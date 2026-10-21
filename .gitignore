@@ -1,0 +1,38 @@
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+build/
+dist/
+
+# Personal settings and recordings. These hold paths and people's voices: never commit them.
+settings.json
+settings.json.*
+speakers.json
+voice-clips/
+Recordings/
+*.raw.wav
+*.wav
+*.flac
+*.mp3
+*.ogg
+*.opus
+*.aif
+*.aiff
+*.m4a
+*.damaged-*
+*.tmp
+
+# Shortcuts made by `python -m recorder --shortcut`, and the program's own logs (a portable copy keeps them beside it)
+*.lnk
+*.log
+
+# Editors and the operating system
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+.DS_Store

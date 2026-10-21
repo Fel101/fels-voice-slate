@@ -1,0 +1,27 @@
+name: Feature request
+description: Suggest an improvement
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for the suggestion. Voice Slate is a small, focused program, and the consent step (origin, allowed use
+        and permission for every clip) is part of what it is. Requests that would weaken that, add network access or
+        tracking, or make it easier to imitate a voice without permission will not be accepted.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: Describe the problem first, then the idea.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like it to do?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Anything you have tried instead?

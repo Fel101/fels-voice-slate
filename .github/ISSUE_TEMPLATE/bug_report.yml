@@ -1,0 +1,72 @@
+name: Bug report
+description: Something does not work the way it should
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting this.
+
+        **Please do not attach recordings or sidecar files of real people, your `settings.json`, or anything private.**
+        Describe the problem instead, or use generated test audio (`tools/synthetic.py`). Remove personal folder names
+        from anything you paste.
+
+        For a security problem, do not open an issue: see the Security policy.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Choose System audio
+        2. Press Record
+        3. ...
+  - type: textarea
+    id: messages
+    attributes:
+      label: Messages
+      description: |
+        Any text from the status line or an error window. To see errors that do not reach the window, start the program
+        from a terminal with `.venv\Scripts\python -m recorder` and paste what it prints.
+      render: text
+  - type: input
+    id: version
+    attributes:
+      label: Voice Slate version
+      description: Shown in About (the gear menu).
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+      placeholder: "Windows 11 24H2"
+    validations:
+      required: true
+  - type: input
+    id: python
+    attributes:
+      label: Python version
+      description: The output of `python --version` in the folder where you installed it.
+      placeholder: "3.12.10"
+  - type: dropdown
+    id: area
+    attributes:
+      label: What were you doing?
+      options:
+        - Recording from a microphone
+        - Recording system audio
+        - Importing a file
+        - Editing or processing
+        - Keeping a clip
+        - Noise reduction (FFmpeg)
+        - Draft transcripts
+        - Installing or starting the program
+        - Something else

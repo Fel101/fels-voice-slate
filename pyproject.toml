@@ -1,0 +1,8 @@
+# Voice Slate is an application you run from a copy of this repository; it is not published as a package.
+# This file only configures the tools. The dependencies are in requirements.txt and requirements-dev.txt.
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-ra"
+faulthandler_timeout = 120        # print where a test is stuck instead of hanging silently
