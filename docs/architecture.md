@@ -20,7 +20,8 @@ recorder/
   settings.py    settings.json, and where the clips go by default
   __main__.py    starting up: --check, --shortcut, and the window
   launch.py      what a windowless start needs: a log file, one copy at a time, and an error window instead of a console
-  shortcut.py    the desktop and Start-menu icon (a Windows .lnk file made through the shell's own COM interfaces)
+  shortcut.py    the icon in the program folder, on the desktop or in the Start menu (a Windows .lnk file made through the shell's own COM interfaces)
+  hotkey.py      F9 while another program is in front: Windows' RegisterHotKey, heard in Qt's event loop
   resources/     the program's icon, drawn by tools/make_icon.py
 tools/           shoot.py draws the screenshots; synthetic.py makes test audio and a fake capture; make_icon.py draws the icon
 tests/           the test suite
@@ -87,6 +88,13 @@ would otherwise be silent. A named mutex allows one copy at a time: a second sta
 exits. `shortcut.py` makes the `.lnk` through Windows' own COM interfaces with `ctypes` and gives it the same
 application id as the running program, so the taskbar groups the window with the icon it was started from. Neither module
 imports Qt, and `python -m recorder --check` reports what is installed without opening a window.
+
+`hotkey.py` is what lets `F9` work while another program has the focus, which a Qt shortcut cannot do. It asks Windows
+(`RegisterHotKey`, through `ctypes`) to tell the program when that one key is pressed, so it never sees any other key, and
+it hears the answer in Qt's event loop through a native event filter. `ui.run()` gives the window a `GlobalKey`; the window
+runs the same Record command a click does, and gives the key back when it closes or when Settings turns it off. A window
+built without one (every test and `tools/shoot.py`) keeps `F9` as an ordinary shortcut, so nothing but the real program ever
+takes the key from the machine it runs on.
 
 ## Keeping the person's audio safe
 

@@ -3,7 +3,7 @@
     python -m recorder               open the window
     pythonw -m recorder              the same with no console window (what the desktop shortcut runs)
     python -m recorder --check       say whether what the program needs is installed
-    python -m recorder --shortcut    put a shortcut on the desktop (or: start-menu, or a path ending in .lnk)
+    python -m recorder --shortcut    put a shortcut on the desktop (or: folder, start-menu, or a path ending in .lnk)
     python -m recorder --version
 """
 import argparse
@@ -30,7 +30,7 @@ def parse(argv):
     parser.add_argument('--check', action='store_true', help='check that what the program needs is installed')
     parser.add_argument('--shortcut', nargs='?', const='desktop', metavar='WHERE',
                         help='make a shortcut that starts the program with no console window: desktop (the default), '
-                             'start-menu, or a path ending in .lnk')
+                             'folder (the program folder), start-menu, or a path ending in .lnk')
     return parser.parse_args(argv)
 
 
@@ -64,12 +64,12 @@ def check():
 def make_shortcut(where):
     from . import shortcut
 
-    if where in ('desktop', 'start-menu'):
+    if where in ('desktop', 'folder', 'start-menu'):
         link = shortcut.default_path(where)
     elif where.lower().endswith('.lnk'):
         link = Path(where)
     else:
-        print(f'Not a place I know: {where}. Use desktop, start-menu or a path ending in .lnk.', file=sys.stderr)
+        print(f'Not a place I know: {where}. Use desktop, folder, start-menu or a path ending in .lnk.', file=sys.stderr)
         return 2
     try:
         made = shortcut.create(link)

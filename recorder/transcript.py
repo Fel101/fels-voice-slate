@@ -18,7 +18,8 @@ from . import audio_core as ac
 
 WORKER = Path(__file__).with_name('asr_worker.py')
 TIMEOUT_SECONDS = 600
-NOT_SET_UP = 'Draft transcripts are not set up (see the README). Type the transcript instead.'
+NOT_SET_UP = ('Draft transcripts are not set up: choose a speech recognizer in Settings (see the README). '
+              'Type the transcript instead.')
 ELLIPSIS = ('...', '…')
 
 

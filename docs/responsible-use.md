@@ -62,7 +62,9 @@ Do not use Voice Slate, or clips made with it, to:
 - make **scam or robocalls**, fake endorsements, or fake statements by real people;
 - **bypass voice authentication** (a bank's or phone's "my voice is my password" check);
 - make **harassing, defamatory or sexual** material about a real person, or any sexual material of a minor;
-- record people **covertly**, or record conversations without the consent the law requires.
+- record people **covertly**, or record conversations without the consent the law requires. `F9` can start a recording
+  while another program is in front: the taskbar button flashes and Windows shows its microphone indicator, but that is
+  for your own convenience, not a way to record someone who does not know.
 
 Changes that would make these easier, such as hiding or skipping the consent step, or removing the origin and allowed-use
 fields, will not be accepted into this project.

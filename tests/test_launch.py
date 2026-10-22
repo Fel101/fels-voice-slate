@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from recorder import __main__ as entry
-from recorder import launch, settings, shortcut
+from recorder import __version__, launch, settings, shortcut
 
 pytestmark = pytest.mark.skipif(sys.platform != 'win32', reason='the launcher is for Windows')
 
@@ -52,7 +52,8 @@ def test_a_process_with_no_console_logs_what_it_prints(isolated_log, monkeypatch
     flush()
     text = isolated_log.read_text(encoding='utf-8')
     assert 'INFO stdout: a line printed by a library' in text and 'ERROR stderr: a warning from somewhere' in text
-    assert "Fel's Voice Slate 0.1.0 starting" in text
+    assert f"Fel's Voice Slate {__version__} starting" in text
+    assert f'Settings: {settings.settings_path()}' in text                  # which file it reads is the first thing to know
 
 
 def test_a_console_is_left_as_it_is(isolated_log, capsys):
@@ -167,7 +168,7 @@ def test_with_a_console_a_message_goes_to_it(monkeypatch, capsys):
 
 def test_version_prints_the_name_and_number(capsys):
     assert entry.main(['--version']) == 0
-    assert capsys.readouterr().out.strip() == "Fel's Voice Slate 0.1.0"
+    assert capsys.readouterr().out.strip() == f"Fel's Voice Slate {__version__}"
 
 
 def test_check_lists_what_is_installed(isolated_log, capsys):
@@ -209,6 +210,19 @@ def test_the_shortcut_option_writes_a_shortcut_that_starts_the_program(tmp_path,
 def test_the_shortcut_option_refuses_a_place_it_does_not_know(capsys):
     assert entry.main(['--shortcut', 'nowhere']) == 2
     assert 'Not a place I know' in capsys.readouterr().err
+
+
+def test_the_folder_shortcut_goes_in_the_program_folder(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(settings, 'program_dir', lambda: tmp_path)
+    assert entry.main(['--shortcut', 'folder']) == 0
+    link = tmp_path / "Fel's Voice Slate.lnk"
+    assert link.is_file() and Path(shortcut.read(link)['folder']) == tmp_path
+
+
+def test_setup_makes_the_icon_in_the_program_folder():
+    """setup.bat is the one way most people make the icon, and a shortcut file cannot be shared, so it must still make it."""
+    setup = (settings.program_dir() / 'setup.bat').read_text(encoding='utf-8')
+    assert '-m recorder --shortcut folder' in setup
 
 
 def test_the_desktop_shortcut_goes_where_windows_keeps_the_desktop(monkeypatch, tmp_path, capsys):

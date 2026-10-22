@@ -16,9 +16,12 @@ def _taskbar_identity():
 
 def run(argv=None):
     """Open the window and run until it is closed. Returns the exit code."""
+    import logging
+
     from PySide6.QtWidgets import QApplication
 
     from .. import __version__, settings
+    from ..hotkey import GlobalKey
     from . import theme
     from .main_window import MainWindow
 
@@ -28,6 +31,11 @@ def run(argv=None):
     app.setApplicationName(settings.APP_NAME)
     app.setApplicationVersion(__version__)
     theme.install(app)
-    window = MainWindow()
+    hotkey = GlobalKey()
+    window = MainWindow(hotkey=hotkey)
+    app.aboutToQuit.connect(lambda: hotkey.set_enabled(False))
+    log = logging.getLogger('recorder')            # what the log says about the two optional things people ask about
+    log.info('Draft transcripts: %s', 'ready' if window.session.drafts.available() else 'not set up')
+    log.info('%s in other programs: %s', hotkey.name, 'on' if hotkey.active else hotkey.problem or 'off')
     window.show()
     return app.exec()

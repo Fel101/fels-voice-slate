@@ -59,6 +59,11 @@ def test_the_desktop_and_the_start_menu_are_found():
     assert shortcut.default_path('desktop').name == "Fel's Voice Slate.lnk"
 
 
+def test_the_program_folder_is_a_place_for_a_shortcut(monkeypatch, tmp_path):
+    monkeypatch.setattr(settings, 'program_dir', lambda: tmp_path)
+    assert shortcut.default_path('folder') == tmp_path / "Fel's Voice Slate.lnk"
+
+
 # ---- the icon file ----------------------------------------------------------------------------------------------------
 
 def test_the_icon_file_holds_every_size_as_a_png():

@@ -5,6 +5,26 @@ the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-21
+
+### Added
+
+- **`F9` works while another program is in front.** Windows tells the program when `F9` is pressed, so a take can be
+  started and stopped from whatever you are reading or playing, and the taskbar button flashes to show it was heard. The
+  program is told about that one key and sees no other. **Record key** in Settings turns it off, a key that another
+  program already holds is reported and not taken, and a dialog that is open is not interrupted by a recording starting.
+- **An icon in the program folder.** `setup.bat` now makes `Fel's Voice Slate.lnk` beside the code, so there is
+  something to double-click right where the program was unpacked, and still offers the desktop icon too.
+  `python -m recorder --shortcut folder` makes it later. A shortcut file holds the paths of the computer it was made
+  on, so it is not part of the repository (Git ignores `*.lnk`): every copy of the program makes its own.
+
+### Changed
+
+- The message for a missing speech recognizer now says to choose one in Settings. Hovering over *Draft transcripts* at
+  the bottom of the window shows which settings file is in use, and the log names it on its first line and says at
+  start-up whether draft transcripts and `F9` are ready.
+- The version is 0.2.0 (the first release was 0.1.0).
+
 ## [0.1.0] - 2026-10-20
 
 The first public release.
@@ -59,5 +79,6 @@ The first public release.
 - The limiter's ceiling also holds for the saved 24 kHz file: resampling can push a peak over it, so the limiter runs
   once more after resampling.
 
-[Unreleased]: ../../compare/v0.1.0...HEAD
+[Unreleased]: ../../compare/v0.2.0...HEAD
+[0.2.0]: ../../compare/v0.1.0...v0.2.0
 [0.1.0]: ../../releases/tag/v0.1.0

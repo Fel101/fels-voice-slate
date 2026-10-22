@@ -589,12 +589,22 @@ def test_the_settings_dialog_returns_what_was_typed_and_none_for_what_was_cleare
     monkeypatch.setattr(clean, 'locate', lambda configured=None: None)
     dialog = dialog_mod.SettingsDialog({'root': 'C:/clips', 'tail_seconds': 0.3, 'ffmpeg': 'C:/tools/ffmpeg.exe'})
     assert dialog.values() == {'root': 'C:/clips', 'tail_seconds': 0.3, 'ffmpeg': 'C:/tools/ffmpeg.exe', 'asr_python': None,
-                               'asr_model': None, 'asr_language': None}
+                               'asr_model': None, 'asr_language': None, 'global_hotkey': True}
     dialog.ffmpeg.edit.setText('')
     dialog.root.edit.setText('D:/voice')
     dialog.tail.setValue(1.5)
     values = dialog.values()
     assert values['ffmpeg'] is None and values['root'] == 'D:/voice' and values['tail_seconds'] == 1.0
+
+
+def test_the_settings_dialog_offers_the_record_key_in_other_programs_and_starts_from_the_saved_choice(qapp, monkeypatch):
+    monkeypatch.setattr(clean, 'locate', lambda configured=None: None)
+    dialog = dialog_mod.SettingsDialog({})
+    assert dialog.hotkey.isChecked() and dialog.values()['global_hotkey'] is True            # on unless the settings say not
+    dialog = dialog_mod.SettingsDialog({'global_hotkey': False})
+    assert not dialog.hotkey.isChecked() and dialog.values()['global_hotkey'] is False
+    dialog.hotkey.setChecked(True)
+    assert dialog.values()['global_hotkey'] is True
 
 
 def test_the_settings_dialog_takes_a_language_code_and_nothing_longer(qapp, monkeypatch):

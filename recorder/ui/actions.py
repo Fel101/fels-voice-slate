@@ -60,7 +60,7 @@ SPEC = {
     'prev_line': ('Previous script line', 'chevron_left', ['Ctrl+Up'], 'Go back one line of the script', False),
     'next_line': ('Next script line', 'chevron_right', ['Ctrl+Down'], 'Go to the next line of the script', False),
     # the program
-    'settings': ('Settings...', 'settings', ['Ctrl+,'], 'Output folder, FFmpeg and draft transcripts', False),
+    'settings': ('Settings...', 'settings', ['Ctrl+,'], 'Output folder, record key, FFmpeg and draft transcripts', False),
     'shortcuts': ('Keyboard shortcuts', None, ['F1'], 'List every shortcut', False),
     'about': ('About...', None, [], 'Version, licence and credits', False),
     'quit': ('Quit', None, ['Ctrl+Q'], 'Close the recorder', False),

@@ -1,5 +1,5 @@
 @echo off
-rem Set up Fel's Voice Slate: create the .venv, install what the program needs, and offer a desktop icon. Run this once.
+rem Set up Fel's Voice Slate: create the .venv, install what the program needs, and make an icon to start it with. Run this once.
 rem It downloads the packages listed in requirements.txt from PyPI, so it needs an internet connection.
 cd /d "%~dp0"
 
@@ -30,14 +30,17 @@ echo Checking the install ...
 if errorlevel 1 goto :failed
 
 echo.
+echo Making the Fel's Voice Slate icon in this folder ...
+".venv\Scripts\python.exe" -m recorder --shortcut folder
 set "ICON=y"
-set /p "ICON=Put a Fel's Voice Slate icon on your desktop? [Y/n] "
+set /p "ICON=Put one on your desktop too? [Y/n] "
 if /i "%ICON%"=="n" goto :done
 ".venv\Scripts\python.exe" -m recorder --shortcut desktop
 
 :done
 echo.
-echo Done. Start Fel's Voice Slate from its desktop icon, or with run.bat (which also shows any error messages).
+echo Done. Start Fel's Voice Slate from its icon (in this folder, or on your desktop), or with run.bat (which also shows
+echo any error messages).
 pause
 exit /b 0
 

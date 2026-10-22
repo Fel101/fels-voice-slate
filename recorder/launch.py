@@ -72,7 +72,8 @@ def start_logging(path=None):
         pass
     sys.excepthook = _log_uncaught
     threading.excepthook = lambda args: _log_uncaught(args.exc_type, args.exc_value, args.exc_traceback)
-    logging.getLogger('recorder').info('%s %s starting. Python %s', settings.APP_NAME, __version__, sys.version.split()[0])
+    logging.getLogger('recorder').info('%s %s starting. Python %s. Settings: %s', settings.APP_NAME, __version__,
+                                       sys.version.split()[0], settings.settings_path())
     return path
 
 

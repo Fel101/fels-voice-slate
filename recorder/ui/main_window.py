@@ -7,7 +7,7 @@ is also when the meter, the clock, the live waveform and the playhead are update
 import base64
 from pathlib import Path
 
-from PySide6.QtCore import QByteArray, QSize, QTimer, Signal
+from PySide6.QtCore import QByteArray, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QApplication, QLabel, QMainWindow, QMenu, QWidget
 
@@ -19,7 +19,7 @@ from ..core.edits import describe
 from ..session import Session
 from ..session.measure import recipe_key
 from ..store import KeepBlocked, TrashUnavailable
-from .actions import Actions
+from .actions import SPEC, Actions, shortcut_text
 from .dialogs import Dialogs
 from .editor_panel import EditorPanel
 from .inspector import Inspector
@@ -33,15 +33,19 @@ PREFERRED_SIZE = QSize(1440, 900)
 AUDIO_SUFFIXES = {'.wav', '.flac', '.ogg', '.opus', '.mp3', '.aif', '.aiff'}
 TICK_MS = 50
 ANALYSIS_DELAY_MS = 200            # how long the measurements wait after the last edit, so a dragged slider measures once
+ALERT_MS = 2000                    # how long the taskbar button flashes when F9 was pressed in another program
 
 
 class MainWindow(QMainWindow):
     closed = Signal()
 
-    def __init__(self, session=None, dialogs=None, settings_file=None):
+    def __init__(self, session=None, dialogs=None, settings_file=None, hotkey=None):
+        """`hotkey` is the key that reaches this window from other programs (recorder/hotkey.py); without one, F9 only
+        works while the window is in front. `run()` supplies it, so no test or tool takes F9 from the machine it runs on."""
         super().__init__()
         self.session = session or Session(settings_file=settings_file)
         self.dialogs = dialogs or Dialogs(self)
+        self.hotkey = hotkey
         self.actions = Actions(self)
         self._pending = set()
         self._notices = []
@@ -80,6 +84,10 @@ class MainWindow(QMainWindow):
         self.session.bus.listen(self._heard)
         self._refresh({'speakers', 'devices', 'takes', 'current', 'recording', 'transport', 'script', 'settings'})
         self._show_status(self.session.status_text)
+        if self.hotkey is not None:
+            # queued: the command runs after the system's message has been dealt with, not inside it
+            self.hotkey.pressed.connect(self._hotkey_pressed, Qt.ConnectionType.QueuedConnection)
+            self._apply_hotkey()
         self.timer = QTimer(self)
         self.timer.setInterval(TICK_MS)
         self.timer.timeout.connect(self._tick)
@@ -320,9 +328,12 @@ class MainWindow(QMainWindow):
         panel.minimap.update()
 
     def _refresh_status_items(self):
+        ready = self.session.drafts.available()
         self.status_clean.setText('Cleaning: FFmpeg ready' if clean.available() else 'Cleaning: FFmpeg not found')
-        self.status_drafts.setText('Draft transcripts: ready' if self.session.drafts.available()
-                                   else 'Draft transcripts: not set up')
+        self.status_drafts.setText('Draft transcripts: ready' if ready else 'Draft transcripts: not set up')
+        self.status_drafts.setToolTip('The speech recognizer chosen in Settings is ready.' if ready else
+                                      f'Choose a speech recognizer in Settings (Ctrl+,). Settings file: '
+                                      f'{self.session.settings_file}')
 
     def _update_mode(self):
         s = self.session
@@ -401,6 +412,29 @@ class MainWindow(QMainWindow):
             self._repaint_timelines()
             self.editor_panel.info.refresh()
             self._update_clock()
+
+    # ---- the record key in other programs ------------------------------------------------------------------------------
+
+    def _apply_hotkey(self):
+        """Take F9 for every program, or give it back, as the settings say. When it cannot be had, say why."""
+        key = self.hotkey
+        wanted = settings.global_hotkey(settings.load(self.session.settings_file))
+        active = key.set_enabled(wanted)
+        _, _, keys, tip, _ = SPEC['record']
+        also = ', also while another program is in front' if active else ''
+        text = f'{tip} ({shortcut_text(keys)}{also})'
+        self.actions.record.setToolTip(text)
+        self.topbar.record.setToolTip(text)
+        if wanted and not active:
+            self.session.bus.status(f'{key.name} only works while this window is in front: {key.problem}.')
+
+    def _hotkey_pressed(self):
+        """F9 was pressed, perhaps in another program. A dialog that is open is not interrupted by a recording starting, but
+        a recording can always be stopped. The taskbar button flashes, so there is a sign when this window is out of sight."""
+        if self._shut or (QApplication.activeModalWidget() is not None and not self.session.capturing.recording):
+            return
+        self.actions.record.trigger()
+        QApplication.alert(self, ALERT_MS)
 
     # ---- commands ----------------------------------------------------------------------------------------------------
 
@@ -552,12 +586,15 @@ class MainWindow(QMainWindow):
             return
         changes = {key: answer[key] for key in ('tail_seconds', 'ffmpeg', 'asr_python', 'asr_model')}
         changes['asr_language'] = answer.get('asr_language')
+        changes['global_hotkey'] = None if answer.get('global_hotkey', True) else False      # on is the default: no entry
         settings.update(changes, s.settings_file)
         clean.set_ffmpeg_path(answer['ffmpeg'])
         s.capturing.set_tail(answer['tail_seconds'])
         if answer['root'] and Path(answer['root']) != s.lib.root:
             s.workspace.set_root(answer['root'])
         s.bus.notify('settings')
+        if self.hotkey is not None:
+            self._apply_hotkey()
 
     # ---- menus -------------------------------------------------------------------------------------------------------
 
@@ -643,6 +680,8 @@ class MainWindow(QMainWindow):
             event.ignore()
             return
         self.timer.stop()
+        if self.hotkey is not None:
+            self.hotkey.set_enabled(False)
         self._save_geometry()
         self._shut = True
         event.accept()

@@ -10,10 +10,12 @@ This guide goes through Voice Slate from the first start to a kept clip. For ins
 
 ## Starting
 
-Start Voice Slate from the **icon on your desktop**. `setup.bat` offers to make it; to make it later, or one in the
-Start menu, run `.venv\Scripts\python -m recorder --shortcut` (or `--shortcut start-menu`) in the program folder. The
-icon opens the program with no console window, and only one copy runs at a time: click it again and the window that is
-already open comes forward.
+Start Voice Slate from its **icon**. `setup.bat` makes one in the program folder (*Fel's Voice Slate*) and offers one on
+your desktop. To make one later, run `.venv\Scripts\python -m recorder --shortcut folder` in the program folder (or
+`--shortcut` for the desktop, `--shortcut start-menu` for the Start menu). The icon opens the program with no console
+window, and only one copy runs at a time: click it again and the window that is already open comes forward. An icon is a
+shortcut file that holds the paths of the computer it was made on, so it cannot be copied to another computer, and if
+you move the program folder you make it again.
 
 `run.bat` starts the program in a console window instead. Use it when something does not start: any error message it
 prints stays on screen. Either way the program keeps a log file (see [Troubleshooting](#troubleshooting)).
@@ -55,6 +57,12 @@ The window can be resized down to 1100 by 700. Buttons that no longer fit collap
    40 seconds.
 4. Press `F9` (or **Stop**) when you have finished. Recording carries on for a short **stop tail** (half a second by
    default, see [Settings](#settings)) so the end of the last word is not cut off.
+
+`F9` also works while another program is in front, so you can start and stop a take from the page you are reading or the
+program that is playing the audio you capture. When it is heard from another program, the taskbar button flashes. While
+Voice Slate holds `F9` this way, other programs do not receive it: turn **Record key** off in [Settings](#settings) if
+you need `F9` there, and it then works only while the Voice Slate window is in front. A dialog that is open is never
+interrupted by a recording starting, though a recording can always be stopped.
 
 The moment you stop, the original recording is written to the speaker's `masters` folder as a 24-bit WAV. Nothing you
 do afterwards can change that file, and closing the program never loses a take. If the device disappears while
@@ -228,6 +236,7 @@ Open them with the gear at the top right, or `Ctrl+,`.
 |---|---|
 | **Output folder** | Where speakers, originals and kept clips are stored. By default a `voice-clips` folder inside the program folder (Git ignores it, and it has a `.gitignore` of its own); if the program folder is in OneDrive, Dropbox or another synced folder, or cannot be written to, `C:\Users\<you>\Recordings\voice-clips` instead. Keep it out of synced folders unless you want a cloud copy of the recordings. |
 | **Stop tail** | How long recording carries on after you press Stop, 0 to 1 second. |
+| **Record key** | Whether `F9` starts and stops recording while another program is in front. On by default. Windows tells Voice Slate when that one key is pressed; it is not a keyboard hook, and no other key is seen. While it is on, other programs do not receive `F9`. If another program already holds `F9`, the status line says so at start-up and `F9` works only in this window. |
 | **FFmpeg** | Path of `ffmpeg.exe`. Leave it empty to search `PATH` and the WinGet folders. |
 | **Speech recognizer: Python** and **model** | The optional draft-transcript setup: a `python.exe` that has [faster-whisper](https://github.com/SYSTRAN/faster-whisper) installed, and a model folder you downloaded yourself. Both are needed. |
 | **Speech language** | A language code such as `en` or `de`. It makes drafts faster and steadier; leave it empty to have the language found for each clip, which is less reliable on short clips. |
@@ -235,7 +244,8 @@ Open them with the gear at the top right, or `Ctrl+,`.
 Settings are saved in a small `settings.json`. The recorder looks for it in this order: the file named by the
 `VOICE_SLATE_SETTINGS` environment variable; a `settings.json` next to the program (handy for a portable copy);
 `%APPDATA%\Fels Voice Slate\settings.json`. It also remembers the window size and position there. A settings file that
-cannot be read is moved aside, never overwritten.
+cannot be read is moved aside, never overwritten. The first line of `voice-slate.log` names the file in use, and so does
+the tooltip of *Draft transcripts* at the bottom of the window.
 
 **About** in the gear menu shows the version, the licence, and the libraries the program is built with.
 
@@ -277,7 +287,15 @@ record. Some setups, such as a remote desktop session, may not offer a loopback 
 restart, or set its path in Settings.
 
 **Suggest from audio says draft transcripts are not set up.** Set both the recognizer's Python and the model folder in
-Settings. The Settings dialog tells you which one is missing.
+Settings. The Settings dialog tells you which one is missing, and the bottom of the window says "Draft transcripts:
+ready" once both are found. If you did set them and it still says so, the program is reading a different settings file
+from the one you edited: hover over *Draft transcripts* at the bottom of the window to see which one it is. A
+`settings.json` next to the program wins over the one in `%APPDATA%`.
+
+**F9 does nothing while another program is in front.** If the status line said "F9 only works while this window is in
+front" when the program started, another program already holds `F9` (a screen recorder, a game overlay, a macro tool).
+Close it or give it another key, then restart Voice Slate. If you turned **Record key** off in Settings, `F9` works only
+in the Voice Slate window.
 
 **A saved clip is missing from the list.** The program lists a message in the status line when a sidecar cannot be used,
 and does not change the files. Common reasons are a moved or deleted original, or a sidecar edited by hand. The files

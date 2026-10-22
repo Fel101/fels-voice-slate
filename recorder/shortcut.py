@@ -6,6 +6,10 @@ package is needed to make one.
 
     python -m recorder --shortcut              a shortcut on the desktop
     python -m recorder --shortcut start-menu   one in the Start menu's program list
+    python -m recorder --shortcut folder       one in the program folder, beside the code
+
+A shortcut file holds the paths of the computer it was made on (and Windows adds that computer's name), so one made here
+cannot be passed on: Git ignores `*.lnk`, and each person makes their own, which `setup.bat` does.
 """
 import ctypes
 import sys
@@ -183,7 +187,9 @@ def launch_target():
 
 
 def default_path(where='desktop'):
-    return known_folder(where) / f'{settings.APP_NAME}.lnk'
+    """Where the shortcut goes: 'desktop', 'start-menu', or 'folder' (the program folder)."""
+    folder = settings.program_dir() if where == 'folder' else known_folder(where)
+    return folder / f'{settings.APP_NAME}.lnk'
 
 
 def create(link, program=None, arguments=None, folder=None, icon=None, description=DESCRIPTION, app_id=settings.APP_ID):

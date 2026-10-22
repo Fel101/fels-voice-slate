@@ -60,6 +60,12 @@ def test_the_stop_tail_is_read_safely(raw, expected):
     assert settings.tail_seconds(data) == pytest.approx(expected)
 
 
+@pytest.mark.parametrize('raw, expected', [(None, True), (True, True), (False, False), ('false', True), (0, True), ([], True)])
+def test_the_record_key_in_other_programs_is_on_unless_the_settings_say_false(raw, expected):
+    data = {} if raw is None else {'global_hotkey': raw}
+    assert settings.global_hotkey(data) is expected
+
+
 @pytest.fixture
 def program(tmp_path, monkeypatch):
     """A program folder of its own, with no cloud folder named in the environment."""

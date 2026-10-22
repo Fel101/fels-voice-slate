@@ -9,8 +9,8 @@ from pathlib import Path
 import PySide6
 from PySide6.QtCore import QRegularExpression, Qt, QUrl, qVersion
 from PySide6.QtGui import QDesktopServices, QFont, QRegularExpressionValidator
-from PySide6.QtWidgets import (QDialog, QDoubleSpinBox, QFileDialog, QFormLayout, QInputDialog, QLabel, QLineEdit,
-                               QMessageBox, QPushButton, QWidget)
+from PySide6.QtWidgets import (QCheckBox, QDialog, QDoubleSpinBox, QFileDialog, QFormLayout, QInputDialog, QLabel,
+                               QLineEdit, QMessageBox, QPushButton, QWidget)
 
 from .. import __version__, clean, settings, transcript
 from .actions import SPEC, shortcut_text
@@ -109,7 +109,7 @@ class PathRow(QWidget):
 
 
 class SettingsDialog(QDialog):
-    """Output folder, stop tail, FFmpeg and draft transcripts. Nothing is applied until OK."""
+    """Output folder, stop tail, the record key, FFmpeg and draft transcripts. Nothing is applied until OK."""
 
     def __init__(self, values, parent=None):
         super().__init__(parent)
@@ -134,6 +134,17 @@ class SettingsDialog(QDialog):
         self.tail.setToolTip('How long recording goes on after Stop, so the end of the last word is not cut off')
         self.tail.setFixedWidth(110)
         form.addRow('Stop tail', self.tail)
+
+        keys = QWidget()
+        keys_layout = vbox(keys, spacing=4)
+        self.hotkey = QCheckBox('F9 starts and stops recording in any program')
+        self.hotkey.setChecked(settings.global_hotkey(values))
+        self.hotkey.setToolTip('Windows tells this program when F9 is pressed, wherever the focus is. It is told about that '
+                               'one key only.')
+        keys_layout.addWidget(self.hotkey)
+        keys_layout.addWidget(label('While this is on, another program does not receive F9. Turn it off if you need F9 '
+                                    'there; it then works only while this window is in front.', 'dim', size=11, wrap=True))
+        form.addRow('Record key', keys)
 
         self.ffmpeg = PathRow(values.get('ffmpeg'), lambda start: self._file(start, 'ffmpeg.exe (ffmpeg.exe);;All files (*)'),
                               'Leave empty to search PATH and the WinGet folders')
@@ -206,6 +217,7 @@ class SettingsDialog(QDialog):
     def values(self):
         """The settings as typed. An empty optional text removes that setting."""
         return {'root': self.root.text() or None, 'tail_seconds': round(self.tail.value(), 2),
+                'global_hotkey': self.hotkey.isChecked(),
                 'ffmpeg': self.ffmpeg.text() or None, 'asr_python': self.python.text() or None,
                 'asr_model': self.model.text() or None, 'asr_language': self.language.text().strip().lower() or None}
 

@@ -52,9 +52,11 @@ files works without one.
 1. Download this repository (the green **Code** button, then **Download ZIP**, and unzip it) or clone it with Git.
 2. Double-click **`setup.bat`** once. It creates a private Python environment in the `.venv` folder, installs the
    packages in [requirements.txt](requirements.txt) from PyPI (it needs an internet connection), checks the install,
-   and offers to put a **Voice Slate icon on your desktop**.
+   puts a **Fel's Voice Slate icon in the program folder**, and offers to put one on your desktop too.
 3. Start Voice Slate from that icon. It opens with no console window, and only one copy runs at a time: a second
    click brings the first window forward. **`run.bat`** starts it too, in a console window that shows any error message.
+   The icon is a shortcut file, which holds the paths of the computer it was made on, so it cannot be passed on: every
+   copy of the program makes its own with `setup.bat`, and if you move the folder, run `setup.bat` again.
 
 Prefer a terminal? In the project folder:
 
@@ -62,20 +64,21 @@ Prefer a terminal? In the project folder:
 python -m venv .venv
 .venv\Scripts\python -m pip install -r requirements.txt
 .venv\Scripts\python -m recorder --check
-.venv\Scripts\python -m recorder --shortcut
+.venv\Scripts\python -m recorder --shortcut folder
 .venv\Scripts\python -m recorder
 ```
 
-`--check` says what is installed and what is missing, and `--shortcut` makes the desktop icon (or `--shortcut
-start-menu`). Nothing is installed outside the project folder, apart from the settings file, the log file and your
-recordings (see below).
+`--check` says what is installed and what is missing, and `--shortcut folder` makes the icon in the program folder
+(`--shortcut` alone makes one on the desktop, `--shortcut start-menu` one in the Start menu). Nothing is installed
+outside the project folder, apart from the settings file, the log file and your recordings (see below).
 
 ## Your first clip
 
 1. Choose **Microphone** and your device at the top. Click the **Arm** button (the small waveform icon, or `Ctrl+M`)
    and speak: the level meter should move.
-2. Press **Record** (`F9`), read a sentence or two aloud (10 to 25 seconds is ideal), and press `F9` again. The
-   original is saved straight away and the editor opens.
+2. Press **Record** (`F9`), read a sentence or two aloud (10 to 25 seconds is ideal), and press `F9` again. `F9` works
+   while another program is in front too, and the taskbar button flashes to show it was heard (**Settings** can turn
+   this off). The original is saved straight away and the editor opens.
 3. Select a part by dragging on the waveform and press `Delete` to cut it, or use the buttons above the waveform. Press
    `Space` to listen, and `A` to switch between the original and the edited clip.
 4. On the **Process** tab, switch on what you need, and press **Normalize**. The **Check** tab shows how the clip
@@ -122,7 +125,8 @@ as a separate program and does not include it.
 **Draft transcripts** use [faster-whisper](https://github.com/SYSTRAN/faster-whisper) running on your computer. You
 need a Python environment with faster-whisper installed, and a faster-whisper model folder that you downloaded
 yourself. Put the path of that environment's `python.exe` and the model folder in **Settings**, and the language you
-speak if you know it (for example `en`), which makes the draft faster and steadier. Voice Slate never downloads a
+speak if you know it (for example `en`), which makes the draft faster and steadier. The status bar at the bottom says
+"Draft transcripts: ready" once both are found. Voice Slate never downloads a
 model, and the worker refuses anything but a local folder. Stretches of silence are skipped, so a pause is not turned
 into invented words. The result is only a draft: listen to the clip and correct it, because the app does not know
 whether it is right.
@@ -131,6 +135,8 @@ whether it is right.
 
 - Voice Slate makes no network connections and sends nothing anywhere. The only downloads are the ones you do
   yourself: the Python packages at setup, and FFmpeg or a speech model if you choose to add them.
+- `F9` works in other programs through one Windows hotkey: Windows tells Voice Slate when that one key is pressed, and
+  Voice Slate sees no other key. It is not a keyboard hook, and **Settings** turns it off.
 - It asks for the origin, the allowed use and your confirmation for every clip, and saves them with the audio.
 - **Record only your own voice, or voices of people who have clearly agreed.** Do not use it to impersonate someone, to
   deceive, or to record people without their knowledge. System-audio capture is for audio you own or may use.

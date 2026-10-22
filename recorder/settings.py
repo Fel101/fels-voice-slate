@@ -13,6 +13,7 @@ Keys, all optional:
 - `asr_python` and `asr_model`: the optional speech recognizer used for draft transcripts (see the README).
 - `asr_language`: a language code such as `en` for the recognizer. Without it the language is detected for each clip.
 - `tail_seconds`: how long recording continues after Stop, 0 to 1.
+- `global_hotkey`: `false` keeps F9 from starting and stopping a recording while another program is in front (on by default).
 """
 import datetime as dt
 import json
@@ -149,3 +150,9 @@ def tail_seconds(data=None):
     if value != value or value in (float('inf'), float('-inf')):
         return DEFAULT_TAIL_SECONDS
     return min(max(value, 0.0), 1.0)
+
+
+def global_hotkey(data=None):
+    """Whether F9 also works while another program is in front. On, unless the settings say `false`."""
+    value = (data if data is not None else load()).get('global_hotkey', True)
+    return value if isinstance(value, bool) else True
