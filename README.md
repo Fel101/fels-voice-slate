@@ -134,10 +134,12 @@ and waits for your yes:
 | `base` | about 150 MB | a good middle (the default) |
 | `small` | about 490 MB | the most accurate, and the slowest |
 
-On top of the model it installs the recognizer itself, about 90 MB from PyPI, into a `.venv-asr` folder beside the
-program. The model goes into `models`. Both folders stay in the program folder, nothing else on the computer changes,
-and Git ignores them. When the recognizer has run once on a second of silence, the setup fills in the matching lines in
-**Settings** for you. Start Voice Slate again, and the status bar at the bottom says "Draft transcripts: ready".
+The model is downloaded from SYSTRAN's repositories on [Hugging Face](https://huggingface.co/Systran) into a `models`
+folder. On top of it the setup installs the recognizer itself, about 90 MB from PyPI, into a `.venv-asr` folder. Both
+folders stay beside the program, and Git ignores them. The only other traces are the usual download caches in your user
+folder: pip's, and a few small files in Hugging Face's. When the recognizer has run once on a second of silence, the
+setup fills in the matching lines in **Settings** for you. Start Voice Slate again, and the status bar at the bottom
+says "Draft transcripts: ready".
 
 Voice Slate itself never goes online: the setup is the only thing that downloads, only when you run it and agree, and
 it sends nothing about you or your recordings. The worker that makes the drafts refuses anything but a local model
