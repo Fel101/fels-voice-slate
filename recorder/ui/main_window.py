@@ -11,6 +11,7 @@ from PySide6.QtCore import QByteArray, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QApplication, QLabel, QMainWindow, QMenu, QWidget
 
+from .. import asr_setup, transcript
 from .. import audio_core as ac
 from .. import clean, settings
 from ..clean import CleanError
@@ -263,6 +264,8 @@ class MainWindow(QMainWindow):
         panel = self.editor_panel
         if 'speakers' in topics:
             self.library.refresh_speakers()
+        elif 'recording' in topics:
+            self.library.refresh_enabled()
         if 'devices' in topics:
             self.topbar.refresh_devices()
         if 'current' in topics:
@@ -556,9 +559,20 @@ class MainWindow(QMainWindow):
         if path:
             self.session.script.load_file(path)
 
+    def _offer_transcript_setup(self):
+        """Suggest from audio was pressed with no recognizer: say so, and offer the one-time setup that gets one."""
+        self.session.bus.status(transcript.NOT_SET_UP)
+        script = settings.program_dir() / transcript.SETUP_SCRIPT
+        if script.is_file() and self.dialogs.confirm('Set up draft transcripts?', asr_setup.OFFER, yes='Open the setup',
+                                                     no='Not now'):
+            self.dialogs.open_path(script)
+
     def suggest_transcript(self):
         take = self.session.current
         if take is None:
+            return
+        if not self.session.drafts.available():
+            self._offer_transcript_setup()
             return
         typed = take.meta['transcript'].strip() and not self.session.drafts.machine_text(take)
         if typed and not self.dialogs.confirm(

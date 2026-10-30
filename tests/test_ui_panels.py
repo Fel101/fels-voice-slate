@@ -103,6 +103,57 @@ def test_the_speaker_cannot_be_changed_while_recording(window, session, open_fak
     assert 'Stop the recording' in window.status_text.full_text
 
 
+@pytest.fixture
+def first_run_window(qapp, make_session, dialogs):
+    """The window over a library with no speaker at all, as on the first start after setup.bat."""
+    from recorder.ui.main_window import MainWindow
+    w = MainWindow(session=make_session(), dialogs=dialogs)
+    w.timer.stop()
+    w.resize(1440, 900)
+    w.show()
+    ui_helpers.pump(qapp)
+    yield w
+    w.timer.stop()
+    w.close()
+    ui_helpers.pump(qapp)
+
+
+def test_the_speaker_picker_and_plus_work_again_after_the_first_recording(first_run_window, open_fake, clock, dialogs):
+    """On a first run the first Record makes 'My voice'. Both controls are off for that recording and must come back."""
+    w = first_run_window
+    session = w.session
+    assert w.library.speakers.count() == 0 and w.library.add_speaker.isEnabled()
+    session.capturing.start()
+    w.flush()
+    assert w.library.speakers.currentText() == 'My voice'
+    assert not w.library.speakers.isEnabled() and not w.library.add_speaker.isEnabled()
+    session.capturing.stop()
+    clock.advance(1.0)                                  # the stop tail passes, and the take is saved
+    w._tick()
+    w.flush()
+    assert len(session.workspace.takes) == 1
+    assert w.library.speakers.isEnabled() and w.library.add_speaker.isEnabled()
+    dialogs.text_answer = 'Sam Rivera'
+    QTest.mouseClick(w.library.add_speaker, Qt.MouseButton.LeftButton)
+    w.flush()
+    assert [name for _, name in session.workspace.speakers] == ['My voice', 'Sam Rivera']
+    assert w.library.speakers.currentText() == 'Sam Rivera'
+
+
+def test_a_refused_speaker_change_during_a_recording_does_not_lock_the_picker(window, session, open_fake, clock):
+    """Picking a speaker mid-recording is refused with a message; once the recording stops the picker works again."""
+    session.workspace.add_speaker('Second Voice')
+    session.capturing.start()
+    window.flush()
+    window.library.speakers.activated.emit(0)           # a click on the list while recording
+    window.flush()
+    session.capturing.stop()
+    clock.advance(1.0)
+    window._tick()
+    window.flush()
+    assert window.library.speakers.isEnabled() and window.library.add_speaker.isEnabled()
+
+
 def test_the_live_card_shows_what_has_been_recorded_so_far(window, session, open_fake, clock):
     session.capturing.start()
     window.flush()
@@ -194,11 +245,22 @@ def test_the_character_counter_warns_outside_the_allowed_range(window, session):
     assert clip.counter.styleSheet() == ''
 
 
-def test_suggest_from_audio_explains_when_the_recognizer_is_not_set_up(window, session):
+def test_suggest_from_audio_explains_when_the_recognizer_is_not_set_up(window, session, dialogs):
     record(session, 12.0)
     window.flush()
+    dialogs.confirm_answer = False
     window.inspector.clip.suggest.click()
-    assert window.status_text.full_text == transcript.NOT_SET_UP
+    assert window.status_text.full_text == transcript.NOT_SET_UP and 'setup-transcripts.bat' in transcript.NOT_SET_UP
+    assert dialogs.confirmations[-1].title == 'Set up draft transcripts?' and dialogs.opened == []
+
+
+def test_suggest_from_audio_offers_the_setup_and_opens_it_when_accepted(window, session, dialogs):
+    record(session, 12.0)
+    window.flush()
+    dialogs.confirm_answer = True
+    window.inspector.clip.suggest.click()
+    assert [path.name for path in dialogs.opened] == ['setup-transcripts.bat'] and dialogs.opened[0].is_file()
+    assert 'about 90 MB' in dialogs.confirmations[-1].text and 'never goes online' in dialogs.confirmations[-1].text
 
 
 def test_suggest_asks_before_replacing_typed_text(window, session, dialogs, monkeypatch):
@@ -206,6 +268,7 @@ def test_suggest_asks_before_replacing_typed_text(window, session, dialogs, monk
     fill(session, transcript='Words I typed myself.')
     window.flush()
     requested = []
+    monkeypatch.setattr(session.drafts, 'available', lambda: True)
     monkeypatch.setattr(session.drafts, 'request', lambda take, replace=False, automatic=False: requested.append(replace))
     dialogs.confirm_answer = False
     window.suggest_transcript()
@@ -219,6 +282,7 @@ def test_suggest_does_not_ask_before_replacing_the_recognizers_own_text_or_nothi
     take = record(session, 12.0)
     window.flush()
     requested = []
+    monkeypatch.setattr(session.drafts, 'available', lambda: True)
     monkeypatch.setattr(session.drafts, 'request', lambda take, replace=False, automatic=False: requested.append(replace))
     window.suggest_transcript()                                 # nothing typed yet
     take.meta.update(transcript='Words the recognizer wrote.', draft_text='Words the recognizer wrote.')

@@ -33,7 +33,7 @@ is in it and whether you had the right to record it.
   it helps.
 - **Keep** only when the clip is ready: it needs a transcript, the origin of the recording, the allowed use, and your
   confirmation that you have the right to use the voice. Keep writes the 24 kHz mono WAV and a sidecar JSON file.
-- **Draft transcripts** (optional) from a speech recognizer that runs on your own computer.
+- **Draft transcripts** (optional) from a speech recognizer that runs on your own computer, set up in one step.
 - **Stays on your computer.** No account, no network access, no telemetry. Discard sends files to the Recycle Bin.
 
 | | |
@@ -52,7 +52,8 @@ files works without one.
 1. Download this repository (the green **Code** button, then **Download ZIP**, and unzip it) or clone it with Git.
 2. Double-click **`setup.bat`** once. It creates a private Python environment in the `.venv` folder, installs the
    packages in [requirements.txt](requirements.txt) from PyPI (it needs an internet connection), checks the install,
-   puts a **Fel's Voice Slate icon in the program folder**, and offers to put one on your desktop too.
+   puts a **Fel's Voice Slate icon in the program folder**, and offers to put one on your desktop too. At the end it
+   asks whether to set up **draft transcripts** as well (see below); answer `n` and do it later if you are not sure.
 3. Start Voice Slate from that icon. It opens with no console window, and only one copy runs at a time: a second
    click brings the first window forward. **`run.bat`** starts it too, in a console window that shows any error message.
    The icon is a shortcut file, which holds the paths of the computer it was made on, so it cannot be passed on: every
@@ -122,19 +123,37 @@ Both are off until you set them up, and the recorder works fully without them.
 and restart Voice Slate. It is found automatically, or you can give its path in **Settings**. The recorder runs FFmpeg
 as a separate program and does not include it.
 
-**Draft transcripts** use [faster-whisper](https://github.com/SYSTRAN/faster-whisper) running on your computer. You
-need a Python environment with faster-whisper installed, and a faster-whisper model folder that you downloaded
-yourself. Put the path of that environment's `python.exe` and the model folder in **Settings**, and the language you
-speak if you know it (for example `en`), which makes the draft faster and steadier. The status bar at the bottom says
-"Draft transcripts: ready" once both are found. Voice Slate never downloads a
-model, and the worker refuses anything but a local folder. Stretches of silence are skipped, so a pause is not turned
-into invented words. The result is only a draft: listen to the clip and correct it, because the app does not know
-whether it is right.
+**Draft transcripts** use [faster-whisper](https://github.com/SYSTRAN/faster-whisper) running on your computer.
+Double-click **`setup-transcripts.bat`** (or answer `y` when `setup.bat` asks, or press **Suggest from audio** and choose
+*Open the setup*). It asks which speech model you want and which language you speak, tells you what it will download,
+and waits for your yes:
+
+| Model | Download | |
+|---|---|---|
+| `tiny` | about 80 MB | the fastest, and the roughest drafts |
+| `base` | about 150 MB | a good middle (the default) |
+| `small` | about 490 MB | the most accurate, and the slowest |
+
+On top of the model it installs the recognizer itself, about 90 MB from PyPI, into a `.venv-asr` folder beside the
+program. The model goes into `models`. Both folders stay in the program folder, nothing else on the computer changes,
+and Git ignores them. When the recognizer has run once on a second of silence, the setup fills in the matching lines in
+**Settings** for you. Start Voice Slate again, and the status bar at the bottom says "Draft transcripts: ready".
+
+Voice Slate itself never goes online: the setup is the only thing that downloads, only when you run it and agree, and
+it sends nothing about you or your recordings. The worker that makes the drafts refuses anything but a local model
+folder. Stretches of silence are skipped, so a pause is not turned into invented words. The result is only a draft:
+listen to the clip and correct it, because the app does not know whether it is right.
+
+If you already have faster-whisper in a Python environment and a model folder, you do not need the setup: put the path
+of that environment's `python.exe` and of the model folder in **Settings**, and the language you speak if you know it
+(for example `en`), which makes the draft faster and steadier. `python -m recorder --setup-transcripts small --language
+de --yes` does the whole setup without questions, for a script.
 
 ## Privacy and responsible use
 
-- Voice Slate makes no network connections and sends nothing anywhere. The only downloads are the ones you do
-  yourself: the Python packages at setup, and FFmpeg or a speech model if you choose to add them.
+- Voice Slate makes no network connections and sends nothing anywhere. The only downloads are the ones you start
+  yourself: the Python packages at setup, the speech recognizer and model if you run `setup-transcripts.bat`, and FFmpeg
+  if you choose to add it. Each of those shows what it fetches and where from.
 - `F9` works in other programs through one Windows hotkey: Windows tells Voice Slate when that one key is pressed, and
   Voice Slate sees no other key. It is not a keyboard hook, and **Settings** turns it off.
 - It asks for the origin, the allowed use and your confirmation for every clip, and saves them with the audio.

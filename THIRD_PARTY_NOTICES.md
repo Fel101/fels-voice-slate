@@ -49,16 +49,46 @@ to run the program.
 | Pygments 2.21.0 | | BSD-2-Clause |
 | colorama 0.4.6 | | BSD-3-Clause |
 
+## The speech recognizer, installed only if you ask for it
+
+`setup-transcripts.bat` (see [requirements-asr.txt](requirements-asr.txt)) installs these into a folder of their own,
+`.venv-asr`, and downloads one speech model into `models`, but only when you run it and agree. The recorder never
+imports them: it runs the recognizer as a separate program, the worker in `recorder/asr_worker.py`. They are not copied
+into this repository and are not modified, and each one stays under its own licence, installed with it in
+`.venv-asr\Lib\site-packages\<package>-<version>.dist-info\licenses\`.
+
+| Package | Version | Licence | Used for |
+|---|---|---|---|
+| [faster-whisper](https://github.com/SYSTRAN/faster-whisper) | 1.2.1 | MIT | The speech recognizer |
+| [CTranslate2](https://github.com/OpenNMT/CTranslate2) | 4.8.0 | MIT | Runs the model on the processor |
+| [ONNX Runtime](https://onnxruntime.ai) | 1.31.0 | MIT | The voice-activity filter that skips silence |
+| [PyAV](https://github.com/PyAV-Org/PyAV) | 17.1.0 | BSD-3-Clause. Its Windows package includes the FFmpeg libraries and the codec libraries they use, under their own licences (LGPL-2.1-or-later, and GPL-2.0-or-later for some, such as x264 and x265) | Reading the audio file |
+| [huggingface_hub](https://github.com/huggingface/huggingface_hub) | 2.2.0 | Apache-2.0 | Fetching the model, only while the setup runs |
+| [Tokenizers](https://github.com/huggingface/tokenizers) | 0.23.3 | Apache-2.0 | Turning words into the model's tokens |
+| [NumPy](https://numpy.org) | 2.5.4 | BSD-3-Clause, with bundled code under 0BSD, MIT, Zlib and CC0-1.0 | Audio arrays |
+
+Installed alongside them, with the versions the last test of the setup installed (`pip` picks the newest that fit, so
+yours may be newer): anyio 4.15.1 (MIT), click 8.5.0 (BSD-3-Clause), colorama 0.4.6 (BSD-3-Clause), filelock 4.2.4 (MIT),
+flatbuffers 25.12.19 (Apache-2.0), fsspec 2026.9.0 (BSD-3-Clause), h11 0.16.0 (MIT), hf-xet 1.7.1 (Apache-2.0), httpcore2
+and httpx2 2.16.0 (BSD-3-Clause), idna 3.20 (BSD-3-Clause), packaging 26.3 (Apache-2.0 or BSD-2-Clause), protobuf 7.36.2
+(BSD-3-Clause), PyYAML 6.0.3 (MIT), setuptools 84.2.1 (MIT), tqdm 4.70.1 (MPL-2.0 and MIT), truststore 0.10.5 (MIT) and
+typing-extensions 4.16.0 (PSF-2.0).
+
+**The speech models** are not part of this repository either. The setup downloads one of the faster-whisper conversions
+published by SYSTRAN on Hugging Face (`Systran/faster-whisper-tiny.en`, `-base.en`, `-small.en`, or the multilingual
+`-tiny`, `-base`, `-small`) of OpenAI's Whisper models. Their model pages give the licence as MIT; check the page of the
+model you choose before you use it for anything beyond your own drafts.
+
 ## Programs the recorder can call, which are not part of it
 
-These are **optional**, you install them yourself, and the recorder runs each one as a separate program. No code or file
-from them is included here, and the recorder never downloads them.
+These are **optional**, and the recorder runs each one as a separate program. No code or file from them is included here,
+and the recorder never downloads them.
 
-- [FFmpeg](https://ffmpeg.org): used for the noise reduction step (its `afftdn` filter). FFmpeg is licensed under the
-  LGPL-2.1-or-later or the GPL-2.0-or-later, depending on how a build was made. Read the licence of the build you install.
-- [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (MIT) and a speech model for it: used for draft
-  transcripts. The model is a separate download with its own licence, for example the Whisper models published by
-  OpenAI under the MIT licence. Check the licence of the model you choose.
+- [FFmpeg](https://ffmpeg.org): used for the noise reduction step (its `afftdn` filter). You install it yourself. FFmpeg
+  is licensed under the LGPL-2.1-or-later or the GPL-2.0-or-later, depending on how a build was made. Read the licence of
+  the build you install.
+- The speech recognizer above: the worker runs the `python.exe` of the `.venv-asr` that `setup-transcripts.bat` made, or
+  of any other environment where you installed faster-whisper yourself and named it in Settings.
 
 ## Fonts, icons and sample material
 

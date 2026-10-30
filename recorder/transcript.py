@@ -3,7 +3,8 @@
 The recognizer runs in its own Python environment, so the recorder does not need its large packages. Two settings
 select it: `asr_python` (a Python with faster-whisper installed) and `asr_model` (a folder holding a downloaded
 faster-whisper model). A third, `asr_language`, names the language (en, es, ...) instead of detecting it each time.
-The recorder never downloads a model, and the worker refuses anything but a local folder.
+The recorder never downloads a model, and the worker refuses anything but a local folder. `asr_setup.py` (run by
+setup-transcripts.bat) installs both and fills the settings in, but only when a person runs it and agrees.
 The result is a draft: the words can be wrong, so listen before keeping. See "Draft transcripts" in the README.
 """
 import json
@@ -18,8 +19,9 @@ from . import audio_core as ac
 
 WORKER = Path(__file__).with_name('asr_worker.py')
 TIMEOUT_SECONDS = 600
-NOT_SET_UP = ('Draft transcripts are not set up: choose a speech recognizer in Settings (see the README). '
-              'Type the transcript instead.')
+SETUP_SCRIPT = 'setup-transcripts.bat'
+NOT_SET_UP = (f'Draft transcripts are not set up: run {SETUP_SCRIPT} in the program folder (it downloads a speech model '
+              'once), or see the README. Type the transcript instead.')
 ELLIPSIS = ('...', '…')
 
 

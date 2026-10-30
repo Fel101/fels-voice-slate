@@ -18,8 +18,10 @@ release notes if you want it.
 
 ## What the program does that matters for security
 
-Voice Slate is a local desktop program. It makes no network connections. It does read and write files, and it starts
-other programs, so these are the places to look:
+Voice Slate is a local desktop program. It makes no network connections. The two setup scripts do: `setup.bat` runs
+`pip` to fetch the packages in `requirements.txt`, and the optional `setup-transcripts.bat` fetches the packages in
+`requirements-asr.txt` and one speech model, only when you run it and say yes. The packages named in those two files are pinned to exact versions. The
+program does read and write files, and it starts other programs, so these are the places to look:
 
 - **Files it opens.** Audio files you import are read by the SoundFile library (libsndfile). Sidecar JSON and
   `speakers.json` files in the output folder are read and checked: a sidecar that names a file outside its own folder, and

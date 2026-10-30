@@ -39,6 +39,14 @@ if /i "%ICON%"=="n" goto :done
 
 :done
 echo.
+echo Draft transcripts (optional): Fel's Voice Slate can suggest a transcript from the audio. That needs a speech
+echo recognizer and a speech model, about 240 MB with the middle model, downloaded once from PyPI and Hugging Face into
+echo this folder. Nothing you record is sent anywhere. You can also do this later with setup-transcripts.bat.
+set "ASR=n"
+set /p "ASR=Set up draft transcripts now? [y/N] "
+if /i "%ASR%"=="y" ".venv\Scripts\python.exe" -m recorder --setup-transcripts
+
+echo.
 echo Done. Start Fel's Voice Slate from its icon (in this folder, or on your desktop), or with run.bat (which also shows
 echo any error messages).
 pause

@@ -4,6 +4,7 @@
     pythonw -m recorder              the same with no console window (what the desktop shortcut runs)
     python -m recorder --check       say whether what the program needs is installed
     python -m recorder --shortcut    put a shortcut on the desktop (or: folder, start-menu, or a path ending in .lnk)
+    python -m recorder --setup-transcripts   download a speech recognizer and model for draft transcripts (asks first)
     python -m recorder --version
 """
 import argparse
@@ -31,6 +32,12 @@ def parse(argv):
     parser.add_argument('--shortcut', nargs='?', const='desktop', metavar='WHERE',
                         help='make a shortcut that starts the program with no console window: desktop (the default), '
                              'folder (the program folder), start-menu, or a path ending in .lnk')
+    parser.add_argument('--setup-transcripts', nargs='?', const='', metavar='SIZE',
+                        help='download a speech recognizer and a speech model for draft transcripts, after asking: '
+                             'SIZE is tiny, base or small (asked if left out)')
+    parser.add_argument('--language', metavar='CODE',
+                        help='with --setup-transcripts: the language you speak, such as en or de, or auto')
+    parser.add_argument('--yes', action='store_true', help='with --setup-transcripts: do not ask before downloading')
     return parser.parse_args(argv)
 
 
@@ -55,6 +62,13 @@ def check():
         print(f'  {"ok     " if ok else "PROBLEM" if required else "absent "}  {what:40s} {state}')
     ffmpeg = clean.locate(data.get('ffmpeg'))
     print(f'  {"ok     " if ffmpeg else "absent "}  {"noise cleaning (FFmpeg, optional)":40s} {ffmpeg or "not found"}')
+    try:
+        from . import transcript
+        drafts = transcript.available(data.get('asr_python'), data.get('asr_model'))
+    except ImportError:                                 # soundfile is missing, which the lines above already say
+        drafts = False
+    print(f'  {"ok     " if drafts else "absent "}  {"draft transcripts (optional)":40s} '
+          f'{"ready" if drafts else "not set up: run setup-transcripts.bat"}')
     root = data.get('root') or f'{settings.program_dir() / settings.CLIPS_FOLDER}  (the default)'
     print(f'\nClips are saved in: {root}\nSettings file: {settings.settings_path()}\nLog file: {launch.log_path()}')
     print('\n' + ('Everything the program needs is installed.' if not missing else 'Something it needs is missing: see above.'))
@@ -79,6 +93,12 @@ def make_shortcut(where):
     print(f'Made {made}')
     print(f'Double-click it to start {settings.APP_NAME}.')
     return 0
+
+
+def setup_transcripts(size, language, yes):
+    from . import asr_setup
+
+    return asr_setup.run(size or None, language, yes)
 
 
 def start():
@@ -109,6 +129,8 @@ def main(argv=None):
         return check()
     if args.shortcut:
         return make_shortcut(args.shortcut)
+    if args.setup_transcripts is not None:
+        return setup_transcripts(args.setup_transcripts, args.language, args.yes)
     return start()
 
 

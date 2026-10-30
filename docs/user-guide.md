@@ -238,7 +238,7 @@ Open them with the gear at the top right, or `Ctrl+,`.
 | **Stop tail** | How long recording carries on after you press Stop, 0 to 1 second. |
 | **Record key** | Whether `F9` starts and stops recording while another program is in front. On by default. Windows tells Voice Slate when that one key is pressed; it is not a keyboard hook, and no other key is seen. While it is on, other programs do not receive `F9`. If another program already holds `F9`, the status line says so at start-up and `F9` works only in this window. |
 | **FFmpeg** | Path of `ffmpeg.exe`. Leave it empty to search `PATH` and the WinGet folders. |
-| **Speech recognizer: Python** and **model** | The optional draft-transcript setup: a `python.exe` that has [faster-whisper](https://github.com/SYSTRAN/faster-whisper) installed, and a model folder you downloaded yourself. Both are needed. |
+| **Speech recognizer: Python** and **model** | The optional draft-transcript setup: a `python.exe` that has [faster-whisper](https://github.com/SYSTRAN/faster-whisper) installed, and a faster-whisper model folder. Both are needed. `setup-transcripts.bat` installs both and fills these in for you (see the README); you only type them here to use a recognizer you already have. |
 | **Speech language** | A language code such as `en` or `de`. It makes drafts faster and steadier; leave it empty to have the language found for each clip, which is less reliable on short clips. |
 
 Settings are saved in a small `settings.json`. The recorder looks for it in this order: the file named by the
@@ -286,11 +286,21 @@ record. Some setups, such as a remote desktop session, may not offer a loopback 
 **The Noise reduction switch is greyed out.** FFmpeg was not found. Install it (`winget install Gyan.FFmpeg`) and
 restart, or set its path in Settings.
 
-**Suggest from audio says draft transcripts are not set up.** Set both the recognizer's Python and the model folder in
-Settings. The Settings dialog tells you which one is missing, and the bottom of the window says "Draft transcripts:
-ready" once both are found. If you did set them and it still says so, the program is reading a different settings file
-from the one you edited: hover over *Draft transcripts* at the bottom of the window to see which one it is. A
-`settings.json` next to the program wins over the one in `%APPDATA%`.
+**Suggest from audio says draft transcripts are not set up.** A new copy of the program has no speech recognizer: it
+ships none and downloads none by itself. Double-click `setup-transcripts.bat` in the program folder (or press **Suggest
+from audio** and choose *Open the setup*). It asks which model you want, says what it will download, and sets
+everything up and checks it. Then start Voice Slate again; the bottom of the window says "Draft transcripts: ready".
+If you set your own recognizer in Settings instead, the dialog tells you which of the Python and the model folder is
+missing. If you did set them and it still says so, the program is reading a different settings file from the one you
+edited: hover over *Draft transcripts* at the bottom of the window to see which one it is. A `settings.json` next to
+the program wins over the one in `%APPDATA%`.
+
+**The transcript setup stops with an error.** It changes nothing in your settings when a step fails, so you can run
+`setup-transcripts.bat` again. Check the internet connection first (it needs PyPI and Hugging Face), and that the drive
+has room: about 450 MB for the recognizer and the base model, 800 MB with `small`. If the message talks about a path
+that is too long, the program folder is nested too deeply: move the whole folder somewhere short, such as
+`C:\VoiceSlate`, delete its `.venv-asr` folder, and run the setup again. To start over, delete the `.venv-asr` and
+`models` folders.
 
 **F9 does nothing while another program is in front.** If the status line said "F9 only works while this window is in
 front" when the program started, another program already holds `F9` (a screen recorder, a game overlay, a macro tool).

@@ -11,7 +11,9 @@ from and whether the person had the right to use the voice. That last part is a 
 - **Changes that weaken the consent step will not be merged.** That includes skipping or pre-filling the origin,
   allowed-use or permission fields, or making them optional. See [Responsible use](docs/responsible-use.md).
 - **No network access and no telemetry.** The program does not connect to anything. Optional tools (FFmpeg, a speech
-  recognizer) are installed by the user and run as separate programs.
+  recognizer) run as separate programs. The user installs FFmpeg; the recognizer is installed by
+  `setup-transcripts.bat` (`recorder/asr_setup.py`), which downloads only when the user runs it and agrees, and says what
+  it fetches first. Nothing else may go online, and that script must not start by itself.
 - Nothing aimed at deceiving people or imitating a voice without permission.
 
 For anything bigger than a small fix, please open an issue first so we can agree on the approach before you spend time on it.

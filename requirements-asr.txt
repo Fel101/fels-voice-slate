@@ -1,0 +1,14 @@
+# What the optional draft-transcript setup installs, into an environment of its own (.venv-asr), so the program's own
+# environment stays small. setup-transcripts.bat does this for you, after asking. These are the versions it was built
+# and tested with (Python 3.12 and 3.13 on Windows 11); every one has a wheel for Python 3.12 to 3.14.
+#
+#     python -m recorder --setup-transcripts
+#
+# The licences of these packages are listed in THIRD_PARTY_NOTICES.md.
+faster-whisper==1.2.1                                 # the speech recognizer (Whisper, run by CTranslate2)
+ctranslate2==4.8.0                                    # the engine that runs the model on the CPU
+onnxruntime==1.31.0                                   # the voice-activity filter that skips silence
+av==17.1.0                                            # decodes the audio for faster-whisper
+huggingface_hub==2.2.0                                # fetches the model, only while the setup runs
+tokenizers==0.23.3
+numpy==2.5.4

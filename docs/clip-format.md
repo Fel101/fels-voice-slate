@@ -33,7 +33,7 @@ A UTF-8 JSON object. An example, written compactly (the program writes it with o
 ```json
 {
   "schema": "voice-recorder-clip-v2",
-  "software": { "name": "voice-slate", "version": "0.2.0" },
+  "software": { "name": "voice-slate", "version": "0.3.0" },
   "id": "3f9a1c2e",
   "created": "2026-10-20T16:12:04+01:00",
   "speaker": "my-voice",

@@ -157,7 +157,8 @@ class SettingsDialog(QDialog):
         self.python.edit.setPlaceholderText('Optional')
         self.python.edit.textChanged.connect(self._check_recognizer)
         form.addRow('Speech recognizer: Python', self.python)
-        self.model = PathRow(values.get('asr_model'), self._folder, 'A faster-whisper model folder you downloaded yourself')
+        self.model = PathRow(values.get('asr_model'), self._folder,
+                             f'A faster-whisper model folder ({transcript.SETUP_SCRIPT} downloads one and fills this in)')
         self.model.edit.setPlaceholderText('Optional')
         self.model.edit.textChanged.connect(self._check_recognizer)
         form.addRow('Speech recognizer: model', self.model)
@@ -171,9 +172,9 @@ class SettingsDialog(QDialog):
         self.language.setFixedWidth(110)
         form.addRow('Speech language', self.language)
         layout.addLayout(form)
-        layout.addWidget(label('FFmpeg (noise reduction) and the speech recognizer (draft transcripts) are optional and '
-                               'installed separately; see the README. The recorder never downloads anything.', 'muted',
-                               wrap=True))
+        layout.addWidget(label('FFmpeg (noise reduction) and the speech recognizer (draft transcripts) are optional; see the '
+                               f'README. {transcript.SETUP_SCRIPT} in the program folder sets the recognizer up and '
+                               'fills these in. The program itself never goes online.', 'muted', wrap=True))
         row = hbox(spacing=8)
         row.addStretch(1)
         cancel = QPushButton('Cancel')
@@ -212,7 +213,8 @@ class SettingsDialog(QDialog):
         elif python or model:
             self.python.say('Both a Python and a model folder are needed, and both must exist.', 'amber')
         else:
-            self.python.say('Not set up. Draft transcripts are optional; typing the transcript always works.', 'dim')
+            self.python.say(f'Not set up. Run {transcript.SETUP_SCRIPT} in the program folder to get a speech recognizer, '
+                            'or type the transcript: that always works.', 'dim')
 
     def values(self):
         """The settings as typed. An empty optional text removes that setting."""

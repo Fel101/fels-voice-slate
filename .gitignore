@@ -1,6 +1,10 @@
 # Python
 .venv/
 venv/
+
+# The optional draft-transcript recognizer and its speech model (setup-transcripts.bat puts them here)
+/.venv-asr/
+/models/
 __pycache__/
 *.py[cod]
 .pytest_cache/

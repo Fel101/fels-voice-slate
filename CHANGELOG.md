@@ -5,6 +5,36 @@ the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-29
+
+### Added
+
+- **Draft transcripts can be set up in one step.** A new copy of the program has no speech recognizer, so *Suggest from
+  audio* could only say to read the README. `setup-transcripts.bat` (also offered at the end of `setup.bat`, and by
+  *Suggest from audio* when nothing is set up) now asks which model you want (`tiny`, `base` or `small`, 80 to 490 MB)
+  and which language you speak, says what it will download, and waits for your yes. It installs faster-whisper from
+  PyPI into a folder of its own, `.venv-asr` (about 90 MB, pinned in `requirements-asr.txt`), downloads the model from
+  Hugging Face into `models`, runs the recognizer once on a second of silence, and only then fills in the speech
+  recognizer lines in Settings. Nothing is written if a step fails, and it can be run again. The program itself still
+  never goes online: this is the one script that downloads, and only when you run it and agree.
+- `python -m recorder --check` also says whether draft transcripts are ready.
+
+### Changed
+
+- The messages about a missing speech recognizer (the status line, the Settings dialog and its tooltips) now name
+  `setup-transcripts.bat` instead of only the README. The README, the user guide, the security policy and the
+  third-party notices say what the setup downloads and where from.
+- The version is 0.3.0 (the previous release was 0.2.0).
+
+### Fixed
+
+- **The speaker list and the + button stayed switched off after the first recording on a new copy.** On a first start
+  there is no speaker, and the first Record creates "My voice" as it begins. The window switched the two controls off for
+  the length of that recording, and switched them on again only when the list of speakers changed, which it does not
+  when a recording stops. So the list showed only "My voice" and neither it nor + would respond. They now follow the
+  recording: off while one runs, on again as soon as it ends. Clicking the list during a recording, which is refused so a
+  take keeps its speaker, caused the same lock and is fixed too.
+
 ## [0.2.0] - 2026-10-21
 
 ### Added
@@ -79,6 +109,7 @@ The first public release.
 - The limiter's ceiling also holds for the saved 24 kHz file: resampling can push a peak over it, so the limiter runs
   once more after resampling.
 
-[Unreleased]: ../../compare/v0.2.0...HEAD
+[Unreleased]: ../../compare/v0.3.0...HEAD
+[0.3.0]: ../../compare/v0.2.0...v0.3.0
 [0.2.0]: ../../compare/v0.1.0...v0.2.0
 [0.1.0]: ../../releases/tag/v0.1.0

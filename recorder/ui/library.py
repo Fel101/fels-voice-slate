@@ -203,8 +203,14 @@ class LibraryPanel(QWidget):
         index = self.speakers.findData(workspace.speaker)
         self.speakers.setCurrentIndex(index)
         self.speakers.blockSignals(False)
-        self.speakers.setEnabled(not self.session.capturing.recording and self.speakers.count() > 0)
-        self.add_speaker.setEnabled(not self.session.capturing.recording)
+        self.refresh_enabled()
+
+    def refresh_enabled(self):
+        """The picker and the + are off while a recording runs, so each recording keeps the speaker it started with.
+        Called whenever the recording starts or ends, not only when the list of speakers changes."""
+        recording = self.session.capturing.recording
+        self.speakers.setEnabled(not recording and self.speakers.count() > 0)
+        self.add_speaker.setEnabled(not recording)
 
     # ---- takes ----
 
