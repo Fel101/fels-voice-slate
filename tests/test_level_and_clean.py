@@ -1,5 +1,6 @@
 """Normalize level and background-noise cleaning: the maths, the FFmpeg step, and what the sidecar records."""
 import json
+import os
 
 import numpy as np
 import pytest
@@ -117,11 +118,11 @@ def test_finding_ffmpeg_prefers_the_configured_path_then_path_then_winget(tmp_pa
     winget.mkdir(parents=True)
     (winget / 'ffmpeg.exe').write_bytes(b'')
     monkeypatch.setenv('LOCALAPPDATA', str(tmp_path / 'local'))
-    monkeypatch.setattr(clean.shutil, 'which', lambda name: None)
+    monkeypatch.setattr(clean, '_on_path', lambda: None)
     clean.set_ffmpeg_path(None)
     try:
         assert clean.find_ffmpeg() == str(winget / 'ffmpeg.exe')
-        monkeypatch.setattr(clean.shutil, 'which', lambda name: 'C:/tools/ffmpeg.exe')
+        monkeypatch.setattr(clean, '_on_path', lambda: 'C:/tools/ffmpeg.exe')
         assert clean.find_ffmpeg() == 'C:/tools/ffmpeg.exe'
         clean.set_ffmpeg_path(configured)
         assert clean.find_ffmpeg() == str(configured)
@@ -134,8 +135,40 @@ def test_finding_ffmpeg_prefers_the_configured_path_then_path_then_winget(tmp_pa
 
 def test_a_missing_ffmpeg_says_how_to_get_it(monkeypatch, tmp_path):
     monkeypatch.setenv('LOCALAPPDATA', str(tmp_path))
-    monkeypatch.setattr(clean.shutil, 'which', lambda name: None)
+    monkeypatch.setattr(clean, '_on_path', lambda: None)
     clean.set_ffmpeg_path(None)
     with pytest.raises(clean.CleanError, match='winget install'):
         clean.find_ffmpeg()
     assert clean.available() is False
+
+
+FFMPEG_NAME = 'ffmpeg.exe' if os.name == 'nt' else 'ffmpeg'
+
+
+def test_ffmpeg_on_path_is_never_taken_from_the_current_folder(tmp_path, monkeypatch):
+    """Windows looks in the current folder before PATH, so a file named ffmpeg.exe in the folder the program was started
+    from would be run in place of the real one. Only folders named in full count."""
+    real, planted = tmp_path / 'real', tmp_path / 'planted'
+    for folder in (real, planted):
+        folder.mkdir()
+        (folder / FFMPEG_NAME).write_bytes(b'')
+    monkeypatch.chdir(planted)
+    monkeypatch.setenv('PATH', os.pathsep.join(['', '.', 'planted', str(real)]))
+    assert clean._on_path() == str(real / FFMPEG_NAME)
+    monkeypatch.setenv('PATH', os.pathsep.join(['', '.', 'planted']))
+    assert clean._on_path() is None
+    monkeypatch.setenv('PATH', f'"{real}"')                          # a quoted entry is still a full path
+    assert clean._on_path() == str(real / FFMPEG_NAME)
+
+
+def test_the_current_folder_is_not_where_find_ffmpeg_looks(tmp_path, monkeypatch):
+    planted = tmp_path / 'planted'
+    planted.mkdir()
+    (planted / FFMPEG_NAME).write_bytes(b'')
+    monkeypatch.chdir(planted)
+    monkeypatch.setenv('PATH', '.')
+    monkeypatch.setenv('LOCALAPPDATA', str(tmp_path / 'nowhere'))
+    clean.set_ffmpeg_path(None)
+    with pytest.raises(clean.CleanError, match='was not found'):
+        clean.find_ffmpeg()
+    assert clean.locate() is None

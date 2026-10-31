@@ -4,6 +4,11 @@ Each original capture is written to `<speaker>/masters/` the moment it is made (
 depends on keeping it. Keep writes the 24 kHz export WAV and the sidecar JSON beside it. A capture with no sidecar is
 not kept yet. New names are never overwritten: a clash gets a numeric suffix. A kept take that is kept again rewrites
 only its own export and sidecar. Discarding a take moves its files to the Recycle Bin.
+
+The work on a take that is not kept yet (its cuts, Process settings, text and label) is saved to an autosave file in
+`masters/`, beside the original, shortly after each change, so a crash or a close does not lose it. The take comes back
+with that work when the program starts again. The autosave file never holds the permission tick: that is never
+remembered, and is given again at Keep. Keep deletes the autosave file, because the sidecar holds the work from then on.
 """
 import datetime as dt
 import hashlib
@@ -30,6 +35,11 @@ SCHEMA = 'voice-recorder-clip-v2'
 KNOWN_SCHEMAS = ('voice-recorder-clip-v1', SCHEMA)
 MASTER_SUBTYPE = 'PCM_24'
 STEM_PATTERN = re.compile(r'(\d{8})-(\d{6})_(mic|system|import)_([0-9a-f]{8})\.raw\.wav$')
+AUTOSAVE_SCHEMA = 'voice-slate-autosave-v1'
+AUTOSAVE_SUFFIX = '.autosave.json'
+AUTOSAVE_TEXT_MAX = 20000           # a text field in an autosave file is cut to this when it is read back
+TRANSCRIPT_STATUSES = ('typed', 'read_from_script', 'asr_draft', 'edited')
+LABEL_MAX = 80
 
 
 class KeepBlocked(ValueError):
@@ -71,6 +81,17 @@ def now_iso():
     return dt.datetime.now().astimezone().isoformat(timespec='seconds')
 
 
+def clean_label(value):
+    """A take's label as it is shown and saved: one line, single spaces, no control characters, at most LABEL_MAX long."""
+    text = ' '.join(str(value or '').split())
+    return ''.join(ch for ch in text if ch.isprintable())[:LABEL_MAX].strip()
+
+
+def _label_of(data):
+    label = data.get('label')
+    return clean_label(label) if isinstance(label, str) else ''
+
+
 # eq=False: a take is compared by identity. The default field-by-field comparison reaches the sample arrays, and
 # comparing two takes of different lengths raised ValueError in the window's list lookups.
 @dataclass(eq=False)
@@ -94,10 +115,13 @@ class Take:
     draft_request: object = field(default=None, repr=False)     # the draft being made, if any (see session/drafts.py)
     draft_key: str = field(default=None, repr=False)            # the cuts the current draft transcript was made from
     cache: dict = field(default_factory=dict, repr=False)      # derived data the window reuses: peaks, spectrogram
+    restored: bool = field(default=False, repr=False)          # its edits and text came back from an autosave file
+    autosave_problem: str = field(default='', repr=False)      # why an autosave file beside its original was not used
 
     def __post_init__(self):
         if self.history is None:
             self.history = History(seconds=self.seconds)
+        self.meta.setdefault('label', '')
         self.meta.setdefault('transcript', '')
         self.meta.setdefault('transcript_status', 'typed')
         self.meta.setdefault('origin', '')
@@ -199,6 +223,9 @@ class Library:
         if not name:
             raise ValueError('Enter a speaker name')
         data = self.speakers()
+        for slug, speaker in data.items():          # a speaker renamed since is still found by the name they have now
+            if speaker['name'] == name:
+                return slug
         base = slugify(name)
         slug, n = base, 2
         while slug in data and data[slug]['name'] != name:
@@ -207,6 +234,25 @@ class Library:
             data[slug] = {'name': name, 'origin': '', 'allowed_use': ''}
             self._write_json(self._speakers_file(), data)
         return slug
+
+    def rename_speaker(self, slug, name):
+        """Show a speaker under another name. Their folder keeps its name, so no clip and no sidecar is touched.
+
+        Raises ValueError, in words the person can read, for a blank name, a name another speaker already has, or a
+        speaker that is not in this folder.
+        """
+        name = str(name).strip()
+        if not name:
+            raise ValueError('Enter a speaker name')
+        data = self.speakers()
+        if slug not in data:
+            raise ValueError('That speaker is not in this folder')
+        for other, speaker in data.items():
+            if other != slug and speaker['name'].casefold() == name.casefold():
+                raise ValueError(f'There is already a speaker called {speaker["name"]}')
+        if data[slug]['name'] != name:
+            data[slug]['name'] = name
+            self._write_json(self._speakers_file(), data)
 
     def remember(self, slug, origin, allowed_use):
         data = self.speakers()
@@ -258,7 +304,7 @@ class Library:
 
         Raises TrashUnavailable, with nothing removed, when the Recycle Bin cannot take them.
         """
-        paths = [Path(p) for p in (take.master_path, take.export_path, take.sidecar_path)
+        paths = [Path(p) for p in (take.master_path, take.export_path, take.sidecar_path, self.autosave_file(take))
                  if p is not None and Path(p).exists()]
         if paths:
             if permanent:
@@ -300,6 +346,7 @@ class Library:
             take.device.update(file=str(path))
         else:
             take.master_path = path
+        self._restore_autosave(take, path)
         return take
 
     def load_takes(self, slug):
@@ -367,6 +414,28 @@ class Library:
             samples, rate = sf.read(str(master_path), dtype='float32', always_2d=False)
         except (OSError, RuntimeError):
             raise SidecarProblem('its master file could not be read') from None
+        history = self._recipe_from(data, samples, rate, self._chain_from_sidecar)
+        label = _label_of(data)
+        take = Take(source=source, samples=samples, rate=int(rate), device=data.get('device') or {},
+                    flags=list(data.get('flags') or []), id=take_id, created=created, speaker=folder.name,
+                    history=history,
+                    meta={'transcript': data.get('transcript', ''),
+                          'transcript_status': data.get('transcript_status', 'typed'),
+                          'origin': data.get('origin', ''), 'allowed_use': data.get('allowed_use', ''),
+                          'consent_confirmed': bool(data.get('consent_confirmed')),
+                          'source_url': data.get('source_url') or '', 'notes': data.get('notes', ''),
+                          'saved_transcript': data.get('transcript', ''), 'label': label, 'saved_label': label})
+        take.master_path = master_path
+        take.export_path = export_path
+        take.sidecar_path = sidecar
+        return take
+
+    @staticmethod
+    def _recipe_from(data, samples, rate, chain_of):
+        """The edit recipe that a sidecar or an autosave file describes, checked against the master it belongs to.
+
+        `chain_of(data)` gives the processing settings. Raises SidecarProblem, saying what is wrong.
+        """
         seconds = len(samples) / rate
         edits = data.get('edits') or []
         try:
@@ -380,22 +449,10 @@ class Library:
         if not math.isfinite(fade) or not 0 <= fade <= ac.MAX_FADE_MS:
             raise SidecarProblem('its join fade is invalid')
         try:
-            chain = chain_mod.normalize(self._chain_from_sidecar(data))
+            chain = chain_mod.normalize(chain_of(data))
         except ValueError as e:
             raise SidecarProblem(f'its processing settings are invalid: {e}') from None
-        take = Take(source=source, samples=samples, rate=int(rate), device=data.get('device') or {},
-                    flags=list(data.get('flags') or []), id=take_id, created=created, speaker=folder.name,
-                    history=History(edits, seconds=seconds, chain=chain, fade_ms=fade),
-                    meta={'transcript': data.get('transcript', ''),
-                          'transcript_status': data.get('transcript_status', 'typed'),
-                          'origin': data.get('origin', ''), 'allowed_use': data.get('allowed_use', ''),
-                          'consent_confirmed': bool(data.get('consent_confirmed')),
-                          'source_url': data.get('source_url') or '', 'notes': data.get('notes', ''),
-                          'saved_transcript': data.get('transcript', '')})
-        take.master_path = master_path
-        take.export_path = export_path
-        take.sidecar_path = sidecar
-        return take
+        return History(edits, seconds=seconds, chain=chain, fade_ms=fade)
 
     @staticmethod
     def _chain_from_sidecar(data):
@@ -491,6 +548,8 @@ class Library:
         sidecar_tmp = take.sidecar_path.with_name(take.sidecar_path.name + '.tmp')
         sidecar_tmp.write_text(json.dumps(sidecar, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
         os.replace(sidecar_tmp, take.sidecar_path)
+        take.meta['saved_label'] = clean_label(take.meta.get('label'))
+        self.remove_autosave(take)                  # the sidecar holds the work from here on
         self.remember(slug, take.meta['origin'], take.meta['allowed_use'])
         take.save_error = ''
         return {'export': take.export_path, 'master': take.master_path, 'sidecar': take.sidecar_path}
@@ -502,7 +561,7 @@ class Library:
         denoise = recipe['chain']['denoise']
         if denoise['enabled']:
             denoise.update(filter=f"afftdn=nf={denoise['nf']:g}", identity_checked=False)
-        return {
+        sidecar = {
             'schema': SCHEMA,
             'software': {'name': 'voice-slate', 'version': __version__},
             'id': take.id,
@@ -529,3 +588,134 @@ class Library:
             'notes': str(take.meta.get('notes') or ''),
             'flags': flags,
         }
+        label = clean_label(take.meta.get('label'))
+        if label:                                   # a take with no label has no such field, as before
+            sidecar['label'] = label
+        return sidecar
+
+    # ---- work in progress ---------------------------------------------------------------------------------------------
+
+    @staticmethod
+    def _master_file(take):
+        """The take's original capture on disk, or None while it has none."""
+        master = take.master_path or (take.device.get('file') if take.device.get('legacy_pending') else None)
+        return Path(master) if master and str(master).endswith('.raw.wav') else None
+
+    @staticmethod
+    def _autosave_beside(master):
+        return master.with_name(master.name[:-len('.raw.wav')] + AUTOSAVE_SUFFIX)
+
+    def autosave_file(self, take):
+        """Where the work on a take that is not kept yet is saved: beside its original. None while it has no original."""
+        master = self._master_file(take)
+        return self._autosave_beside(master) if master is not None else None
+
+    def autosave(self, take):
+        """Save what has changed on a take since Keep last wrote it. Returns True if a file was written.
+
+        A take that is not kept gets an autosave file beside its original, holding its cuts, Process settings, text and
+        label. A kept take has its sidecar already, so only a changed label is written there. A take whose original is
+        not on disk (yet, or any more) has nowhere to be saved, and nothing is written. Raises OSError or ValueError
+        when the write fails.
+        """
+        if take.kept:
+            return self._save_label(take)
+        master = self._master_file(take)
+        if master is None or not master.is_file():
+            return False
+        self._write_json(self._autosave_beside(master), self._autosave_data(take, master))
+        return True
+
+    def remove_autosave(self, take):
+        """Delete the take's autosave file, if there is one."""
+        path = self.autosave_file(take)
+        try:
+            if path is not None:
+                path.unlink(missing_ok=True)
+        except OSError:
+            pass                                    # a leftover is harmless: a take with a sidecar never reads it
+
+    @staticmethod
+    def _autosave_data(take, master):
+        meta, recipe = take.meta, take.history.to_json()
+        text = {key: str(meta.get(key) or '') for key in ('transcript', 'origin', 'allowed_use', 'source_url', 'notes',
+                                                             'draft_text')}
+        line = meta.get('script_line')
+        return {
+            'schema': AUTOSAVE_SCHEMA,
+            'software': {'name': 'voice-slate', 'version': __version__},
+            'saved': now_iso(),
+            'master': {'file': master.name, 'sample_rate': int(take.rate), 'frames': int(len(take.samples))},
+            'device': {} if take.device.get('legacy_pending') else take.device,
+            'flags': [flag for flag in take.flags if isinstance(flag, str)],
+            'edits': recipe['edits'],
+            'join_fade_ms': recipe['join_fade_ms'],
+            'chain': recipe['chain'],
+            'label': clean_label(meta.get('label')),
+            **text,
+            'transcript_status': str(meta.get('transcript_status') or 'typed'),
+            'script_line': line if isinstance(line, str) else None,
+            'needs_transcript_review': bool(take.needs_transcript_review),
+            'draft_key': take.draft_key if isinstance(take.draft_key, str) else None,
+            # No permission tick: it is never remembered, and is given again when the clip is kept.
+        }
+
+    def _restore_autosave(self, take, master):
+        """Give a take back the work its autosave file holds. A file that cannot be used is left as it is, and the take
+        loads as it was recorded, with the reason in `take.autosave_problem`."""
+        path = self._autosave_beside(master)
+        if not path.is_file():
+            return
+        try:
+            self._apply_autosave(take, master, json.loads(path.read_text(encoding='utf-8')))
+        except SidecarProblem as e:
+            take.autosave_problem = f'{path.name}: {e}'
+        except (OSError, KeyError, TypeError, ValueError):
+            take.autosave_problem = f'{path.name}: it is damaged'
+
+    def _apply_autosave(self, take, master, data):
+        if not isinstance(data, dict) or data.get('schema') != AUTOSAVE_SCHEMA:
+            raise SidecarProblem('it is not an autosave file of this program')
+        about = data.get('master')
+        if not isinstance(about, dict) or about.get('file') != master.name or about.get('frames') != len(take.samples) \
+                or about.get('sample_rate') != take.rate:
+            raise SidecarProblem('it was saved for a different recording')
+        history = self._recipe_from(data, take.samples, take.rate, lambda d: d.get('chain'))
+        # Everything is checked before anything is applied, so a file that fails halfway leaves the take as recorded.
+        meta = {key: data[key][:AUTOSAVE_TEXT_MAX] for key in
+                ('transcript', 'origin', 'allowed_use', 'source_url', 'notes', 'draft_text') if isinstance(data.get(key), str)}
+        meta['label'] = _label_of(data)
+        meta['transcript_status'] = data['transcript_status'] if data.get('transcript_status') in TRANSCRIPT_STATUSES \
+            else 'typed'
+        if isinstance(data.get('script_line'), str):
+            meta['script_line'] = data['script_line']
+        take.history = history
+        take.meta.update(meta)
+        take.needs_transcript_review = bool(data.get('needs_transcript_review')) and history.words_changed
+        take.draft_key = data['draft_key'] if isinstance(data.get('draft_key'), str) else None
+        if isinstance(data.get('device'), dict) and not take.device.get('legacy_pending'):
+            take.device = data['device']
+        flags = data.get('flags')
+        if isinstance(flags, list):
+            take.flags = ['recovered'] + [f for f in flags if isinstance(f, str) and f != 'recovered']
+        take.restored = True
+
+    def _save_label(self, take):
+        """Write a kept take's label into its sidecar, leaving everything else in the file as it is."""
+        label = clean_label(take.meta.get('label'))
+        path = take.sidecar_path
+        if label == clean_label(take.meta.get('saved_label')) or path is None or not Path(path).is_file():
+            return False
+        path = Path(path)
+        data = json.loads(path.read_text(encoding='utf-8'))
+        if not isinstance(data, dict):
+            raise ValueError('the sidecar is not a clip description')
+        if label:
+            data['label'] = label
+        else:
+            data.pop('label', None)
+        tmp = path.with_name(path.name + '.tmp')
+        tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
+        os.replace(tmp, path)
+        take.meta['saved_label'] = label
+        return True

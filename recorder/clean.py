@@ -10,7 +10,6 @@ separate program and nothing is linked.
 """
 import math
 import os
-import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -56,12 +55,27 @@ def _winget_candidates():
     return ([str(link)] if link.is_file() else []) + [str(p) for p in reversed(found)]
 
 
+def _on_path():
+    """ffmpeg.exe from a folder on PATH, or None.
+
+    `shutil.which` looks in the current folder first on Windows, so a file named ffmpeg.exe in whatever folder the
+    program was started from would be run instead of the real one. Only folders named by their full path count here:
+    an empty entry or a relative one such as "." means the current folder, and is skipped.
+    """
+    name = 'ffmpeg.exe' if os.name == 'nt' else 'ffmpeg'
+    for entry in os.environ.get('PATH', '').split(os.pathsep):
+        entry = entry.strip().strip('"')
+        if entry and os.path.isabs(entry) and (Path(entry) / name).is_file():
+            return str(Path(entry) / name)
+    return None
+
+
 def locate(configured=None):
     """Where ffmpeg.exe is: `configured` if given, else the one on PATH, else the newest one installed by WinGet.
     None when it is not there. Unlike find_ffmpeg this never raises and ignores the saved setting."""
     if configured:
         return str(configured) if Path(configured).is_file() else None
-    return shutil.which('ffmpeg') or next(iter(_winget_candidates()), None)
+    return _on_path() or next(iter(_winget_candidates()), None)
 
 
 def find_ffmpeg():
@@ -70,7 +84,7 @@ def find_ffmpeg():
         if Path(_configured).is_file():
             return _configured
         raise CleanError(f'The ffmpeg path in settings does not exist: {_configured}')
-    found = shutil.which('ffmpeg')
+    found = _on_path()
     if found:
         return found
     candidates = _winget_candidates()

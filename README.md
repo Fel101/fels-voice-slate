@@ -19,8 +19,9 @@ is in it and whether you had the right to record it.
 
 - **Record** from a microphone, or from what your computer is playing. An armed input keeps the half second before you
   press Record, so the first word is never cut off. Script mode shows one prompt per take.
-- **Never loses a take.** The original recording is written to disk the moment you stop. Edits are a list of steps kept
-  beside it, so they can always be undone and the original is never changed.
+- **Never loses a take.** The original recording is written to disk the moment you stop, and your edits, settings and
+  typed text are saved beside it a moment after each change, so a crash or a close loses nothing. Edits are a list of
+  steps, so they can always be undone and the original is never changed.
 - **Edit** by dragging on the waveform: cut, trim, silence, fade in and out, gain on a part, trim the pauses at the
   ends, shorten long pauses, and compare the original with the edited clip. Undo and redo have a clickable history.
 - **Process** the whole take: high-pass filter, mains-hum notch (50 or 60 Hz), noise reduction (optional, needs
@@ -33,6 +34,8 @@ is in it and whether you had the right to record it.
   it helps.
 - **Keep** only when the clip is ready: it needs a transcript, the origin of the recording, the allowed use, and your
   confirmation that you have the right to use the voice. Keep writes the 24 kHz mono WAV and a sidecar JSON file.
+- **Name and find takes.** Give a take a label, rename a speaker, and filter the list of takes by the words in their
+  labels, transcripts and notes.
 - **Draft transcripts** (optional) from a speech recognizer that runs on your own computer, set up in one step.
 - **Stays on your computer.** No account, no network access, no telemetry. Discard sends files to the Recycle Bin.
 
@@ -101,15 +104,17 @@ is used instead. Change it in **Settings** (the gear at the top right).
 ```text
 voice-clips\
   speakers.json
-  my-voice\                                   one folder per speaker
+  my-voice\                                      one folder per speaker
     masters\
-      20261020-161204_mic_3f9a1c2e.raw.wav    the original recording, 24-bit, never changed
-    20261020-161204_mic_3f9a1c2e.wav          the kept clip: 24 kHz, mono, 16-bit
-    20261020-161204_mic_3f9a1c2e.json         the sidecar: transcript, origin, allowed use, edits, measurements
+      20261020-161204_mic_3f9a1c2e.raw.wav       the original recording, 24-bit, never changed
+      20261020-161204_mic_3f9a1c2e.autosave.json your edits and text, until the clip is kept
+    20261020-161204_mic_3f9a1c2e.wav             the kept clip: 24 kHz, mono, 16-bit
+    20261020-161204_mic_3f9a1c2e.json            the sidecar: transcript, origin, allowed use, edits, measurements
 ```
 
 The sidecar holds everything needed to see how the clip was made, including the edit list and the processing settings.
-Its fields are described in [Clip format](docs/clip-format.md), so other programs can read it.
+Its fields are described in [Clip format](docs/clip-format.md), so other programs can read it. The autosave file is there
+only while a take is not kept: Keep deletes it, and it is not part of the format that other programs read.
 
 Recordings of a voice are personal data. Keep the folder out of OneDrive, Dropbox and other synced folders unless you
 want a copy in the cloud, leave `voice-clips` out when you zip or share the program folder, and see

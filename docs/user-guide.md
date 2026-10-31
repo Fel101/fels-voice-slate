@@ -4,7 +4,8 @@ This guide goes through Voice Slate from the first start to a kept clip. For ins
 [README](../README.md). Press `F1` in the program for the list of keyboard shortcuts.
 
 **Contents:** [Starting](#starting) · [The window](#the-window) · [Recording](#recording) · [Script mode](#script-mode) ·
-[Importing audio](#importing-audio) · [Speakers](#speakers) · [Editing](#editing) · [Process](#process-the-whole-take) ·
+[Importing audio](#importing-audio) · [Speakers](#speakers) · [Naming and finding takes](#naming-and-finding-takes) ·
+[Editing](#editing) · [Process](#process-the-whole-take) ·
 [Check](#check) · [Auto analyze and Auto fix](#auto-analyze-and-auto-fix) · [Keeping a clip](#keeping-a-clip) ·
 [Settings](#settings) · [Keyboard shortcuts](#keyboard-shortcuts) · [Troubleshooting](#troubleshooting)
 
@@ -28,8 +29,8 @@ To keep the program on the taskbar, pin the desktop icon (right-click it) rather
 
 | Area | What it holds |
 |---|---|
-| **Top bar** | Record (`F9`), Play (`Space`), Stop, Loop (`L`); the clock; the source (Microphone or System audio) and the device; the Arm button; the level meter; and the gear menu with Settings, Import, New speaker, Load script, Open output folder and more. |
-| **Left** | The speaker, and that speaker's takes. Each take shows a small waveform, its length, when it was made, where it came from, and a status: *Recording*, *In review* (the take that is open), *Kept*, *Not kept*, or *Not saved* (the original could not be written yet). |
+| **Top bar** | Record (`F9`), Play (`Space`), Stop, Loop (`L`); the clock; the source (Microphone or System audio) and the device; the Arm button; the level meter; and the gear menu with Settings, Import, New speaker, Rename speaker, Load script, Open output folder and more. |
+| **Left** | The speaker, a box that filters the takes, and that speaker's takes. Each take shows a small waveform, its label (or its number and length, until you name it), when it was made, and a status: *Recording*, *In review* (the take that is open), *Kept*, *Not kept*, or *Not saved* (the original could not be written yet). Hover over a take to see its length, when and from where it was made, and the start of its transcript. See [Naming and finding takes](#naming-and-finding-takes). |
 | **Middle** | The editor: tools, the waveform, a spectrogram, an overview strip, and a line with In, Out, Length, Playhead and Zoom. While recording it shows the live waveform and a take-length guide instead. |
 | **Right** | Three tabs, **Clip**, **Process** and **Check**, and under them the **Ready to keep?** card with Keep, Re-record, Discard and Open folder. |
 | **Bottom** | A status line, and the state of the optional extras (FFmpeg and draft transcripts). |
@@ -68,6 +69,15 @@ The moment you stop, the original recording is written to the speaker's `masters
 do afterwards can change that file, and closing the program never loses a take. If the device disappears while
 recording, what was captured so far is kept and the take is marked *interrupted*.
 
+Your work on a take that is not kept yet is saved too. A moment after each change, your cuts, the Process settings and
+the text you typed (the transcript, label, origin, allowed use and notes) are written to an `.autosave.json` file in the
+same `masters` folder, so a crash, a power cut or closing the window does not lose them: when you start the program again
+the take is there with its edits and its text, and the status line says so. What does not come back is the undo history,
+and the permission box, which is never remembered and is ticked again when you keep the clip. Keep deletes the autosave
+file, because the sidecar holds the work from then on. If it cannot be written (a full disk, say), the status line says so,
+and the window warns you once when you close it. A kept clip that you change again is saved when you press Keep again; only
+its label is saved at once.
+
 Use **Re-record** to throw a take away (it goes to the Recycle Bin) and start another straight away.
 
 ## Script mode
@@ -94,6 +104,21 @@ a recording. Only import audio you have the right to use.
 A speaker is a person whose voice you are recording, and has their own folder. Add one with the **+** next to the
 speaker list, or `Ctrl+N`. After the first Keep for a speaker, the origin and allowed-use texts are remembered and
 filled in for their next takes. Your confirmation of permission is never remembered: it is asked for every clip.
+
+To change the name a speaker is shown under, choose **Rename speaker...** in the gear menu, or right-click the speaker
+list. Only the name changes: the speaker's folder keeps its old name, so no clip moves and nothing already kept is
+touched. Two speakers cannot have the same name.
+
+## Naming and finding takes
+
+Takes are numbered *Take 1*, *Take 2* and so on from the oldest. To give one a name you can find it by, type it in the
+field at the top of the **Clip** tab, press `F2`, or right-click the take and choose **Rename**. The label (one line, up to
+80 characters) replaces the number in the list. It is saved with the take: in its autosave file until the clip is kept,
+and then in the sidecar. Changing the label of a kept clip is saved at once, without pressing Keep.
+
+The box above the list filters the current speaker's takes. Type some words, and only the takes whose label, transcript or
+notes contain all of them are shown, in any order and whatever the capitals; the counter beside **Takes** says how many of
+how many. The numbers do not change while a filter is on. Clear the box to see every take again.
 
 ## Editing
 
@@ -216,15 +241,15 @@ The **Ready to keep?** card lists what is still needed, with a count of the prob
 - the transcript still matches the words after any cuts.
 
 Press **Keep clip** (`Ctrl+S`). If something is missing, a message lists it and nothing is written. Otherwise Voice
-Recorder writes the 24 kHz mono WAV and the sidecar JSON next to the original, and the take shows *Kept*. Keeping a kept
-clip again rewrites only that clip's own two files.
+Slate writes the 24 kHz mono WAV and the sidecar JSON next to the original, deletes the take's autosave file, and the
+take shows *Kept*. Keeping a kept clip again rewrites only that clip's own two files.
 
 The sidecar also records how the transcript came about (typed, read from a script, a draft from the recognizer, or
-edited), and every edit and setting used. See [Clip format](clip-format.md).
+edited), the label if the take has one, and every edit and setting used. See [Clip format](clip-format.md).
 
-**Discard** moves the take's three files to the Recycle Bin, after asking, so you can restore them from there. If the
-Recycle Bin cannot take them (a network folder, say), the program says so and offers to delete them permanently
-instead; it never does that without asking.
+**Discard** moves the take's files (the original, the export and the sidecar, and the autosave file if there is one) to
+the Recycle Bin, after asking, so you can restore them from there. If the Recycle Bin cannot take them (a network folder,
+say), the program says so and offers to delete them permanently instead; it never does that without asking.
 
 ## Settings
 
@@ -314,6 +339,14 @@ stay where they are.
 **It says a take is "Not saved".** The original could not be written (a full disk, or a locked folder). The take is held
 in memory; fix the problem and press Keep, or close the window and read the message, which tells you if anything is
 still unwritten. The window refuses to close while audio exists only in memory.
+
+**The status line says it could not use the saved changes of a take.** The take's autosave file (`.autosave.json`, in
+`masters`) is damaged, or belongs to a different recording. The take shows as it was recorded, and the file is left where
+it is; the next change you make to the take writes a new one. To get rid of it, delete the file.
+
+**It says it could not save your changes to a take.** The autosave file could not be written (a full disk, or a locked
+folder). Your changes are still in the window, and are tried again every few seconds. Fix the problem; if you close the
+window first, it warns you once.
 
 If it is something else, please [open an issue](../CONTRIBUTING.md#reporting-a-problem) with the steps to reproduce it.
 Do not attach recordings of other people.

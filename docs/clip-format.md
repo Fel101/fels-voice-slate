@@ -11,6 +11,7 @@ voice-clips\                                    the output folder: beside the pr
   my-voice\                                     one folder per speaker
     masters\
       20261020-161204_mic_3f9a1c2e.raw.wav      the original recording
+      20261020-161204_mic_3f9a1c2e.autosave.json  work in progress on a take that is not kept yet (temporary)
     20261020-161204_mic_3f9a1c2e.wav            the kept clip
     20261020-161204_mic_3f9a1c2e.json           the sidecar for the kept clip
 ```
@@ -24,6 +25,7 @@ nothing is overwritten.
 | `masters\*.raw.wav` | The original recording, written the moment recording stops (or a file is imported). **24-bit PCM at the device's own sample rate**, one or two channels. It is never modified. A master with no sidecar next to it is a take that has not been kept yet. |
 | `*.wav` | The **kept clip**: edited, processed and resampled to **24 kHz, mono, 16-bit PCM**. This is the file to hand to other tools. |
 | `*.json` | The **sidecar**, described below. |
+| `masters\*.autosave.json` | **Temporary, and not part of the format.** The cuts, processing settings and text of a take that is not kept yet, saved so that a crash or a close loses nothing. Voice Slate deletes it when the clip is kept, and it never holds the permission tick. It sits in `masters`, not beside the sidecars, and its `schema` is not `voice-recorder-clip-*`, so a program that reads the clips as described [below](#reading-the-clips-from-another-program) never meets it. |
 | `speakers.json` | `{ "my-voice": { "name": "My voice", "origin": "...", "allowed_use": "..." } }`. The origin and allowed use remembered for each speaker. The key is the folder name. |
 
 ## The sidecar
@@ -70,7 +72,8 @@ A UTF-8 JSON object. An example, written compactly (the program writes it with o
   },
   "needs_transcript_review": false,
   "notes": "",
-  "flags": ["edited", "filtered", "level_changed", "limited"]
+  "flags": ["edited", "filtered", "level_changed", "limited"],
+  "label": "Welcome back, take two"
 }
 ```
 
@@ -99,6 +102,7 @@ A UTF-8 JSON object. An example, written compactly (the program writes it with o
 | `needs_transcript_review` | Always `false` in a kept clip: Keep requires the transcript to be confirmed after cuts. |
 | `notes` | Free text. |
 | `flags` | Facts about the take: `edited`, `filtered` (high-pass or hum notch on), `cleaned` (noise reduction on), `level_changed`, `limited` (limiter on), `clipped`, `interrupted` (the device stopped while recording). |
+| `label` | Optional. A name the person gave the take to find it by: one line, at most 80 characters. The field is absent when the take has no label. It can change after the clip was kept (renaming a kept take rewrites only this field of the sidecar), and the WAV never changes with it, so the SHA-256 in `export` still holds. |
 
 ### Edits
 

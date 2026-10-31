@@ -26,10 +26,14 @@ program does read and write files, and it starts other programs, so these are th
 - **Files it opens.** Audio files you import are read by the SoundFile library (libsndfile). Sidecar JSON and
   `speakers.json` files in the output folder are read and checked: a sidecar that names a file outside its own folder, and
   a speaker list whose entries are not plain folder names, are refused, because a clip folder can come from someone else.
-  Keep, which writes files, and Discard, which removes them, act only inside the speaker's folder.
+  An autosave file (the saved work on a take that is not kept yet) is read the same way: it is used only if it fits the
+  original recording it sits beside, and its edits and settings pass the checks a sidecar's do. Keep, which writes files,
+  and Discard, which removes them, act only inside the speaker's folder.
 - **Programs it runs.** Noise reduction runs `ffmpeg.exe`, and draft transcripts run a `python.exe` with a worker script
   (`recorder/asr_worker.py`, started in isolated mode with a local model folder). Their locations come from your
-  `settings.json`, or are found on `PATH`. **Treat `settings.json` as trusted**, like any configuration that names a
+  `settings.json`, or are found on `PATH`. FFmpeg is looked for only in folders that `PATH` names in full, never in the
+  current folder, where Windows' own search would look first, so an `ffmpeg.exe` left in whatever folder the program was
+  started from is not run. **Treat `settings.json` as trusted**, like any configuration that names a
   program: anyone who can change it can make the recorder run a program of their choosing. It is not meant to be taken from
   strangers.
 - **What it stores.** Recordings and sidecars are personal data. They are written where you choose, and are not encrypted

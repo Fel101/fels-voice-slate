@@ -51,8 +51,11 @@ SPEC = {
     'keep': ('Keep clip', None, ['Ctrl+S'], 'Write the 24 kHz WAV and its sidecar', False),
     'discard': ('Discard take...', 'trash', [], 'Move this take to the Recycle Bin', False),
     'rerecord': ('Re-record', None, [], 'Move this take to the Recycle Bin and record again', False),
+    'rename': ('Rename take', None, ['F2'], 'Give this take a label to find it by', False),
     'import_recording': ('Import recording...', 'import', ['Ctrl+O'], 'Copy a recording in as a new take', False),
     'new_speaker': ('New speaker...', 'plus', ['Ctrl+N'], 'Add a speaker', False),
+    'rename_speaker': ('Rename speaker...', None, [], 'Change the name this speaker is shown under. Their folder and clips '
+                                                       'are not touched', False),
     'refresh_devices': ('Refresh devices', None, [], 'Look for microphones and outputs again', False),
     'open_folder': ('Open output folder', 'folder', ['Ctrl+Shift+O'], 'Show the output folder in Explorer', False),
     'load_script': ('Load script...', None, ['Ctrl+Shift+L'], 'Read prompts from a text file, one line per take', False),

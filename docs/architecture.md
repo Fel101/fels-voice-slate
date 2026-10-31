@@ -10,7 +10,7 @@ recorder/
   ui/            the PySide6 window: draws what the session says changed, and forwards what the person does
   session/       the controller. No toolkit. Session.tick() drives it, and a Bus tells the window what changed
   core/          pure functions on arrays and recipes: edits, chain, render, analysis, autofix
-  store.py       the files: speakers, originals, kept clips and their sidecars
+  store.py       the files: speakers, originals, kept clips and their sidecars, and the autosave files of takes not kept yet
   audio_core.py  small pure helpers, and the rules for what can be kept
   capture.py     microphone (sounddevice) and system audio (PyAudioWPatch), behind one interface
   audio_io.py    playback through a sounddevice output stream
@@ -76,7 +76,8 @@ made for (a result for an older recipe is dropped), follows the clip as it is ed
 
 - **Device threads.** The microphone and loopback callbacks copy audio into buffers and nothing else.
 - **The main thread** runs `Session.tick()` about twenty times a second from a `QTimer`. `tick()` reads the meter, notices
-  a device that has stalled, ends a recording when its stop tail is over, moves the playhead, and delivers finished jobs.
+  a device that has stalled, ends a recording when its stop tail is over, moves the playhead, writes the autosave files
+  that are due, and delivers finished jobs.
 - **Worker threads** (`jobs.py`) do the slow work: measuring, rendering for playback, FFmpeg, and the speech recognizer. A
   job's result waits in a queue until `tick()` hands it to the main thread, so no code outside `jobs.py` needs a lock.
   Jobs are given a frozen copy of the recipe, so edits made while they run cannot change what they render.
@@ -108,11 +109,21 @@ takes the key from the machine it runs on.
 - Discard goes through `send2trash`, so it is recoverable. If the Recycle Bin is not available the person is asked
   before anything is deleted for good.
 - Each export's SHA-256 goes in its sidecar.
+- The work on a take that is not kept yet (its recipe, its text and its label) is saved to `masters/<name>.autosave.json`.
+  `session/autosave.py` marks a take when the bus says `edits` changed, or `meta` with that take as its payload, writes it
+  once the take has been still for a second (or after five seconds of steady change, such as typing), and writes everything
+  waiting when another take is opened and when the session closes. `Library.autosave` writes the file and
+  `Library.load_unkept` reads it back, checking it against the original it sits beside (name, sample rate and length) and
+  its recipe by the same rules as a sidecar's (`Library._recipe_from`). A file that fails is left alone, and the take loads
+  as it was recorded, with the reason in `take.autosave_problem`. The permission tick is never in it, as it is never
+  remembered. Keep deletes it, and Discard sends it to the Recycle Bin with the other files. A failed write is reported
+  once and tried again; closing with a write still failing refuses once, and then lets go, so a broken folder cannot trap
+  the window. A kept take has no autosave file: only a changed label is written, into its sidecar.
 
 ## The window
 
-- **`session/bus.py`** carries topics (`takes`, `current`, `edits`, `selection`, `playhead`, `recording`, `analysis` and
-  so on). The window marks the parts that heard a topic and redraws them once per event-loop turn (`MainWindow.flush`).
+- **`session/bus.py`** carries topics (`takes`, `current`, `meta` (with the take whose text changed, when that is worth
+  saving), `edits`, `selection`, `playhead`, `recording`, `analysis` and so on). The window marks the parts that heard a topic and redraws them once per event-loop turn (`MainWindow.flush`).
 - **`ui/actions.py`** defines every command once (`SPEC`: name, icon, shortcuts, tooltip). Toolbar buttons, menus and
   shortcuts all use the same `QAction`, so a command is enabled, disabled and described in one place.
 - **`ui/dialogs.py`** is the only place that opens a modal dialog or a context menu, behind a small `Dialogs` class that

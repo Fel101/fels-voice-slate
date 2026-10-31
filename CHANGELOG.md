@@ -5,6 +5,42 @@ the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **Labels.** Give a take a name in the new field at the top of the Clip tab, with `F2`, or from the take's right-click
+  menu. The label shows in the list in place of the take's number, and is saved in the sidecar as an optional `label`
+  field (a take with no label has no such field). Changing the label of a kept clip is saved at once, without Keep.
+- **Rename speaker...** in the gear menu, and on the right-click menu of the speaker list, changes the name a speaker is
+  shown under. Their folder keeps its name, so no clip moves and nothing already kept is touched.
+- **A filter box above the list of takes** shows only the takes whose label, transcript or notes contain all the words
+  typed, whatever the capitals. The take numbers do not change while it is on.
+
+### Changed
+
+- The README and the user guide said that edits were "kept beside" the original. That was true only after Keep; it is now
+  true of every take, by the autosave file described below.
+- The message that appears when the window will not close because something could not be saved now says "everything",
+  not "every recording", since it can be the edits of a take as well as its audio.
+
+### Fixed
+
+- **The edits and typed text of a take that was not kept were lost on a crash or a close.** The original recording was
+  safe, but the cuts, the Process settings and the transcript, origin, allowed use and notes lived only in memory until
+  Keep, so the take came back as it was recorded. They are now written to an `.autosave.json` file beside the original a
+  moment after each change, when another take is opened and when the program closes, and come back when it starts again
+  (the status line says so). The permission box is never saved, and neither is the undo history. Keep deletes the file,
+  and Discard sends it to the Recycle Bin with the rest. If it cannot be written, the status line says so, and closing
+  the window warns once. The file is not part of the clip format, and no program that reads the clips as described there
+  sees it.
+
+### Security
+
+- Noise reduction no longer runs an `ffmpeg.exe` found in the current folder. On Windows the standard search of `PATH`
+  looks in the current folder first, so a file of that name in whatever folder the program was started from would have run
+  in place of the real one. (The icon and `run.bat` start the program in its own folder, so this took a file planted
+  there, or a start from another folder by hand.) FFmpeg is now looked for only in folders that `PATH` names in full,
+  after the path in Settings, and then in WinGet's folders, as before.
+
 ## [0.3.0] - 2026-10-29
 
 ### Added

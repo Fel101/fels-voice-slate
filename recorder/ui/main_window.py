@@ -123,7 +123,8 @@ class MainWindow(QMainWindow):
 
     def _build_menu(self):
         a, menu = self.actions, self.topbar.menu
-        for name in ('settings', 'import_recording', 'new_speaker', 'load_script', 'clear_script', 'open_folder'):
+        for name in ('settings', 'import_recording', 'new_speaker', 'rename_speaker', 'load_script', 'clear_script',
+                     'open_folder'):
             menu.addAction(a[name])
         menu.addSeparator()
         menu.addAction(a.refresh_devices)
@@ -169,8 +170,10 @@ class MainWindow(QMainWindow):
         a.keep.triggered.connect(self.keep)
         a.discard.triggered.connect(self.discard)
         a.rerecord.triggered.connect(self.rerecord)
+        a.rename.triggered.connect(self.rename_take)
         a.import_recording.triggered.connect(self.import_recording)
         a.new_speaker.triggered.connect(self.new_speaker)
+        a.rename_speaker.triggered.connect(self.rename_speaker)
         a.open_folder.triggered.connect(self.open_folder)
         a.refresh_devices.triggered.connect(capturing.refresh_devices)
         a.load_script.triggered.connect(self.load_script)
@@ -186,6 +189,7 @@ class MainWindow(QMainWindow):
         self.topbar.deviceChanged.connect(capturing.select_device)
         self.library.speakerPicked.connect(workspace.select_speaker)
         self.library.newSpeakerRequested.connect(self.new_speaker)
+        self.library.speakerContext.connect(self._speaker_menu)
         self.library.takePicked.connect(self._take_picked)
         self.library.takeContext.connect(self._take_menu)
         self.library.importRequested.connect(self.import_recording)
@@ -365,8 +369,9 @@ class MainWindow(QMainWindow):
             'select_all': has_take, 'set_in': has_take, 'set_out': has_take, 'check_joins': has_take and bool(history.cuts),
             'play': has_take, 'stop': has_take and s.transport.active, 'loop': has_take, 'ab': has_take,
             'zoom_in': has_take, 'zoom_out': has_take, 'fit': has_take,
-            'keep': has_take, 'discard': has_take, 'rerecord': has_take,
+            'keep': has_take, 'discard': has_take, 'rerecord': has_take, 'rename': has_take,
             'import_recording': idle, 'new_speaker': idle, 'settings': idle, 'arm': idle,
+            'rename_speaker': idle and s.workspace.speaker is not None,
             'prev_line': bool(s.script.lines) and s.script.index > 0,
             'next_line': bool(s.script.lines) and s.script.index < len(s.script.lines) - 1,
             'clear_script': bool(s.script.lines),
@@ -531,6 +536,11 @@ class MainWindow(QMainWindow):
                 'Re-record?', 'This take moves to the Recycle Bin and a new recording starts straight away.'):
             self.session.capturing.start()
 
+    def rename_take(self):
+        """Put the cursor in the Label field of the take in front, so it can be given a name."""
+        if self.session.current is not None and not self.session.capturing.recording:
+            self.inspector.focus_label()
+
     def import_recording(self):
         path = self.dialogs.choose_file('Import a recording', self.session.lib.root)
         if path:
@@ -543,6 +553,19 @@ class MainWindow(QMainWindow):
                 self.session.workspace.add_speaker(name)
             except ValueError as e:
                 self.dialogs.notice('warning', 'New speaker', str(e))
+
+    def rename_speaker(self):
+        workspace = self.session.workspace
+        slug = workspace.speaker
+        if not slug:
+            return
+        old = workspace.name_of(slug)
+        name = self.dialogs.ask_text('Rename speaker', 'The name to show this voice under:', old)
+        if name and name != old:
+            try:
+                workspace.rename_speaker(slug, name)
+            except ValueError as e:
+                self.dialogs.notice('warning', 'Rename speaker', str(e))
 
     def open_folder(self):
         s = self.session
@@ -642,6 +665,7 @@ class MainWindow(QMainWindow):
     def build_take_menu(self, take):
         menu = QMenu(self)
         menu.addAction('Open', lambda: self._take_picked(take))
+        menu.addAction('Rename', lambda: (self._take_picked(take), self.rename_take()))
         copy = menu.addAction('Copy file path', lambda: QApplication.clipboard().setText(str(take.export_path or take.master_path)))
         copy.setEnabled((take.export_path or take.master_path) is not None)
         menu.addSeparator()
@@ -651,6 +675,15 @@ class MainWindow(QMainWindow):
     def _take_menu(self, take, pos):
         if not self.session.capturing.recording:
             self.dialogs.popup(self.build_take_menu(take), pos)
+
+    def build_speaker_menu(self):
+        menu = QMenu(self)
+        menu.addAction(self.actions.rename_speaker)
+        menu.addAction(self.actions.new_speaker)
+        return menu
+
+    def _speaker_menu(self, pos):
+        self.dialogs.popup(self.build_speaker_menu(), pos)
 
     # ---- dropping files ----------------------------------------------------------------------------------------------
 
@@ -688,8 +721,8 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         failures = self.session.close()
         if failures:
-            self.dialogs.notice('error', 'Could not save every recording',
-                                '\n'.join(failures) + '\n\nThe window stays open so the audio is not lost. Free up space or '
+            self.dialogs.notice('error', 'Could not save everything',
+                                '\n'.join(failures) + '\n\nThe window stays open so nothing is lost. Free up space or '
                                 'fix the folder, then close again.')
             event.ignore()
             return

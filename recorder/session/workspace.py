@@ -17,7 +17,7 @@ Step = namedtuple('Step', 'key label done detail')           # a rule that must 
 Advice = namedtuple('Advice', 'key text')                     # something worth knowing that does not block Keep
 Readiness = namedtuple('Readiness', 'steps ready advice')
 
-META_FIELDS = ('transcript', 'origin', 'allowed_use', 'source_url', 'consent_confirmed', 'notes')
+META_FIELDS = ('transcript', 'origin', 'allowed_use', 'source_url', 'consent_confirmed', 'notes', 'label')
 
 
 class Workspace:
@@ -66,6 +66,11 @@ class Workspace:
         self.refresh_speakers(select=slug)
         self._speaker_changed()
         return slug
+
+    def rename_speaker(self, slug, name):
+        """Show a speaker under another name. Their folder and their clips are not touched. Raises ValueError."""
+        self.lib.rename_speaker(slug, name)
+        self.refresh_speakers(select=self.speaker)
 
     def ensure_speaker(self):
         return self.add_speaker('My voice')
@@ -116,9 +121,19 @@ class Workspace:
         extra = [t for t in self.lib.load_takes(slug) if self._identity(t) not in known]
         self.takes = sorted(in_memory + extra, key=lambda t: t.created, reverse=True)
         self._remember_takes()
+        notes = []
         if self.lib.skipped:
             detail = '; '.join(f'{name}: {reason}' for name, reason in self.lib.skipped)
-            self.bus.status(f'{len(self.lib.skipped)} saved clip(s) not loaded. Their files were not changed. {detail}')
+            notes.append(f'{len(self.lib.skipped)} saved clip(s) not loaded. Their files were not changed. {detail}')
+        unusable = [t.autosave_problem for t in extra if t.autosave_problem]
+        if unusable:
+            notes.append(f'The saved changes of {len(unusable)} take(s) could not be used, so they show as recorded. '
+                         f'The files were not changed. {"; ".join(unusable)}')
+        restored = sum(1 for t in extra if t.restored)
+        if restored:
+            notes.append(f'Picked up your saved edits and text on {restored} take{"s" if restored != 1 else ""}.')
+        if notes:
+            self.bus.status(' '.join(notes))
 
     def add_take(self, samples, rate, source, device, flags=(), script_line=None):
         """A finished capture becomes a take: its original goes to the masters folder, then it is listed and opened."""
@@ -190,13 +205,13 @@ class Workspace:
                 take.meta[key] = value
                 changed = True
         if changed:
-            self.bus.notify('meta')
+            self.bus.notify('meta', take)
 
     def confirm_transcript(self):
         take = self.current
         if take is not None and take.needs_transcript_review:
             take.needs_transcript_review = False
-            self.bus.notify('meta')
+            self.bus.notify('meta', take)
 
     def readiness(self, derived=None):
         """The live "Ready to keep?" list for the current take. `derived` is its measurement, or None while measuring."""

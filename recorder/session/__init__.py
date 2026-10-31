@@ -9,6 +9,7 @@ without a display, a microphone or a speaker.
 - `editor`: selection, playhead, every edit, the chain settings, undo
 - `transport`: playback, pause, seek, loop, A/B
 - `drafts`: transcript drafts from the optional speech recognizer
+- `autosave`: the work on takes that are not kept yet, saved beside their originals as it happens
 - `measure`: background measurements, the spectrogram and the peaks for drawing
 - `advisor`: Auto analyze (what could be better, in plain words) and Auto fix (one undo step)
 - `script`: script mode
@@ -19,6 +20,7 @@ from .. import clean, settings
 from ..jobs import Jobs
 from ..store import Library
 from .advisor import Advisor
+from .autosave import Autosave
 from .bus import Bus
 from .capturing import Capturing
 from .drafts import Drafts
@@ -44,12 +46,14 @@ class Session:
         self.editor = Editor(self.bus, self.workspace)
         self.transport = Transport(self.bus, self.workspace, self.editor, player, clock)
         self.drafts = Drafts(self.bus, self.workspace, self.jobs, self.settings_file, clock)
+        self.autosave = Autosave(self.bus, self.workspace, clock)
         self.measure = Measurements(self.bus, self.workspace, self.jobs)
         self.advisor = Advisor(self.bus, self.workspace, self.editor, self.jobs)
         self.workspace.on_take_added = lambda take: self.drafts.request(take, automatic=True)
         self.bus.listen(self._heard)
         self.closed = False
         self._closing = False
+        self._autosave_warned = False
         self.workspace.refresh_speakers()
         self.capturing.refresh_devices()
         self.workspace._speaker_changed()
@@ -81,7 +85,7 @@ class Session:
         except Exception as e:                  # a meter or device error must not lose the take; see capture_failed
             self.capturing.capture_failed(e)
         for name, step in (('Playback', self.transport.tick), ('Draft transcript', self.drafts.tick),
-                           ('Background task', self.jobs.drain)):
+                           ('Autosave', self.autosave.tick), ('Background task', self.jobs.drain)):
             try:
                 step()
             except Exception as e:              # these touch only the display; a failure must not touch the recording
@@ -123,6 +127,11 @@ class Session:
             if failures:
                 self.bus.status('Could not save all originals. The window remains open and the audio is still in memory.')
                 return failures
+            lost = self.autosave.flush()
+            if lost and not self._autosave_warned:
+                self._autosave_warned = True        # the next close leaves anyway, so a folder that stays broken cannot trap it
+                self.bus.status('Could not save your latest changes. Close again to leave without them.')
+                return lost
             self.closed = True
             self.jobs.close()
             return []

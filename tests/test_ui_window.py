@@ -490,10 +490,10 @@ def test_the_take_menu_opens_copies_and_discards(window, session, dialogs, qapp)
     second = record(session, 10.0)
     window.flush()
     menu = window.build_take_menu(first)
-    assert [a.text() for a in menu.actions() if a.text()] == ['Open', 'Copy file path', 'Discard...']
+    assert [a.text() for a in menu.actions() if a.text()] == ['Open', 'Rename', 'Copy file path', 'Discard...']
     menu.actions()[0].trigger()
     assert session.current is first
-    menu.actions()[1].trigger()
+    next(a for a in menu.actions() if a.text() == 'Copy file path').trigger()
     assert qapp.clipboard().text() == str(first.master_path)
     next(a for a in menu.actions() if a.text() == 'Discard...').trigger()
     assert session.workspace.takes == [second]

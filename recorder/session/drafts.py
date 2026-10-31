@@ -106,7 +106,7 @@ class Drafts:
                             + (' A repeated ending was removed.' if tidied else ''))
         else:
             self.bus.status('Draft ready. Your typed transcript was kept; use Suggest from audio to replace it.')
-        self.bus.notify('meta')
+        self.bus.notify('meta', take)           # the take whose text changed, which may not be the one in front
         return True
 
     # ---- following the edits ------------------------------------------------------------------------------------------

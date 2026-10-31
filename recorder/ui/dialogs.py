@@ -266,7 +266,7 @@ SHORTCUT_GROUPS = (
     ('Edit', ('undo', 'redo', 'cut', 'trim', 'silence', 'select_all', 'set_in', 'set_out')),
     ('Check and repair', ('auto_analyze', 'auto_fix')),
     ('View', ('zoom_in', 'zoom_out', 'fit', 'zoom_selection')),
-    ('Clips and files', ('keep', 'import_recording', 'new_speaker', 'open_folder', 'load_script', 'prev_line',
+    ('Clips and files', ('keep', 'rename', 'import_recording', 'new_speaker', 'open_folder', 'load_script', 'prev_line',
                          'next_line')),
     ('Program', ('settings', 'shortcuts', 'quit')),
 )
