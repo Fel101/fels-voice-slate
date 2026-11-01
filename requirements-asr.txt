@@ -1,6 +1,7 @@
 # What the optional draft-transcript setup installs, into an environment of its own (.venv-asr), so the program's own
 # environment stays small. setup-transcripts.bat does this for you, after asking. These are the versions it was built
-# and tested with (Python 3.12 and 3.13 on Windows 11); every one has a wheel for Python 3.12 to 3.14.
+# and tested with (Python 3.12 to 3.14 on Windows 11); every one has a wheel for Python 3.12 to 3.14. ctranslate2 4.8.0 and
+# onnxruntime have none for 3.15. When they do, add it to PYTHONS in recorder/asr_setup.py.
 #
 #     python -m recorder --setup-transcripts
 #

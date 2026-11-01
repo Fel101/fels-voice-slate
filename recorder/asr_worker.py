@@ -60,13 +60,14 @@ def main(argv=None):
         sys.stderr.write(f'The silence filter is unavailable ({e}); transcribing without it.\n')
         text, info = transcribe(model, args.audio, language, filtered=False)
         filtered = False
+    # Plain ASCII, with every other letter as an escape: a pipe on Windows uses the code page, which most languages do not fit.
     json.dump({
         'text': text,
         'language': info.language,
         'language_probability': round(float(info.language_probability), 3),
         'duration_seconds': round(float(info.duration), 3),
         'silence_filter': filtered,
-    }, sys.stdout, ensure_ascii=False)
+    }, sys.stdout)
     sys.stdout.write('\n')
     return 0
 

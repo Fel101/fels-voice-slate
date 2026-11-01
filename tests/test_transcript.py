@@ -108,6 +108,43 @@ def test_a_failing_worker_is_reported_in_words(recognizer, monkeypatch, outcome,
         transcript.suggest(np.zeros(24000, np.float32), python, model)
 
 
+@pytest.mark.parametrize('said', ['Déjà vu, il a été très café.', 'It’s £5 at the café…', 'Zażółć gęślą jaźń.',
+                                  'Привет, мир.', 'こんにちは世界。', 'مرحبا بالعالم'])
+def test_a_draft_in_any_language_comes_through_a_real_pipe(tmp_path, recognizer, monkeypatch, said):
+    """The real worker in a real process, with only the recognizer stood in for. On Windows a pipe uses the code page."""
+    worker = tmp_path / 'worker.py'
+    worker.write_text(f'''
+import runpy, sys, types
+
+sys.stdout.reconfigure(encoding='cp1252')           # what a pipe has here, and it must not depend on the test's computer
+
+
+class Model:
+    def __init__(self, path, **kwargs):
+        pass
+
+    def transcribe(self, audio, **kwargs):
+        return [types.SimpleNamespace(text={said!r})], types.SimpleNamespace(language='xx', language_probability=1.0,
+                                                                             duration=1.0)
+
+
+sys.modules['faster_whisper'] = types.SimpleNamespace(WhisperModel=Model)
+runpy.run_path({asr_worker.__file__!r}, run_name='__main__')
+''', encoding='utf-8')
+    monkeypatch.setattr(transcript, 'WORKER', worker)
+    assert transcript.suggest(np.zeros(24000, np.float32), sys.executable, recognizer[1])['text'] == said
+
+
+def test_a_message_in_the_code_page_still_reaches_the_person(tmp_path, recognizer, monkeypatch):
+    """Windows and Python write their own errors in the code page, so a letter of one is not UTF-8."""
+    worker = tmp_path / 'worker.py'
+    worker.write_text("import sys\nsys.stderr.buffer.write(b'Das Modul f\\xfcr ctranslate2 fehlt\\n')\nsys.exit(1)\n",
+                      encoding='utf-8')
+    monkeypatch.setattr(transcript, 'WORKER', worker)
+    with pytest.raises(transcript.DraftUnavailable, match='ctranslate2 fehlt'):
+        transcript.suggest(np.zeros(24000, np.float32), sys.executable, recognizer[1])
+
+
 def test_a_timeout_or_a_missing_interpreter_is_reported_in_words(recognizer, monkeypatch):
     python, model = recognizer
 

@@ -10,8 +10,8 @@ recorder/
   ui/            the PySide6 window: draws what the session says changed, and forwards what the person does
   session/       the controller. No toolkit. Session.tick() drives it, and a Bus tells the window what changed
   core/          pure functions on arrays and recipes: edits, chain, render, analysis, autofix
-  store.py       the files: speakers, originals, kept clips and their sidecars, the autosave files of takes not kept yet,
-                 and moving a take to another speaker
+  store.py       the files: speakers, originals, kept clips and their sidecars, the spool files of takes being recorded,
+                 the autosave files of takes not kept yet, and moving a take to another speaker
   share.py       a copy of a kept clip as WAV, FLAC, MP3 or Ogg at another sample rate (SoundFile's libsndfile, no FFmpeg)
   manifest.py    a list of the kept clips, as JSON Lines or CSV, for programs that read a whole set
   audio_core.py  small pure helpers, and the rules for what can be kept
@@ -21,7 +21,9 @@ recorder/
   transcript.py  draft transcripts by running a faster-whisper of the user's (asr_worker.py does the work)
   asr_setup.py   setup-transcripts.bat: installs that faster-whisper (.venv-asr, requirements-asr.txt) and a model
                  (models/) when the person runs it and agrees, then fills in the settings. The one code path that goes
-                 online, and the program never calls it by itself
+                 online, and the program never calls it by itself. It can use another Python than the program's, because
+                 the recognizer's packages are built for fewer versions (PYTHONS). It only ever lists what the Python
+                 launcher has: told to run a version it lacks, the launcher can download that version
   jobs.py        a small pool of worker threads
   settings.py    settings.json, and where the clips go by default
   __main__.py    starting up: --check, --shortcut, --setup-transcripts, and the window
@@ -61,8 +63,9 @@ end of the clip gets through.
 
 Playback, the Check tab, the transcript draft and Keep all use this one pipeline, so **what you hear and measure is what
 Keep writes**. Clipping is the one thing the finished clip cannot show, because gain and the limiter hide it, so
-`render.recorded_clipping` measures it on the original, on the loudest channel and leaving out what was cut or silenced. `core/analysis.py` holds the measurements (peak pyramid for drawing, spectrogram, loudness, noise floor,
-hum, bandwidth, silence) and `quality_report()` which builds the Check tab's rows.
+`render.recorded_clipping` measures it on the original, on the loudest channel and leaving out what was cut or silenced.
+`core/analysis.py` holds the measurements (peak pyramid for drawing, spectrogram, loudness, noise floor, hum, bandwidth,
+silence) and `quality_report()` which builds the Check tab's rows.
 
 ## Auto analyze and Auto fix
 
@@ -100,8 +103,8 @@ been used for. It writes `voice-slate.log` (and, if a native library crashes, `v
 settings file, replaces the missing `stdout` and `stderr` with the log, and shows an error window for a failure that
 would otherwise be silent. An error that nothing caught, on any thread, is logged and then passed to the window through its
 `unexpected` signal, so it is shown rather than lost; the window shows each message once, because a fault in something that
-repeats would otherwise open a dialog twenty times a second. A named mutex allows one copy at a time: a second start brings the first window forward and
-exits. `shortcut.py` makes the `.lnk` through Windows' own COM interfaces with `ctypes` and gives it the same
+repeats would otherwise open a dialog twenty times a second. A named mutex allows one copy at a time: a second start brings
+the first window forward and exits. `shortcut.py` makes the `.lnk` through Windows' own COM interfaces with `ctypes` and gives it the same
 application id as the running program, so the taskbar groups the window with the icon it was started from. Neither module
 imports Qt, and `python -m recorder --check` reports what is installed without opening a window.
 
@@ -175,7 +178,8 @@ None of these changes a kept clip, and none goes online.
 ## The window
 
 - **`session/bus.py`** carries topics (`takes`, `current`, `meta` (with the take whose text changed, when that is worth
-  saving), `edits`, `selection`, `playhead`, `recording`, `analysis` and so on). The window marks the parts that heard a topic and redraws them once per event-loop turn (`MainWindow.flush`).
+  saving), `edits`, `selection`, `playhead`, `recording`, `analysis` and so on). The window marks the parts that heard a
+  topic and redraws them once per event-loop turn (`MainWindow.flush`).
 - **`ui/actions.py`** defines every command once (`SPEC`: name, icon, shortcuts, tooltip). Toolbar buttons, menus and
   shortcuts all use the same `QAction`, so a command is enabled, disabled and described in one place.
 - **`ui/dialogs.py`** is the only place that opens a modal dialog or a context menu, behind a small `Dialogs` class that

@@ -5,6 +5,8 @@ the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-01
+
 ### Added
 
 - **Labels.** Give a take a name in the new field at the top of the Clip tab, with `F2`, or from the take's right-click
@@ -45,8 +47,8 @@ the project uses [Semantic Versioning](https://semver.org/).
 ### Changed
 
 - **The default noise floor is -45 dB, not -25.** On test speech -25 left the clip further from the clean voice than no
-  cleaning at all, in all three test conditions, while -45 left it closer. Clips that were already kept hold their own
-  setting and do not change. The Process tab now suggests setting it about 5 dB above the clip's noise floor.
+  cleaning at all in five of six test conditions, while -45 left it closer in all six. Clips that were already kept hold
+  their own setting and do not change. The Process tab now suggests setting it about 5 dB above the clip's noise floor.
 - **Auto fix sets noise reduction from the clip's own noise**, about 5 dB above its noise floor, and drops it if it would take
   more than 4 dB from the voice in any band. On a quiet, noisy test take the speech used to gain 12 dB over the noise while the
   consonants lost 9 dB; they now lose under 2 dB, and Auto fix beat no cleaning in all six test conditions.
@@ -61,9 +63,22 @@ the project uses [Semantic Versioning](https://semver.org/).
   true of every take, by the autosave file described below.
 - The message that appears when the window will not close because something could not be saved now says "everything",
   not "every recording", since it can be the edits of a take as well as its audio.
+- The version is 0.4.0 (the previous release was 0.3.0).
 
 ### Fixed
 
+- **A draft transcript failed as soon as it held a letter outside plain English.** The recognizer passed its text back in
+  the Windows code page and the program read it as UTF-8, so *café* ended in an error about `NoneType`, and Polish, Russian
+  or Japanese stopped the recognizer itself. In practice that was nearly every draft in every language but English,
+  although the setup offers them. The text now travels in plain ASCII with the other letters as escapes, and an error
+  message in the code page is no longer lost on the way.
+- **The transcript setup could not work on Python 3.15.** Everything else in the program installs there, but two of the
+  recognizer's packages, ctranslate2 4.8.0 and onnxruntime, have no build for it yet, and the most a person saw was pip's
+  *No matching distribution found*. The setup now looks for a Python 3.12 to 3.14 beside the one it runs on and makes the
+  recognizer's environment with that. If there is none, it says what to install before it asks anything or downloads
+  anything. An environment that a failed attempt left behind is made again, or trying again would have failed the same way.
+- **On a computer without Microsoft's Visual C++ runtime, only the transcript setup failed**, because the window brings its
+  own copy and ctranslate2 and onnxruntime do not. The setup now says so before it downloads anything, and where to get it.
 - **A Keep that could not write looked like a success.** No message appeared, the card said *Kept*, no WAV existed, autosave
   stopped, and later edits were lost at the next start. SoundFile reports a failed write with an error of its own, which
   nothing was catching, and the take was marked kept before anything was written. Both files are now finished before either
@@ -210,7 +225,8 @@ The first public release.
 - The limiter's ceiling also holds for the saved 24 kHz file: resampling can push a peak over it, so the limiter runs
   once more after resampling.
 
-[Unreleased]: ../../compare/v0.3.0...HEAD
+[Unreleased]: ../../compare/v0.4.0...HEAD
+[0.4.0]: ../../compare/v0.3.0...v0.4.0
 [0.3.0]: ../../compare/v0.2.0...v0.3.0
 [0.2.0]: ../../compare/v0.1.0...v0.2.0
 [0.1.0]: ../../releases/tag/v0.1.0

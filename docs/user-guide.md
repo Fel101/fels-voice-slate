@@ -432,6 +432,16 @@ that is too long, the program folder is nested too deeply: move the whole folder
 `C:\VoiceSlate`, delete its `.venv-asr` folder, and run the setup again. To start over, delete the `.venv-asr` and
 `models` folders.
 
+**The transcript setup says it needs Python 3.12 to 3.14** (or an older copy of the program stopped with *No matching
+distribution found for ctranslate2*). The speech recognizer is not built for newer Pythons yet. Voice Slate can stay on the
+Python it has: install Python 3.14 beside it, by typing `py install 3.14` in a terminal or from
+[python.org](https://www.python.org/downloads/), and run `setup-transcripts.bat` again. It finds that Python by itself
+and uses it for the recognizer alone.
+
+**The transcript setup says Microsoft's Visual C++ runtime is missing.** The recognizer needs it, and the rest of the
+program brings its own copy, which is why everything else works. Install the X64 *Visual C++ Redistributable* from
+[Microsoft](https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist) and run `setup-transcripts.bat` again.
+
 **F9 does nothing while another program is in front.** If the status line said "F9 only works while this window is in
 front" when the program started, another program already holds `F9` (a screen recorder, a game overlay, a macro tool).
 Close it or give it another key, then restart Voice Slate. If you turned **Record key** off in Settings, `F9` works only

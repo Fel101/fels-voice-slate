@@ -34,9 +34,10 @@ program does read and write files, and it starts other programs, so these are th
   (`recorder/asr_worker.py`, started in isolated mode with a local model folder). Their locations come from your
   `settings.json`, or are found on `PATH`. FFmpeg is looked for only in folders that `PATH` names in full, never in the
   current folder, where Windows' own search would look first, so an `ffmpeg.exe` left in whatever folder the program was
-  started from is not run. **Treat `settings.json` as trusted**, like any configuration that names a
-  program: anyone who can change it can make the recorder run a program of their choosing. It is not meant to be taken from
-  strangers.
+  started from is not run. `setup-transcripts.bat` also runs the Python launcher (`py`) when the program's own Python is too
+  new for the recognizer, to list the other Pythons and to make the recognizer's environment with one of them. **Treat
+  `settings.json` as trusted**, like any configuration that names a program: anyone who can change it can make the recorder
+  run a program of their choosing. It is not meant to be taken from strangers.
 - **What it writes for you to share.** *Save a copy* and *Export manifest* write one file to a place you choose, under a
   temporary name first and then renamed, so a failure leaves no half-written file; *Save a copy* refuses a place inside the
   output folder, and neither changes a kept clip. A CSV manifest puts an apostrophe in front of a text that a spreadsheet

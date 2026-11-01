@@ -102,8 +102,10 @@ def suggest(export_samples, python, model, language=None):
         if language:
             command += ['--language', str(language)]
         try:
-            reply = subprocess.run(command, capture_output=True, text=True, encoding='utf-8', timeout=TIMEOUT_SECONDS,
-                                   check=False, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+            # Windows' own messages arrive in the code page, and one letter of that must not lose the message.
+            reply = subprocess.run(command, capture_output=True, text=True, encoding='utf-8', errors='replace',
+                                   timeout=TIMEOUT_SECONDS, check=False,
+                                   creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
         except subprocess.TimeoutExpired:
             raise DraftUnavailable('The transcript draft took too long. Type the transcript instead.') from None
         except OSError as e:

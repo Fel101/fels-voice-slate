@@ -52,10 +52,10 @@ is in it and whether you had the right to record it.
 
 ## Install
 
-You need 64-bit **Windows** and **Python 3.12 or newer** ([python.org](https://www.python.org/downloads/)). Choose 3.12 to
-3.14 if you want draft transcripts, because their packages are not built for newer versions yet. It is developed and
-tested on Windows 11; Windows 10 has not been tested. A microphone is needed to record; importing audio files works
-without one.
+You need 64-bit **Windows** and **Python 3.12 or newer** ([python.org](https://www.python.org/downloads/)). Draft
+transcripts need Python 3.12 to 3.14, because their packages are not built for newer versions yet. If you have Python 3.15,
+install 3.14 beside it (`py install 3.14`) and the setup finds it by itself. It is developed and tested on Windows 11;
+Windows 10 has not been tested. A microphone is needed to record; importing audio files works without one.
 
 1. Download this repository (the green **Code** button, then **Download ZIP**, and unzip it) or clone it with Git.
 2. Double-click **`setup.bat`** once. It creates a private Python environment in the `.venv` folder, installs the
@@ -160,6 +160,10 @@ folders stay beside the program, and Git ignores them. The only other traces are
 folder: pip's, and a few small files in Hugging Face's. When the recognizer has run once on a second of silence, the
 setup fills in the matching lines in **Settings** for you. Start Voice Slate again, and the status bar at the bottom
 says "Draft transcripts: ready".
+
+The recognizer needs Python 3.12 to 3.14, which can sit beside a newer Python that runs the program, and Microsoft's Visual
+C++ runtime, which most computers already have. If either is missing, the setup says what to install before it downloads
+anything.
 
 Voice Slate itself never goes online: the setup is the only thing that downloads, only when you run it and agree, and
 it sends nothing about you or your recordings. The worker that makes the drafts refuses anything but a local model
