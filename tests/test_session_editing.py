@@ -209,6 +209,54 @@ def test_a_fade_or_a_gain_change_does_not_ask_for_the_transcript_to_be_checked(s
     assert take.history.edits[2]['gain_db'] == -6.0
 
 
+def test_a_fade_after_the_transcript_was_confirmed_does_not_ask_again(session):
+    take = record(session, 12.0)
+    session.editor.set_selection(5.0, 6.0)
+    session.editor.cut_selection()
+    assert take.needs_transcript_review is True
+    session.workspace.confirm_transcript()
+    session.editor.set_selection(0.0, 1.0)
+    session.editor.fade_selection('in')
+    session.editor.set_selection(2.0, 3.0)
+    session.editor.gain_selection(-6.0)
+    assert take.needs_transcript_review is False
+
+
+def test_a_new_cut_after_the_transcript_was_confirmed_asks_again(session):
+    take = record(session, 12.0)
+    session.editor.set_selection(5.0, 6.0)
+    session.editor.cut_selection()
+    session.workspace.confirm_transcript()
+    session.editor.set_selection(8.0, 9.0)
+    session.editor.silence_selection()
+    assert take.needs_transcript_review is True
+
+
+def test_undoing_back_to_the_cuts_that_were_confirmed_asks_nothing(session):
+    take = record(session, 12.0)
+    session.editor.set_selection(5.0, 6.0)
+    session.editor.cut_selection()
+    session.workspace.confirm_transcript()
+    session.editor.set_selection(8.0, 9.0)
+    session.editor.cut_selection()
+    assert take.needs_transcript_review is True
+    session.editor.undo()
+    assert take.needs_transcript_review is False
+
+
+def test_a_fade_on_a_kept_clip_with_cuts_does_not_ask_either(session, make_session):
+    take = record(session, 12.0)
+    fill(session)
+    session.editor.set_selection(5.0, 6.0)
+    session.editor.cut_selection()
+    session.workspace.confirm_transcript()
+    session.keep()
+    fresh = make_session()
+    fresh.editor.set_selection(0.0, 1.0)
+    fresh.editor.fade_selection('in')
+    assert fresh.current.id == take.id and fresh.current.needs_transcript_review is False
+
+
 def test_a_gain_edit_changes_only_its_region(session):
     take = record(session, 12.0)
     plain = session.lib.export_for(take).copy()

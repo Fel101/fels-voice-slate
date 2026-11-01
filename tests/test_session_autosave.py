@@ -1,6 +1,8 @@
 """Autosave in the session: when the work on a take is written, what a restart brings back, and what is never saved."""
 import json
 
+import pytest
+
 from helpers import fill, record
 from recorder.session import autosave as autosave_mod
 
@@ -166,7 +168,7 @@ def test_a_discarded_take_is_not_written_again(session, clock):
     assert autosave_files(session) == [] and session.autosave.waiting == []
 
 
-def test_keeping_removes_the_autosave_file_and_a_kept_take_is_not_autosaved_again(session, clock):
+def test_keeping_removes_the_autosave_file(session, clock):
     take = record(session, 14.0)
     fill(session)
     cut(session, 0.0, 1.0)
@@ -175,9 +177,147 @@ def test_keeping_removes_the_autosave_file_and_a_kept_take_is_not_autosaved_agai
     assert autosave_files(session) == [session.lib.autosave_file(take)]
     session.keep()
     assert autosave_files(session) == []
-    cut(session, 2.0, 3.0)                                     # a kept take edited again waits for Keep, as before
+    settle(session, clock)
+    assert autosave_files(session) == []                       # the sidecar holds it all, so nothing comes back
+
+
+def kept(session, seconds=14.0):
+    take = record(session, seconds)
+    fill(session)
+    session.keep()
+    return take
+
+
+def test_changes_to_a_kept_clip_come_back_after_a_close(session, make_session, clock):
+    take = kept(session)
+    wav = take.export_path.read_bytes()
+    cut(session, 2.0, 3.0)
+    session.workspace.set_meta(transcript='Words corrected after the clip was kept.', notes='a note')
+    assert take.changed
+    settle(session, clock)
+    assert autosave_files(session) == [session.lib.autosave_file(take)]
+    assert session.close() == []
+
+    fresh = make_session()
+    [back] = fresh.workspace.takes
+    assert back.kept and back.changed and back.restored and 'Picked up your saved edits' in fresh.status_text
+    assert [(e['start_seconds'], e['end_seconds']) for e in back.history.edits] == [(2.0, 3.0)]
+    assert back.meta['transcript'] == 'Words corrected after the clip was kept.' and back.meta['notes'] == 'a note'
+    assert back.needs_transcript_review is True
+    assert back.meta['consent_confirmed'] is True              # what the permission covers has not changed
+    assert back.export_path.read_bytes() == wav                # and the kept clip is as it was until it is updated
+
+    fresh.workspace.confirm_transcript()
+    paths = fresh.keep()
+    data = json.loads(paths['sidecar'].read_text(encoding='utf-8'))
+    assert data['transcript'] == 'Words corrected after the clip was kept.' and len(data['edits']) == 1
+    assert not back.changed and autosave_files(fresh) == [] and paths['export'].read_bytes() != wav
+
+
+def test_a_crash_keeps_the_changes_to_a_kept_clip_too(session, make_session, clock):
+    kept(session)
+    session.workspace.set_meta(notes='written just before the crash')
+    settle(session, clock)
+    assert make_session().current.meta['notes'] == 'written just before the crash'
+
+
+def test_a_kept_clip_put_back_as_it_was_needs_no_autosave_file(session, clock):
+    take = kept(session)
+    cut(session, 2.0, 3.0)
+    settle(session, clock)
+    assert autosave_files(session)
+    session.editor.undo()
+    assert not take.changed
     settle(session, clock)
     assert autosave_files(session) == []
+
+
+def test_a_kept_clip_nobody_changed_writes_nothing(session, clock):
+    kept(session)
+    session.workspace.set_meta(label='Only a label')
+    settle(session, clock, 30)
+    assert autosave_files(session) == []
+
+
+def test_a_new_allowed_use_that_comes_back_still_needs_the_box_ticked(session, make_session, clock):
+    take = kept(session)
+    session.workspace.set_meta(allowed_use='a new purpose')
+    session.workspace.set_meta(consent_confirmed=True)         # the tick itself is never saved
+    settle(session, clock)
+    session.close()
+    fresh = make_session()
+    [back] = fresh.workspace.takes
+    assert back.meta['allowed_use'] == 'a new purpose' and back.meta['consent_confirmed'] is False
+    assert json.loads(take.sidecar_path.read_text(encoding='utf-8'))['allowed_use'] == 'my own voice references'
+
+
+def test_an_autosave_file_left_by_an_earlier_keep_is_not_read(session, make_session, clock):
+    take = kept(session)
+    cut(session, 2.0, 3.0)
+    session.workspace.confirm_transcript()
+    settle(session, clock)
+    path = session.lib.autosave_file(take)
+    stale = path.read_text(encoding='utf-8')
+    cut(session, 4.0, 5.0)
+    session.workspace.confirm_transcript()
+    session.keep()                                             # a different clip from the one the file builds on
+    path.write_text(stale, encoding='utf-8')                   # as if deleting it had failed
+    [back] = make_session().workspace.takes
+    assert not back.restored and not back.changed and len(back.history.edits) == 2
+
+
+def test_the_autosave_file_of_a_take_before_it_was_kept_is_not_read_after(session, make_session, clock):
+    take = record(session, 14.0)
+    fill(session)
+    settle(session, clock)
+    path = session.lib.autosave_file(take)
+    stale = path.read_text(encoding='utf-8').replace('The harbour', 'The old harbour')
+    session.keep()
+    path.write_text(stale, encoding='utf-8')
+    [back] = make_session().workspace.takes
+    assert back.meta['transcript'] == 'The harbour lights came on at dusk.' and not back.restored
+
+
+def test_going_back_to_the_kept_clip_drops_the_changes(session, make_session, clock):
+    kept(session)
+    cut(session, 2.0, 3.0)
+    session.workspace.set_meta(transcript='Words that turned out to be wrong.')
+    settle(session, clock)
+    session.close()
+    fresh = make_session()
+    [back] = fresh.workspace.takes
+    assert fresh.workspace.revert() is True
+    assert not back.changed and back.history.edits == [] and not back.needs_transcript_review
+    assert back.meta['transcript'] == 'The harbour lights came on at dusk.' and back.meta['consent_confirmed'] is True
+    assert autosave_files(fresh) == [] and fresh.current is back
+    assert not back.history.can_undo
+
+
+def test_going_back_needs_a_kept_clip(session):
+    record(session, 12.0)
+    assert session.workspace.revert() is False
+
+
+def test_going_back_when_the_sidecar_is_gone_leaves_the_changes_alone(session):
+    take = kept(session)
+    cut(session, 2.0, 3.0)
+    take.sidecar_path.unlink()
+    with pytest.raises(OSError):
+        session.workspace.revert()
+    assert take.changed and len(take.history.edits) == 1
+
+
+def test_a_failed_keep_goes_on_being_autosaved(session, make_session, clock):
+    """It used to count as kept once the write had failed, and autosave stopped saving it just when it was needed most."""
+    take = record(session, 14.0)
+    fill(session)
+    (session.lib.folder(session.workspace.speaker) / f'{take.stem}.wav.tmp').mkdir()
+    with pytest.raises(OSError):
+        session.keep()
+    assert not take.kept
+    session.workspace.set_meta(transcript='Corrected after the Keep that failed.')
+    settle(session, clock)
+    assert make_session().current.meta['transcript'] == 'Corrected after the Keep that failed.'
 
 
 def test_a_new_label_on_a_kept_take_goes_into_its_sidecar(session, clock):

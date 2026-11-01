@@ -227,12 +227,14 @@ def take_warnings(stats, flags=()):
         items.append(Issue('Silent: cannot be kept', True, 'silent'))
     elif stats['rms_dbfs'] < QUIET_DB:
         items.append(Issue(f"Quiet ({stats['rms_dbfs']:.0f} dBFS RMS): advisory", False, 'quiet'))
-    if stats.get('clipped'):
+    if stats.get('clipped') or stats.get('recording_clipped'):
         items.append(Issue('Clipped: some samples reach full scale; consider re-recording', False, 'clipped'))
     if stats.get('silence_fraction', 0) > MOSTLY_SILENT:
         items.append(Issue('Mostly silence', False, 'mostly_silent'))
     if 'interrupted' in flags:
         items.append(Issue('Interrupted: the device stopped during this take', False, 'interrupted'))
+    if 'dropouts' in flags:
+        items.append(Issue('Dropouts: the device lost some audio during this take; listen for gaps', False, 'dropouts'))
     return items
 
 

@@ -4,8 +4,9 @@ The plan uses only what the editor already offers (the high-pass and hum filters
 inside long pauses, gain and the limiter) in the order the clip is cleaned up: filters first, because rumble and hum
 hide the silence and the noise; then noise, then the cuts, which are found on the cleaned clip; then the level. Each
 repair is tried on a copy of the recipe, and noise cleaning is measured before it is kept, so the plan is rendered
-rather than guessed. Noise cleaning can change how a voice sounds, so it is used only on a clearly noisy clip.
-Applied to the take, the whole plan is one undo step.
+rather than guessed. Noise cleaning can change how a voice sounds, so it is used only on a clearly noisy clip, set from
+the noise that clip actually has, and dropped if it takes too much of the voice along with the noise. Applied to the
+take, the whole plan is one undo step.
 
 `diagnose` takes the recipe and a function that renders it. Nothing here touches a file or a window.
 """
@@ -28,8 +29,9 @@ HIGHPASS_HZ = 80.0
 RUMBLE_LIMIT = -24.0            # dB of energy under 60 Hz against the speech band; more than this is too much
 SNR_CLEAN, SNR_NOISY = 35.0, 25.0       # speech this far above the noise is clean; below the second it is clearly noisy.
 #                                         The Check tab's noise-floor limits (-55 and -45 dB) at the -20 dB speech target.
-NOISE_FLOOR = -25.0             # the noise-cleaning setting Auto fix uses (the program's own default)
+NOISE_ABOVE_FLOOR = 5.0         # noise cleaning does best set about this far above the clip's own noise floor
 NOISE_MIN_GAIN = 3.0            # noise cleaning is kept only if it lowers the noise by at least this many dB
+VOICE_LOSS_LIMIT = 4.0          # and only if it takes no more than this many dB from the voice in any band
 LEVEL_TOLERANCE = 3.0           # speech within this many dB of the target needs no change
 PEAK_CEILING = -1.0             # dBFS; a higher peak leaves no headroom
 NARROW_HZ = 3500.0
@@ -84,6 +86,12 @@ class Diagnosis:
 
 
 # ---- measuring --------------------------------------------------------------------------------------------------------
+
+def noise_setting(floor):
+    """The noise-cleaning setting for a clip with this noise floor (dB): in whole dB, within what the filter takes."""
+    low, high = chain_mod.LIMITS[('denoise', 'nf')]
+    return float(min(max(round(floor + NOISE_ABOVE_FLOOR), low), high))
+
 
 def _snapshot(history):
     """The recipe as a render function wants it: edits, chain and join fade."""
@@ -172,7 +180,8 @@ class _Plan:
         self.ops.extend(ops)
         for section, values in (chain or {}).items():
             self.chain.setdefault(section, {}).update(values)
-        self.steps.append(text)
+        if text not in self.steps:
+            self.steps.append(text)
         self.done.update({key: text for key in keys})
         return True
 
@@ -202,13 +211,15 @@ def _filters(plan, look, x, before_level):
 
 
 def _denoise(plan, x, rate, before_level, denoise_ok):
-    """Step 2: noise cleaning on a clearly noisy clip, tried on a copy and kept only if it lowers the noise."""
+    """Step 2: noise cleaning on a clearly noisy clip, tried on a copy, and kept only if it lowers the noise and leaves
+    the voice."""
     if plan.snr >= SNR_NOISY or plan.history.chain['denoise']['enabled']:
         return x
     if not denoise_ok:
         plan.skipped['noise'] = 'FFmpeg was not found, and noise reduction needs it'
         return x
-    setting = {'denoise': {'enabled': True, 'nf': NOISE_FLOOR}}
+    nf = noise_setting(analysis.noise_floor_db(x, rate))
+    setting = {'denoise': {'enabled': True, 'nf': nf}}
     try:
         cleaned = before_level(_snapshot(plan.trial(setting)))
     except ValueError as e:                         # FFmpeg failed or timed out
@@ -217,23 +228,35 @@ def _denoise(plan, x, rate, before_level, denoise_ok):
     if _snr(cleaned, rate) - plan.snr < NOISE_MIN_GAIN:
         plan.skipped['noise'] = 'noise cleaning did not lower it enough to be worth the change to the voice'
         return x
-    plan.add(['noise'], f'Noise reduction (noise floor {NOISE_FLOOR:.0f} dB)', chain=setting)
+    if analysis.voice_loss_db(x, cleaned, rate) > VOICE_LOSS_LIMIT:
+        plan.skipped['noise'] = 'noise cleaning would take too much of the voice along with the noise'
+        return x
+    plan.add(['noise'], f'Noise reduction (noise floor {nf:.0f} dB)', chain=setting)
     return cleaned
 
 
 def _trim(plan, master, rate, x, before_level):
-    """Step 3: the silence at either end, cut down to a short margin. Returns the audio."""
-    look, ranges = plan.cleaned, []
-    if look.lead > EDGE_LIMIT:
-        ranges.append((0.0, look.lead - TRIM_MARGIN))
-    if look.tail > EDGE_LIMIT:
-        ranges.append((look.seconds - look.tail + TRIM_MARGIN, look.seconds))
-    if not ranges:
-        return x
-    if not _fits(look.seconds, ranges):
-        plan.skipped['ends'] = 'the clip would be left shorter than 6 s'
-    elif plan.add(['ends'], 'Trim the silence at the ends', ops=_cut_ops(master, rate, plan.history, ranges)):
-        return before_level(_snapshot(plan.history))
+    """Step 3: the silence at either end, cut down to a short margin. Returns the audio.
+
+    What counts as a pause depends on the whole clip, so cutting one end can show up silence at the other that a blip of
+    leftover noise was hiding. The clip is looked at once more, so that a second look at the result finds nothing to do.
+    """
+    look = plan.cleaned
+    for _ in range(2):
+        ranges = []
+        if look.lead > EDGE_LIMIT:
+            ranges.append((0.0, look.lead - TRIM_MARGIN))
+        if look.tail > EDGE_LIMIT:
+            ranges.append((look.seconds - look.tail + TRIM_MARGIN, look.seconds))
+        if not ranges:
+            break
+        if not _fits(look.seconds, ranges):
+            plan.skipped['ends'] = 'the clip would be left shorter than 6 s'
+            break
+        if not plan.add(['ends'], 'Trim the silence at the ends', ops=_cut_ops(master, rate, plan.history, ranges)):
+            break
+        x = before_level(_snapshot(plan.history))
+        look = _look(x, rate)
     return x
 
 
@@ -281,8 +304,9 @@ def _repair(master, rate, history, before_level, denoise_ok, look):
 
 # ---- saying it in words -----------------------------------------------------------------------------------------------
 
-def _findings(look, plan, out, final):
-    """The findings, worst first. `out` describes the clip as it would be kept now, `final` as it would be afterwards."""
+def _findings(look, plan, out, final, recorded):
+    """The findings, worst first. `out` describes the clip as it would be kept now, `final` as it would be afterwards, and
+    `recorded` is the share of the recording behind them that is at full scale."""
     found = []
     cleaned = plan.cleaned
 
@@ -302,9 +326,10 @@ def _findings(look, plan, out, final):
     elif seconds > ac.TARGET_MAX_SECONDS:
         add('length', 'warn', 'Long clip', f'{seconds:.1f} s long. That is fine up to {ac.MAX_SECONDS:.0f} s, but '
             f'{ac.TARGET_MIN_SECONDS:.0f} to {ac.TARGET_MAX_SECONDS:.0f} s works best.')
-    if out.stats['clipped_fraction'] > 0.001:
-        add('clipping', 'bad', 'Clipping', f"{out.stats['clipped_fraction'] * 100:.2f}% of the samples reach full scale. "
-            'Clipping cannot be repaired: lower the microphone level and record again.')
+    clipped = max(out.stats['clipped_fraction'], recorded)
+    if clipped > 0.001:
+        add('clipping', 'bad', 'Clipping', f'{clipped * 100:.2f}% of the samples reach full scale. Clipping cannot be '
+            'repaired, and gain or the limiter only hide it: lower the microphone level and record again.')
     if look.rumble > RUMBLE_LIMIT:
         detail = f'There is a lot of energy under 60 Hz ({look.rumble:.0f} dB against the speech). Speech has almost ' \
                  'none there: it is rumble, handling noise or music.'
@@ -358,7 +383,8 @@ def diagnose(master, rate, history, before_level, denoise_ok=True):
     x = before_level(_snapshot(history))
     look = _look(x, rate)
     here = _export(x, rate, history.chain)
-    before = analysis.quality_report(here)
+    recorded = render.recorded_clipping(master, rate, history)['recording_clipped_fraction']
+    before = analysis.quality_report(here, recorded_clipped=recorded)
     if look.speech < NO_SPEECH_DB:
         finding = Finding('speech', 'bad', 'No speech found', 'The clip is silent, or too quiet to measure. There is '
                           'nothing to fix.', '')
@@ -366,8 +392,9 @@ def diagnose(master, rate, history, before_level, denoise_ok=True):
 
     plan = _repair(master, rate, history, before_level, denoise_ok, look)
     if not plan.steps:
-        return Diagnosis(_findings(look, plan, _output(here), _output(here)), [], {}, [], before, before)
+        return Diagnosis(_findings(look, plan, _output(here), _output(here), recorded), [], {}, [], before, before)
     final = _export(before_level(_snapshot(plan.history)), rate, plan.history.chain)
-    return Diagnosis(_findings(look, plan, _output(here), _output(final)), plan.ops, plan.chain, plan.steps, before,
-                     analysis.quality_report(final), plan.done,
+    left = render.recorded_clipping(master, rate, plan.history)['recording_clipped_fraction']
+    return Diagnosis(_findings(look, plan, _output(here), _output(final), recorded), plan.ops, plan.chain, plan.steps,
+                     before, analysis.quality_report(final, recorded_clipped=left), plan.done,
                      (analysis.snr_db(here, ac.EXPORT_RATE), analysis.snr_db(final, ac.EXPORT_RATE)))

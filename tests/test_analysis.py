@@ -238,3 +238,50 @@ def test_each_problem_shows_up_on_its_own_row():
     padded = np.concatenate([np.zeros(3 * EXPORT, np.float32), clip])
     assert status(analysis.quality_report(padded), 'ends') == 'warn'
     assert status(analysis.quality_report(clip * 0.1), 'speech') == 'bad'
+
+
+# ---- what cleaning took from the voice ---------------------------------------------------------------------------------
+
+TALKING = [(0.5, 2.5), (3.0, 5.0), (5.5, 7.5), (8.0, 10.0)]
+
+
+def noisy():
+    return bursts(10.5, TALKING, noise=0.003, f0=137.0)
+
+
+def test_cleaning_that_takes_only_the_noise_costs_the_voice_nothing():
+    x = noisy()
+    frame = int(RATE * ac.FRAME_SECONDS)
+    y = x.copy()
+    db = analysis.frame_db(x, RATE)
+    for index in np.nonzero(db <= analysis.speech_threshold_db(x, RATE))[0]:
+        y[index * frame:(index + 1) * frame] *= 0.05
+    assert analysis.voice_loss_db(x, y, RATE) < 1.0
+
+
+def test_cleaning_that_takes_the_top_of_the_voice_is_seen():
+    x = noisy()
+    sos = butter(8, 1000.0, 'low', fs=RATE, output='sos')
+    assert analysis.voice_loss_db(x, sosfilt(sos, x).astype(np.float32), RATE) > 10.0
+
+
+def test_a_band_where_the_voice_is_buried_in_the_noise_says_nothing():
+    x = bursts(10.5, TALKING, noise=0.05, f0=137.0, amp=0.02)
+    assert analysis.voice_loss_db(x, np.zeros_like(x), RATE) == 0.0
+
+
+@pytest.mark.parametrize('x', [tone(6.0), np.zeros(6 * RATE, np.float32), np.zeros(0, np.float32)],
+                         ids=['no pauses', 'silence', 'nothing'])
+def test_with_no_pauses_or_no_speech_there_is_nothing_to_compare(x):
+    assert analysis.voice_loss_db(x, x, RATE) == 0.0
+
+
+def test_a_shorter_clip_after_cleaning_is_compared_as_far_as_it_goes():
+    x = noisy()
+    assert analysis.voice_loss_db(x, x[:len(x) - 100], RATE) < 1.0
+
+
+def test_the_check_tab_reports_clipping_in_the_recording_behind_a_clean_clip():
+    rows = {row.key: row for row in analysis.quality_report(tone(12.0, amp=0.1, rate=ac.EXPORT_RATE), recorded_clipped=0.3)}
+    assert rows['clipping'].status == 'bad' and rows['clipping'].value == '30.000% of samples'
+    assert 'limiter' in rows['clipping'].hint

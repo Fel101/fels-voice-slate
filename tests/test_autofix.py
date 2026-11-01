@@ -1,6 +1,7 @@
 """Auto analyze and Auto fix: what the advisor finds in a clip, and that its plan, applied, repairs it."""
 import numpy as np
 import pytest
+from scipy.signal import butter, sosfiltfilt
 
 from helpers import RATE, bursts, tone
 from recorder import audio_core as ac
@@ -38,6 +39,11 @@ def gate(mono, rate, nf):
 
 def identity(mono, rate, nf):
     return mono
+
+
+def muffle(mono, rate, nf):
+    """A stand-in for cleaning set too hard: the noise falls as `gate` makes it, and the top of the voice goes with it."""
+    return sosfiltfilt(butter(8, 800.0, 'low', fs=rate, output='sos'), gate(mono, rate, nf)).astype(np.float32)
 
 
 def advise(x, history=None, denoise=gate, denoise_ok=True):
@@ -87,6 +93,28 @@ def test_long_silence_at_the_ends_is_cut_down_to_a_short_margin():
     _, out = fixed(x, d, h)
     lead, tail = analysis.edge_silence(out, ac.EXPORT_RATE)
     assert 0.1 < lead < 0.25 and 0.1 < tail < 0.25
+
+
+def test_silence_that_only_shows_once_the_other_end_is_cut_goes_too(monkeypatch):
+    """A blip of noise left by the cleaner can hide a silent end until the other end has gone, as it did on real speech."""
+    x = voice([(3.0, 6.0), (6.5, 9.5), (10.0, 15.0)], seconds=18.0)
+    real, looks = autofix._look, []
+
+    def hiding(audio, rate):
+        look = real(audio, rate)
+        looks.append(look)
+        if len(looks) == 2:                                 # the look the ends are first planned from
+            look.tail = 0.0
+        return look
+
+    monkeypatch.setattr(autofix, '_look', hiding)
+    d, h = advise(x)
+    monkeypatch.setattr(autofix, '_look', real)
+    assert d.steps == ['Trim the silence at the ends'] and len(d.ops) == 2
+    recipe, out = fixed(x, d, h)
+    lead, tail = analysis.edge_silence(out, ac.EXPORT_RATE)
+    assert 0.1 < lead < 0.25 and 0.1 < tail < 0.25
+    assert advise(x, recipe)[0].steps == []
 
 
 def test_long_pauses_inside_the_clip_are_shortened_to_about_half_a_second():
@@ -236,7 +264,7 @@ def test_a_clearly_noisy_clip_is_cleaned_when_the_cleaner_helps():
     x = voice(noise=0.012)
     d, h = advise(x)
     assert find(d, 'noise').status == 'bad' and find(d, 'noise').fix.startswith('Noise reduction')
-    assert d.chain['denoise'] == {'enabled': True, 'nf': autofix.NOISE_FLOOR}
+    assert d.chain['denoise'] == {'enabled': True, 'nf': autofix.noise_setting(analysis.noise_floor_db(x, RATE))}
     before, after = d.snr
     assert after - before >= autofix.NOISE_MIN_GAIN
     assert 'Speech above the noise' in {c.label for c in d.changes}
@@ -249,6 +277,23 @@ def test_noise_cleaning_is_not_kept_when_it_does_not_help():
     noise = find(d, 'noise')
     assert 'denoise' not in d.chain and noise.fix == ''
     assert 'Not fixed: noise cleaning did not lower it enough' in noise.detail
+
+
+def test_noise_cleaning_is_set_from_the_noise_the_clip_has():
+    assert autofix.noise_setting(-50.2) == -45.0 and autofix.noise_setting(-38.6) == -34.0
+    assert autofix.noise_setting(-200.0) == -80.0 and autofix.noise_setting(-10.0) == -20.0     # the limits of the filter
+    quiet, loud = (advise(voice(noise=noise))[0].chain['denoise']['nf'] for noise in (0.01, 0.016))
+    assert loud - quiet == pytest.approx(4.0, abs=1.0)                   # the noise is 4 dB louder, and so is the setting
+
+
+def test_noise_cleaning_that_takes_the_voice_with_it_is_not_kept():
+    """The noise measure alone calls this a success: the speech stands further above the noise than it did."""
+    x = voice(noise=0.012)
+    cleaned = muffle(x, RATE, -40.0)
+    assert autofix._snr(cleaned, RATE) - autofix._snr(x, RATE) >= autofix.NOISE_MIN_GAIN
+    d, _ = advise(x, denoise=muffle)
+    noise = find(d, 'noise')
+    assert 'denoise' not in d.chain and noise.fix == '' and 'too much of the voice' in noise.detail
 
 
 def test_noise_cleaning_is_not_tried_without_ffmpeg():
@@ -294,6 +339,18 @@ def test_clipping_is_reported_with_no_fix():
     d, _ = advise(x.astype(np.float32))
     clipping = find(d, 'clipping')
     assert clipping.status == 'bad' and clipping.fix == '' and 'record again' in clipping.detail
+
+
+def test_the_limiter_does_not_make_clipping_go_away():
+    x = (np.clip(voice(amp=0.6), -0.5, 0.5) * 2.0).astype(np.float32)
+    d, h = advise(x)
+    assert find(d, 'clipping').status == 'bad' and d.chain['limiter'] == {'enabled': True}
+    recipe, out = fixed(x, d, h)
+    assert ac.measure(out, ac.EXPORT_RATE)['clipped_fraction'] == 0.0        # the finished clip measures clean
+    again, _ = advise(x, recipe)
+    clipping = find(again, 'clipping')
+    assert clipping.status == 'bad' and 'only hide it' in clipping.detail and 'ok' not in keys(again)
+    assert next(row for row in again.before if row.key == 'clipping').status == 'bad'
 
 
 def test_a_silent_clip_says_there_is_no_speech_and_plans_nothing():

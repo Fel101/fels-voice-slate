@@ -9,7 +9,7 @@ without a display, a microphone or a speaker.
 - `editor`: selection, playhead, every edit, the chain settings, undo
 - `transport`: playback, pause, seek, loop, A/B
 - `drafts`: transcript drafts from the optional speech recognizer
-- `autosave`: the work on takes that are not kept yet, saved beside their originals as it happens
+- `autosave`: the work that Keep has not written yet, saved beside the originals as it happens
 - `measure`: background measurements, the spectrogram and the peaks for drawing
 - `advisor`: Auto analyze (what could be better, in plain words) and Auto fix (one undo step)
 - `script`: script mode
@@ -94,11 +94,15 @@ class Session:
     # ---- actions that span parts --------------------------------------------------------------------------------------
 
     def keep(self):
-        """Keep the current take. Returns the paths; raises KeepBlocked, CleanError or OSError with the reason."""
+        """Keep the current take. Returns the paths; raises KeepBlocked, CleanError or OSError with the reason.
+
+        The script moves on when the line in front has been read and kept. Updating a kept clip, or keeping an older take of
+        another line, leaves it where it is, so no line is skipped.
+        """
         take = self.workspace.current
-        had_line = take is not None and take.meta.get('script_line') is not None
+        line = take.meta.get('script_line') if take is not None and not take.kept else None
         paths = self.workspace.keep()
-        if paths and had_line and self.script.lines:
+        if paths and line is not None and line == self.script.current:
             self.script.step(1)
         return paths
 

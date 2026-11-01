@@ -55,8 +55,13 @@ resampling to 24 kHz for export, and the limiter once more at that rate, because
 ceiling (`render.finish`). Each stage is cached by what decides its output, so moving the level slider does not run
 FFmpeg again.
 
+`clean.denoise` keeps the clip in step: afftdn holds the audio back and its output is only as long as its input, so the
+delay is measured (once for each FFmpeg and sample rate, on a burst of noise) and taken out, and the input is padded so the
+end of the clip gets through.
+
 Playback, the Check tab, the transcript draft and Keep all use this one pipeline, so **what you hear and measure is what
-Keep writes**. `core/analysis.py` holds the measurements (peak pyramid for drawing, spectrogram, loudness, noise floor,
+Keep writes**. Clipping is the one thing the finished clip cannot show, because gain and the limiter hide it, so
+`render.recorded_clipping` measures it on the original, on the loudest channel and leaving out what was cut or silenced. `core/analysis.py` holds the measurements (peak pyramid for drawing, spectrogram, loudness, noise floor,
 hum, bandwidth, silence) and `quality_report()` which builds the Check tab's rows.
 
 ## Auto analyze and Auto fix
@@ -67,8 +72,10 @@ the order that lets each one see the effect of the last. Each step is tried on a
 the plan is measured rather than guessed. It returns the findings in plain words, the operations and chain settings that
 would fix them, and a before-and-after for each number that changes. It is a pure function of the recipe and a render
 function, so it is tested on generated audio with known faults. The rules are conservative on purpose: noise reduction
-can change a voice, so it is only used on a clearly noisy clip and is kept only if it measurably lowers the noise; a
-clip is never shortened below the 6 s the Keep rules need; and a second look at a fixed clip finds nothing more to do.
+can change a voice, so it is only used on a clearly noisy clip, set from that clip's own noise floor, and is kept only if
+it measurably lowers the noise and `analysis.voice_loss_db` finds the voice still there (the speech above the noise goes up
+even when the voice is taken along with the noise, so that measure cannot judge it alone); a clip is never shortened below
+the 6 s the Keep rules need; and a second look at a fixed clip finds nothing more to do.
 
 `session/advisor.py` runs it. It works out the advice on a worker thread, caches it per take under the recipe it was
 made for (a result for an older recipe is dropped), follows the clip as it is edited, and applies a fix through
@@ -78,9 +85,9 @@ made for (a result for an older recipe is dropped), follows the clip as it is ed
 ## Threads, the tick and the clock
 
 - **Device threads.** The microphone and loopback callbacks copy audio into buffers and nothing else.
-- **The main thread** runs `Session.tick()` about twenty times a second from a `QTimer`. `tick()` reads the meter, notices
-  a device that has stalled, ends a recording when its stop tail is over, moves the playhead, writes the autosave files
-  that are due, and delivers finished jobs.
+- **The main thread** runs `Session.tick()` about twenty times a second from a `QTimer`. `tick()` reads the meter, writes
+  what has been recorded to the spool file, notices a device that has stalled, ends a recording when its stop tail is over,
+  moves the playhead, writes the autosave files that are due, and delivers finished jobs.
 - **Worker threads** (`jobs.py`) do the slow work: measuring, rendering for playback, FFmpeg, and the speech recognizer. A
   job's result waits in a queue until `tick()` hands it to the main thread, so no code outside `jobs.py` needs a lock.
   Jobs are given a frozen copy of the recipe, so edits made while they run cannot change what they render.
@@ -91,7 +98,9 @@ made for (a result for an older recipe is dropped), follows the clip as it is ed
 The desktop icon runs `pythonw.exe -m recorder`, which has no console, so `launch.py` supplies what a console would have
 been used for. It writes `voice-slate.log` (and, if a native library crashes, `voice-slate-crash.log`) beside the
 settings file, replaces the missing `stdout` and `stderr` with the log, and shows an error window for a failure that
-would otherwise be silent. A named mutex allows one copy at a time: a second start brings the first window forward and
+would otherwise be silent. An error that nothing caught, on any thread, is logged and then passed to the window through its
+`unexpected` signal, so it is shown rather than lost; the window shows each message once, because a fault in something that
+repeats would otherwise open a dialog twenty times a second. A named mutex allows one copy at a time: a second start brings the first window forward and
 exits. `shortcut.py` makes the `.lnk` through Windows' own COM interfaces with `ctypes` and gives it the same
 application id as the running program, so the taskbar groups the window with the icon it was started from. Neither module
 imports Qt, and `python -m recorder --check` reports what is installed without opening a window.
@@ -105,14 +114,27 @@ takes the key from the machine it runs on.
 
 ## Keeping the person's audio safe
 
+- While a take runs, `Capturing.tick` writes what has arrived to a `store.Spool` in `masters/`, and forces it to the disk
+  every two seconds. The audio callbacks stay out of this: they only fill buffers. A failure here never touches the
+  recording, which is in memory anyway. `Library.load_takes` makes a take of any spool it finds (`_recover_spools`), flagged
+  *interrupted*, unless a recording is running, because its spool is in the same folder.
 - The original is written (to a temporary file, then renamed) when recording stops. If it cannot be written, the take
-  stays in memory flagged *Not saved*, and the window refuses to close until it has been written.
-- Exports, sidecars and settings are written atomically (temporary file, then rename). Names are never overwritten: a clash
-  gets a numeric suffix. A damaged `speakers.json` or `settings.json` is moved aside and rebuilt, never overwritten.
+  stays in memory flagged *Not saved*, its spool stays on disk, and the window refuses to close until it has been written.
+- Exports, sidecars and settings are written atomically (temporary file, then rename), and recordings and sidecars are forced
+  to the disk first (`store.sync_file`), because a file renamed while it is still in Windows' cache can be empty after a power
+  cut. Names are never overwritten: a clash gets a numeric suffix. A damaged `speakers.json` or `settings.json` is moved aside
+  and rebuilt, never overwritten.
+- `Library.keep` finishes both the WAV and the sidecar under temporary names before either goes in place, and only then sets
+  `export_path`, which is what makes a take count as kept. A Keep that fails leaves the take as it was and still being
+  autosaved. SoundFile reports failures as `RuntimeError`, so `_write_audio` turns them into `OSError`, which is what the
+  window catches. Tests of this must make the real write fail (a folder standing where the file has to go), not raise a
+  stand-in error.
+- A sidecar is a text file that can be edited or arrive from elsewhere, so `Library._check_fields` checks the kind of every
+  value it uses. One bad value costs that clip, which is reported, and not the whole list.
 - Discard goes through `send2trash`, so it is recoverable. If the Recycle Bin is not available the person is asked
   before anything is deleted for good.
 - Each export's SHA-256 goes in its sidecar.
-- The work on a take that is not kept yet (its recipe, its text and its label) is saved to `masters/<name>.autosave.json`.
+- The work on a take that Keep has not written (its recipe, its text and its label) is saved to `masters/<name>.autosave.json`.
   `session/autosave.py` marks a take when the bus says `edits` changed, or `meta` with that take as its payload, writes it
   once the take has been still for a second (or after five seconds of steady change, such as typing), and writes everything
   waiting when another take is opened and when the session closes. `Library.autosave` writes the file and
@@ -121,7 +143,11 @@ takes the key from the machine it runs on.
   as it was recorded, with the reason in `take.autosave_problem`. The permission tick is never in it, as it is never
   remembered. Keep deletes it, and Discard sends it to the Recycle Bin with the other files. A failed write is reported
   once and tried again; closing with a write still failing refuses once, and then lets go, so a broken folder cannot trap
-  the window. A kept take has no autosave file: only a changed label is written, into its sidecar.
+  the window.
+- A kept take is compared with what its sidecar holds (`Take.changed`). While they differ it has an autosave file too, read
+  back by `Library.load_kept`, and its card says *Changed*. The file carries the SHA-256 of the kept WAV it builds on, so one
+  left behind by a Keep that could not delete it is ignored. `Library.revert` drops the changes. A label goes straight into
+  the sidecar, as it changes nothing about the clip, and new words for the origin or allowed use clear the permission tick.
 
 ## Moving, copying and listing clips
 

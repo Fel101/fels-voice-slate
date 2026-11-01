@@ -31,7 +31,7 @@ To keep the program on the taskbar, pin the desktop icon (right-click it) rather
 | Area | What it holds |
 |---|---|
 | **Top bar** | Record (`F9`), Play (`Space`), Stop, Loop (`L`); the clock; the source (Microphone or System audio) and the device; the Arm button; the level meter; and the gear menu with Settings, Import, New speaker, Rename speaker, Move take to speaker, Save a copy, Export manifest, Load script, Open output folder and more. |
-| **Left** | The speaker, a box that filters the takes, and that speaker's takes. Each take shows a small waveform, its label (or its number and length, until you name it), when it was made, and a status: *Recording*, *In review* (the take that is open), *Kept*, *Not kept*, or *Not saved* (the original could not be written yet). Hover over a take to see its length, when and from where it was made, and the start of its transcript. Right-click a take for its menu. See [Naming and finding takes](#naming-and-finding-takes), [Moving a take](#moving-a-take-to-another-speaker), and [Sharing your clips](#sharing-your-clips) for dragging a kept clip out of the window. |
+| **Left** | The speaker, a box that filters the takes, and that speaker's takes. Each take shows a small waveform, its label (or its number and length, until you name it), when it was made, and a status: *Recording*, *In review* (the take that is open), *Kept*, *Changed* (kept, with changes the kept clip does not have yet), *Not kept*, or *Not saved* (the original could not be written yet). Hover over a take to see its length, when and from where it was made, and the start of its transcript. Right-click a take for its menu. See [Naming and finding takes](#naming-and-finding-takes), [Moving a take](#moving-a-take-to-another-speaker), and [Sharing your clips](#sharing-your-clips) for dragging a kept clip out of the window. |
 | **Middle** | The editor: tools, the waveform, a spectrogram, an overview strip, and a line with In, Out, Length, Playhead and Zoom. While recording it shows the live waveform and a take-length guide instead. |
 | **Right** | Three tabs, **Clip**, **Process** and **Check**, and under them the **Ready to keep?** card with Keep, Re-record, Discard and Open folder. |
 | **Bottom** | A status line, and the state of the optional extras (FFmpeg and draft transcripts). |
@@ -52,8 +52,9 @@ The window can be resized down to 1100 by 700. Buttons that no longer fit collap
    - **System audio** records what the computer is playing through the chosen output (WASAPI loopback). Use it only for
      audio you own or may use; see [Responsible use](responsible-use.md). It records only while something plays.
 2. Click **Arm** (`Ctrl+M`) to open the input before you record. The level meter becomes live, and Voice Slate keeps
-   the last half second, so when you press Record the beginning of the first word is already included. Arming is
-   optional: Record opens the input itself if you did not.
+   the last half second, so when you press Record the beginning of the first word is already included. It stays armed
+   after each take until you click **Arm** again, so every take of a session starts the same way. Arming is optional:
+   Record opens the input itself if you did not, and lets it go again when the take ends.
 3. Press **Record** (`F9`). The clock runs, the waveform draws live, and a bar shows where the take length falls
    against the rules: 6 seconds is the minimum, 10 to 25 seconds is the sweet spot, and recording stops by itself at
    40 seconds.
@@ -66,18 +67,29 @@ Voice Slate holds `F9` this way, other programs do not receive it: turn **Record
 you need `F9` there, and it then works only while the Voice Slate window is in front. A dialog that is open is never
 interrupted by a recording starting, though a recording can always be stopped.
 
-The moment you stop, the original recording is written to the speaker's `masters` folder as a 24-bit WAV. Nothing you
-do afterwards can change that file, and closing the program never loses a take. If the device disappears while
-recording, what was captured so far is kept and the take is marked *interrupted*.
+While you record, the take is written to a `.spool` file in the speaker's `masters` folder. If the program or the computer
+stops in the middle, the next start makes a take of what was on disk, marks it *interrupted*, and says so in the status
+line; a crash costs the last moment, and a power cut at most the last two seconds. If that file cannot be written (a full
+disk, say), the status line says so and the recording carries on in memory.
 
-Your work on a take that is not kept yet is saved too. A moment after each change, your cuts, the Process settings and
-the text you typed (the transcript, label, origin, allowed use and notes) are written to an `.autosave.json` file in the
-same `masters` folder, so a crash, a power cut or closing the window does not lose them: when you start the program again
-the take is there with its edits and its text, and the status line says so. What does not come back is the undo history,
-and the permission box, which is never remembered and is ticked again when you keep the clip. Keep deletes the autosave
-file, because the sidecar holds the work from then on. If it cannot be written (a full disk, say), the status line says so,
-and the window warns you once when you close it. A kept clip that you change again is saved when you press Keep again; only
-its label is saved at once.
+The moment you stop, the original recording is written to the `masters` folder as a 24-bit WAV and the spool file goes.
+Nothing you do afterwards can change that file, and closing the program never loses a take. If the device disappears
+while recording, what was captured so far is kept and the take is marked *interrupted*. If the device reports that it lost
+audio along the way (a busy computer, say), the status line says so, the take is marked *dropouts*, and **Ready to keep?**
+reminds you to listen for gaps.
+
+Your work on a take is saved too. A moment after each change, your cuts, the Process settings and the text you typed (the
+transcript, label, origin, allowed use and notes) are written to an `.autosave.json` file in the same `masters` folder, so
+a crash, a power cut or closing the window does not lose them: when you start the program again the take is there with its
+edits and its text, and the status line says so. What does not come back is the undo history, and the permission box,
+which is never remembered and is ticked again when you keep the clip. Keep deletes the autosave file, because the sidecar
+holds the work from then on. If it cannot be written (a full disk, say), the status line says so, and the window warns you
+once when you close it.
+
+The same goes for a clip you have already kept and then change: your changes are saved, and the take shows *Changed*, until
+**Update kept clip** writes them. The kept WAV and its sidecar stay as they were until then. To drop the changes instead,
+right-click the take and choose **Go back to the kept clip...**. A new label is the exception: it goes straight into the
+sidecar.
 
 Use **Re-record** to throw a take away (it goes to the Recycle Bin) and start another straight away.
 
@@ -85,12 +97,14 @@ Use **Re-record** to throw a take away (it goes to the Recycle Bin) and start an
 
 Script mode shows one prompt per take, which is handy for reading a list of sentences.
 
-1. Write the prompts in a text file, one per line, and save it as UTF-8. Empty lines are ignored.
+1. Write the prompts in a text file, one per line. UTF-8 is best, and Notepad's other choices work too. Empty lines are
+   ignored.
 2. Choose **Load script** from the gear menu (`Ctrl+Shift+L`).
 3. The current line appears above the waveform in large type. Move along the script with `Ctrl+Up` and `Ctrl+Down`, or
    the arrow buttons beside the line.
 4. Record the take. The line becomes its transcript, marked in the sidecar as *read from script* (or *edited* if you
-   change it). After you **Keep** the clip, the script moves to the next line.
+   change it). After you **Keep** the take of the line on screen, the script moves to the next line. Updating a kept clip,
+   or keeping an older take of another line, leaves the script where it is.
 
 **Clear script** in the gear menu stops using it.
 
@@ -98,7 +112,8 @@ Script mode shows one prompt per take, which is handy for reading a list of sent
 
 Press `Ctrl+O`, click **Import**, or drag audio files onto the window. A WAV, FLAC, Ogg, MP3 or AIFF file is copied
 into the current speaker's `masters` folder as a new take. Your file is not touched, and the take is edited and kept like
-a recording. Only import audio you have the right to use.
+a recording. A file with no audio in it, or a damaged one, is refused with a message. Only import audio you have the right
+to use.
 
 ## Speakers
 
@@ -180,7 +195,8 @@ under the cursor. `Ctrl+Z` undoes and `Ctrl+Y` redoes; the **History** list on t
 earlier step.
 
 If you cut or silence a part that might hold spoken words, the transcript has to be confirmed again before you can keep
-the clip: read it against the clip and choose **It matches**.
+the clip: read it against the clip and choose **It matches**. Fades, gain and the Process settings change no words, so they
+do not ask, and neither does undoing back to the cuts you confirmed.
 
 ## Process the whole take
 
@@ -192,7 +208,7 @@ holds for the 24 kHz file that is saved: resampling cannot push a peak above it.
 |---|---|
 | **High-pass filter** | Removes rumble and desk thumps below a cutoff (20 to 300 Hz, 80 by default). |
 | **Hum filter** | Notches mains hum at 50 or 60 Hz and its harmonics. The Check tab tells you when hum was found. |
-| **Noise reduction** | Reduces steady background noise with FFmpeg's `afftdn` filter. It needs [FFmpeg](../README.md#optional-extras). The slider is the noise floor in dB (-80 to -20, -25 by default): values nearer -20 clean more, and can change the voice. The recorder cannot check that the cleaned voice still sounds like the original, so listen to the result, and the sidecar records `identity_checked: false`. |
+| **Noise reduction** | Reduces steady background noise with FFmpeg's `afftdn` filter. It needs [FFmpeg](../README.md#optional-extras). The slider is the noise floor in dB (-80 to -20, -45 by default). It works best about 5 dB above the **Noise floor** on the Check tab: values nearer -20 clean more, and take more of the voice with the noise. The recorder cannot check that the cleaned voice still sounds like the original, so listen to the result, and the sidecar records `identity_checked: false`. |
 | **Level** | A gain for the whole clip (-24 to +36 dB). **Normalize** sets the speech to -20 dB RMS, measured on the spoken parts only; unless the limiter is on, it will not let a peak go above -0.45 dBFS. **Reset** goes back to the recorded level. |
 | **Peak limiter** | A look-ahead limiter with a ceiling you set (-1 dB by default), so one loud pop does not stop you raising the speech. |
 | **Join fade** | The crossfade at every cut, 0 to 50 ms (10 by default). |
@@ -207,6 +223,10 @@ The **Check** tab measures the clip exactly as Keep would write it, and gives ea
 explanation: length, speech level, peak, clipping, loudness (LUFS), noise floor, bandwidth, mains hum, silence at the ends,
 and how much of the clip is silence. They are advice. Only the length and "not silent" rules in the section after next
 stop you keeping a clip.
+
+Clipping is counted on the recording behind the clip as well as on the clip itself. Gain and the limiter can bring clipped
+peaks down so that the finished clip measures clean, but the damage is still in it. A part you cut or silenced does not
+count, because it is no longer in the clip.
 
 The noise floor is read from the quietest stretch of the clip (the quietest tenth of it, or the quietest fifth of a
 second, whichever is lower), so a take needs at least a short pause to be measured. Cutting the pauses short does not
@@ -228,9 +248,9 @@ says what **Auto fix** would do about it. It looks for:
 | Low-frequency rumble | Switches on the high-pass filter at 80 Hz. |
 | Speech too quiet or too loud | Sets the gain that puts the speech at -20 dB, with the peak limiter on so one loud pop cannot hold it down. |
 | Peaks above -1 dBFS | Switches on the peak limiter. |
-| A clearly noisy clip (speech under 25 dB above the noise) | Switches on noise reduction, but only if FFmpeg is installed, and only if trying it on a copy lowers the noise by at least 3 dB. |
+| A clearly noisy clip (speech under 25 dB above the noise) | Switches on noise reduction, set about 5 dB above the clip's own noise floor, but only if FFmpeg is installed, and only if trying it on a copy lowers the noise by at least 3 dB without taking more than 4 dB from the voice in any band. |
 | Slightly noisy (25 to 35 dB) | Nothing. Noise reduction can change the voice, so the finding tells you to try it yourself on the Process tab. |
-| Clipping, a telephone-quality recording, a clip that is too short or too long | Nothing: these cannot be repaired. The finding says what to do instead. |
+| Clipping, a telephone-quality recording, a clip that is too short or too long | Nothing: these cannot be repaired. The finding says what to do instead, and clipping stays on the list after the limiter has brought the peaks down. |
 
 **Auto fix** (`Ctrl+Shift+F`, the wand button) applies the plan. All of it is **one undo step** (`Ctrl+Z` takes it all
 back), and the original recording is never touched. Your own settings are respected: a filter you already switched on
@@ -258,15 +278,19 @@ The **Ready to keep?** card lists what is still needed, with a count of the prob
 - the **origin** (where the recording came from) is entered;
 - the **allowed use** (what the voice may be used for) is entered;
 - you ticked **the permission box**: you have the right to use this voice for the purpose you stated, because it is
-  your own voice or the speaker has given permission;
+  your own voice or the speaker has given permission. The tick is a statement about what is written above it, so changing
+  the origin or the allowed use clears it, on a kept clip as well, and it has to be given again;
 - the transcript still matches the words after any cuts.
 
 Press **Keep clip** (`Ctrl+S`). If something is missing, a message lists it and nothing is written. Otherwise Voice
 Slate writes the 24 kHz mono WAV and the sidecar JSON next to the original, deletes the take's autosave file, and the
-take shows *Kept*. Keeping a kept clip again rewrites only that clip's own two files.
+take shows *Kept*. Keeping a kept clip again rewrites only that clip's own two files. If the files cannot be written (a full
+disk, a file open in another program), a message says why, the take stays as it was, and you can press Keep again once the
+problem is fixed.
 
 The sidecar also records how the transcript came about (typed, read from a script, a draft from the recognizer, or
-edited), the label if the take has one, and every edit and setting used. See [Clip format](clip-format.md).
+edited), when you ticked the permission box, the label if the take has one, and every edit and setting used. See
+[Clip format](clip-format.md).
 
 **Discard** moves the take's files (the original, the export and the sidecar, and the autosave file if there is one) to
 the Recycle Bin, after asking, so you can restore them from there. If the Recycle Bin cannot take them (a network folder,
@@ -414,8 +438,22 @@ Close it or give it another key, then restart Voice Slate. If you turned **Recor
 in the Voice Slate window.
 
 **A saved clip is missing from the list.** The program lists a message in the status line when a sidecar cannot be used,
-and does not change the files. Common reasons are a moved or deleted original, or a sidecar edited by hand. The files
-stay where they are.
+and does not change the files. Common reasons are a moved or deleted original, or a sidecar edited by hand. The other clips
+load as usual, and the files stay where they are.
+
+**It says "Could not write the files" when I press Keep.** The take is not kept, and nothing was changed: the message gives
+the reason, usually a full disk or a clip open in another program. Your work on the take goes on being saved. Fix the
+problem and press Keep again.
+
+**It says "Could not play".** The sound could not reach an output device. Check that one is connected and chosen as the
+default in Windows' sound settings.
+
+**A message says "Something went wrong".** The program ran into something it did not expect. It says what, and the details
+are in `voice-slate.log`. Your recordings are not affected, but the last thing you did may not have finished, so check it.
+If it happens again, please [report it](../CONTRIBUTING.md#reporting-a-problem).
+
+**A take I never finished has appeared, marked interrupted.** The program stopped while that take was being recorded, and
+the next start made a take of what had reached the disk. Keep it or discard it like any other.
 
 **Dragging a clip out does nothing.** Only the card of a kept take can be dragged, and not while recording. The place you
 drop it on must accept files: some web pages take a file only on their own drop area, and Windows does not let a program

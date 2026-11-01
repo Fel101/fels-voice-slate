@@ -1,10 +1,10 @@
 """Saving the work on a take while it happens, so a crash or a close does not lose it.
 
-A take that is not kept has its original on disk from the moment it was made, but its cuts, its Process settings and the
-text typed for it live in memory until Keep. This part writes them to an autosave file beside the original (store.py says
-what the file holds) shortly after each change, and again when another take is opened and when the program closes. The
-take comes back with that work when the program starts again. A kept take has its sidecar, so only a new label is
-written there.
+A take has its original on disk from the moment it was made, but its cuts, its Process settings and the text typed for it
+live in memory until Keep. This part writes them to an autosave file beside the original (store.py says what the file
+holds) shortly after each change, and again when another take is opened and when the program closes. The take comes back
+with that work when the program starts again. That goes for a kept take changed since, too, whose label is written
+straight into its sidecar.
 
 A change is written once the take has been still for a moment, or after a few seconds of steady changes such as typing,
 so a burst of edits is one write.

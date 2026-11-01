@@ -11,7 +11,7 @@ from PySide6.QtCore import QByteArray, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QApplication, QLabel, QMainWindow, QMenu, QWidget
 
-from .. import asr_setup, manifest, share, transcript
+from .. import asr_setup, launch, manifest, share, transcript
 from .. import audio_core as ac
 from .. import clean, settings
 from ..clean import CleanError
@@ -39,6 +39,7 @@ ALERT_MS = 2000                    # how long the taskbar button flashes when F9
 
 class MainWindow(QMainWindow):
     closed = Signal()
+    unexpected = Signal(str)                # an error nothing caught, from any thread (recorder/ui/__init__.py sends these)
 
     def __init__(self, session=None, dialogs=None, settings_file=None, hotkey=None):
         """`hotkey` is the key that reaches this window from other programs (recorder/hotkey.py); without one, F9 only
@@ -54,6 +55,7 @@ class MainWindow(QMainWindow):
         self._shut = False                  # set when the window has closed for good
         self._last_head = None
         self._edited_seconds = 0.0
+        self._errors_shown = set()
         self.setWindowTitle(settings.APP_NAME)
         self.setMinimumSize(MIN_SIZE)
         self.resize(self._first_size())
@@ -83,6 +85,7 @@ class MainWindow(QMainWindow):
         self._analysis_timer.setInterval(ANALYSIS_DELAY_MS)
         self._analysis_timer.timeout.connect(self._request_analysis)
         self.session.bus.listen(self._heard)
+        self.unexpected.connect(self._show_unexpected, Qt.ConnectionType.QueuedConnection)
         self._refresh({'speakers', 'devices', 'takes', 'current', 'recording', 'transport', 'script', 'settings'})
         self._show_status(self.session.status_text)
         if self.hotkey is not None:
@@ -252,6 +255,16 @@ class MainWindow(QMainWindow):
     def _show_status(self, text):
         self.status_text.set_full_text(text)
 
+    def _show_unexpected(self, text):
+        """Something failed that nothing here was ready for. Say so instead of leaving the person to wonder why nothing
+        happened, but once for each message: a fault in something that repeats would otherwise open a dialog twenty times a
+        second."""
+        self._show_status(f'Something went wrong: {text}')
+        if text not in self._errors_shown:
+            self._errors_shown.add(text)
+            self.dialogs.notice('error', 'Something went wrong', f'{text}\n\nThe last action may not have finished. Your '
+                                f'recordings are not affected. The details are in {launch.log_path()}')
+
     def _derived(self):
         """The measurement of the current recipe if it is ready (never starts one)."""
         take = self.session.current
@@ -298,6 +311,8 @@ class MainWindow(QMainWindow):
             self.inspector.refresh_analysis(self._derived())
             self._analysis_timer.start()
             self._repaint_timelines()
+            if s.current is not None and s.current.kept:
+                self.library.refresh_takes()            # its card says whether it still matches the kept clip
         if topics & {'selection', 'playhead'}:
             panel.info.refresh()
             self._repaint_timelines()
@@ -543,6 +558,16 @@ class MainWindow(QMainWindow):
         if self.session.current is not None and self._discard_current(
                 'Re-record?', 'This take moves to the Recycle Bin and a new recording starts straight away.'):
             self.session.capturing.start()
+
+    def revert_take(self, take):
+        """Drop what has been changed on a kept clip since Keep, after asking."""
+        if not self.dialogs.confirm('Go back to the kept clip?', 'The changes made since this clip was kept will be '
+                                    'dropped. The kept clip itself has not changed.', yes='Drop the changes', danger=True):
+            return
+        try:
+            self.session.workspace.revert(take)
+        except (OSError, ValueError) as e:
+            self.dialogs.notice('error', 'Could not go back to the kept clip', str(e))
 
     def rename_take(self):
         """Put the cursor in the Label field of the take in front, so it can be given a name."""
@@ -810,6 +835,8 @@ class MainWindow(QMainWindow):
             move = menu.addMenu('Move to speaker')
             for slug, name in others:
                 move.addAction(name, lambda checked=False, slug=slug: self._move(take, slug))
+        if take.changed:
+            menu.addAction('Go back to the kept clip...', lambda: self.revert_take(take))
         menu.addSeparator()
         menu.addAction('Discard...', lambda: (self._take_picked(take), self.discard()))
         return menu

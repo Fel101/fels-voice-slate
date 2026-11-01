@@ -89,7 +89,7 @@ class _MicBackend:
 
     def open(self, on_block):
         def callback(indata, frames, time_info, status):
-            on_block(np.array(indata, dtype=np.float32))
+            on_block(np.array(indata, dtype=np.float32), bool(status.input_overflow or status.input_underflow))
 
         self._stream = self._sd.InputStream(device=self.device, samplerate=self.rate, channels=self.channels,
                                             dtype='float32', callback=callback)
@@ -154,7 +154,7 @@ class _LoopbackBackend:
 
         def callback(in_data, frame_count, time_info, status):
             x = np.frombuffer(in_data, dtype='<i2').astype(np.float32) / 32768.0
-            on_block(x.reshape(-1, self.channels))
+            on_block(x.reshape(-1, self.channels), bool(status & (pa.paInputOverflow | pa.paInputUnderflow)))
             return None, pa.paContinue
 
         self._stream = self._p.open(format=pa.paInt16, channels=self.channels, rate=self.rate, input=True,
@@ -211,6 +211,8 @@ class Capture:
         self._recording = False
         self._frames = 0
         self._columns = []                     # (frames so far, lowest, highest) per recorded block: the live waveform
+        self._spooled = 0                      # how many of the blocks new_blocks has handed out
+        self.dropouts = 0                      # how many times the device said it lost audio during this take
         self.level = (-120.0, -120.0)
         self.armed = False
         self.close_error = None
@@ -243,12 +245,16 @@ class Capture:
         out[:, 0] /= self.rate
         return out.astype(np.float32)
 
-    def _on_block(self, x):
+    def _on_block(self, x, lost=False):
+        """A block from the device. `lost` says the device lost audio just before it. The first block of a stream can say
+        that about nothing but the stream starting, so it is not counted."""
         levels = _mono_levels(x)
         with self._lock:
             self.level = levels
+            first = self._last_block is None
             self._last_block = time.monotonic()
             if self._recording:
+                self.dropouts += bool(lost and not first)
                 self._blocks.append(x)
                 self._frames += len(x)
                 if len(x):
@@ -275,12 +281,21 @@ class Capture:
                     self._columns.append((frames, *_span(block)))
             self._ring.clear()
             self._ring_frames = 0
+            self._spooled = 0
+            self.dropouts = 0
             self._recording = True
             self._started = time.monotonic()
             self._last_block = None
         if not self.armed:
             self.backend.open(self._on_block)
             self.armed = True
+
+    def new_blocks(self):
+        """The blocks recorded since the last call, for writing to disk as the take goes on."""
+        with self._lock:
+            blocks = self._blocks[self._spooled:]
+            self._spooled = len(self._blocks)
+        return blocks
 
     def alive(self):
         return self.backend.alive()

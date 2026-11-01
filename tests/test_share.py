@@ -198,3 +198,8 @@ def test_the_offered_rates_are_the_ones_programs_ask_for():
     assert RATES == (16000, 22050, 24000, 44100, 48000) and ac.EXPORT_RATE in RATES
     assert [share.rate_text(r) for r in RATES] == ['16 kHz', '22.05 kHz', '24 kHz', '44.1 kHz', '48 kHz']
     assert share.DEFAULT_KIND in FORMATS and share.DEFAULT_RATE in RATES
+
+
+@pytest.mark.parametrize('name', ['nul', 'CON', 'com0', 'LPT9.old'])
+def test_a_name_windows_keeps_for_a_device_is_given_a_prefix(name):
+    assert share.filename_for(name) == f'_{name}'

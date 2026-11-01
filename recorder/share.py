@@ -12,6 +12,7 @@ import numpy as np
 import soundfile as sf
 
 from . import audio_core as ac
+from .store import RESERVED_NAMES
 
 MP3_KBPS = 128
 # kind: (name shown, file ending, SoundFile format, subtype, other settings of the writer)
@@ -26,7 +27,6 @@ DEFAULT_KIND, DEFAULT_RATE = 'wav', 48000
 # The Ogg encoder in libsndfile crashes the whole program (a stack overflow, not an error that can be caught) when it is
 # given a clip of half a minute or so in one call. Eight thousand frames at a time is nowhere near the limit.
 CHUNK_FRAMES = 8192
-_RESERVED = {'CON', 'PRN', 'AUX', 'NUL', *(f'COM{n}' for n in range(1, 10)), *(f'LPT{n}' for n in range(1, 10))}
 
 
 class CopyError(OSError):
@@ -51,7 +51,7 @@ def filename_for(text, fallback='clip'):
     name = ' '.join(name.split()).strip(' .')[:80].strip(' .')
     if not name:
         return fallback
-    return f'_{name}' if name.split('.')[0].upper() in _RESERVED else name
+    return f'_{name}' if name.split('.')[0].upper() in RESERVED_NAMES else name
 
 
 def save_copy(source, destination, kind=DEFAULT_KIND, rate=DEFAULT_RATE):

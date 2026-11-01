@@ -161,6 +161,25 @@ def export_samples(master, rate, recipe, denoise=None, cache=None, ident=None):
     return finish(process(master, rate, recipe, denoise, cache, ident), rate, recipe.chain)
 
 
+def recorded_clipping(master, rate, recipe):
+    """How much of the recording behind the clip is at full scale, on its loudest channel, as the keep rules count it.
+
+    Measuring the finished clip cannot tell: gain and the limiter bring clipped peaks down, and the clip then measures clean
+    although the damage is still in it. Only what the clip leaves out (the cuts and the silenced parts) does not count.
+    """
+    peak = np.abs(np.asarray(master, dtype=np.float32))
+    peak = peak if peak.ndim == 1 else peak.max(axis=1)
+    used = np.zeros(len(peak), dtype=bool)
+    for a, b in segments_of(master, rate, recipe.edits):
+        used[a:b] = True
+    for e in recipe.edits:
+        if e.get('op') == 'silence':
+            used[int(round(e['start_seconds'] * rate)):int(round(e['end_seconds'] * rate))] = False
+    kept = peak[used]
+    return {'recording_clipped': bool(kept.size and kept.max() >= ac.CLIP_FLAG),
+            'recording_clipped_fraction': round(float(np.mean(kept >= ac.CLIP_LAB)), 6) if kept.size else 0.0}
+
+
 # ---- master time and edited time ------------------------------------------------------------------------------------
 
 def segments_of(master, rate, edits):

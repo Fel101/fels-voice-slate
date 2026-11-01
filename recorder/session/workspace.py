@@ -11,13 +11,14 @@ import numpy as np
 
 from .. import audio_core as ac
 from .. import settings
-from ..store import Library, Take
+from ..store import Library, Take, now_iso
 
 Step = namedtuple('Step', 'key label done detail')           # a rule that must be met before Keep
 Advice = namedtuple('Advice', 'key text')                     # something worth knowing that does not block Keep
 Readiness = namedtuple('Readiness', 'steps ready advice')
 
 META_FIELDS = ('transcript', 'origin', 'allowed_use', 'source_url', 'consent_confirmed', 'notes', 'label')
+STATED_FIELDS = ('origin', 'allowed_use')                     # what the permission tick is a statement about
 
 
 class Workspace:
@@ -118,10 +119,13 @@ class Workspace:
         self._scope = (self.lib.root.resolve(), slug)
         in_memory = self._session_takes.get(self._scope, [])
         known = {self._identity(t) for t in in_memory}
-        extra = [t for t in self.lib.load_takes(slug) if self._identity(t) not in known]
+        extra = [t for t in self.lib.load_takes(slug, recover=not self.is_recording()) if self._identity(t) not in known]
         self.takes = sorted(in_memory + extra, key=lambda t: t.created, reverse=True)
         self._remember_takes()
         notes = []
+        if self.lib.recovered:
+            count = self.lib.recovered
+            notes.append(f'Recovered {count} recording{"s" if count != 1 else ""} cut short when the program stopped.')
         if self.lib.skipped:
             detail = '; '.join(f'{name}: {reason}' for name, reason in self.lib.skipped)
             notes.append(f'{len(self.lib.skipped)} saved clip(s) not loaded. Their files were not changed. {detail}')
@@ -196,21 +200,28 @@ class Workspace:
         take = self.current
         if take is None:
             return
-        changed = False
+        changed, reworded = False, False
         for key, value in fields.items():
             if key not in META_FIELDS:
                 raise KeyError(key)
             value = bool(value) if key == 'consent_confirmed' else ('' if value is None else str(value))
             if take.meta.get(key) != value:
+                reworded = reworded or (key in STATED_FIELDS and take.meta.get(key, '').strip() != value.strip())
                 take.meta[key] = value
                 changed = True
+                if key == 'consent_confirmed':
+                    take.meta['consent_confirmed_at'] = now_iso() if value else ''
+        if reworded and take.meta.get('consent_confirmed') and 'consent_confirmed' not in fields:
+            # The permission is given for what is written there, so new words need it given again.
+            take.meta.update(consent_confirmed=False, consent_confirmed_at='')
+            self.bus.status('The permission applies to what is written there, so tick the box again for the new wording.')
         if changed:
             self.bus.notify('meta', take)
 
     def confirm_transcript(self):
         take = self.current
         if take is not None and take.needs_transcript_review:
-            take.needs_transcript_review = False
+            take.transcript_checked()
             self.bus.notify('meta', take)
 
     def readiness(self, derived=None):
@@ -245,6 +256,9 @@ class Workspace:
         advice = []
         if take.unsaved:
             advice.append(Advice('unsaved', 'The original is only in memory. Keep writes it once the folder is writable.'))
+        if take.changed:
+            advice.append(Advice('changed', 'Changed since it was kept. Your changes are saved, but the kept clip does not '
+                                            'have them until you update it.'))
         if derived is not None and derived.stats is not None:
             advice.extend(Advice(issue.code, issue.text) for issue in ac.take_warnings(derived.stats, take.flags)
                           if not issue.blocks)
@@ -273,9 +287,10 @@ class Workspace:
         if draft and text == draft:
             return 'asr_draft'
         saved = take.meta.get('saved_transcript')
+        status = take.meta.get('transcript_status', 'typed')
         if saved is not None and text == saved.strip():
-            return take.meta.get('transcript_status', 'typed')
-        return 'edited' if take.meta.get('transcript_status') == 'read_from_script' else 'typed'
+            return status
+        return 'typed' if status == 'typed' else 'edited'          # a script line or a draft that was then changed
 
     def keep(self):
         """Write the current take's export and sidecar. Raises KeepBlocked, CleanError or OSError with the reason."""
@@ -289,6 +304,18 @@ class Workspace:
         self.bus.notify('meta')
         self.bus.status(f"Kept. Saved to {paths['export']}")
         return paths
+
+    def revert(self, take=None):
+        """Put a kept take (the open one unless another is given) back as it was kept, dropping the changes made since.
+        Raises OSError or ValueError, with the take as it was, when its sidecar cannot be used."""
+        take = take or self.current
+        if take is None or not take.kept:
+            return False
+        self.lib.revert(take)
+        self.bus.notify('takes')
+        self.open_take(take)
+        self.bus.status('Back to the clip as it was kept.')
+        return True
 
     def move_take(self, slug, take=None):
         """File a take (the open one unless another is given) under another speaker. Returns the old files that could
@@ -318,6 +345,8 @@ class Workspace:
         self.bus.notify('takes')
         if was_open:
             self.bus.notify('current')
+        if take.changed:
+            self.bus.notify('meta', take)           # its autosave file stayed behind: it is written again in the new place
         self.bus.status(f'Moved to {name}.' if not left else
                         f'Moved to {name}, but these old files could not be removed: {", ".join(p.name for p in left)}.')
         return left

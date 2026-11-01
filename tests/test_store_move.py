@@ -481,3 +481,18 @@ def test_trash_unavailable_is_not_raised_by_a_move(lib, pair, monkeypatch):
     take = kept_take(lib, ann)
     monkeypatch.setattr(lib, 'trash', lambda paths: (_ for _ in ()).throw(TrashUnavailable('no bin')))
     assert lib.move_take(take, ben) == []
+
+
+def test_changes_to_a_kept_clip_follow_it_to_the_new_speaker(lib, pair):
+    ann, ben = pair
+    take = kept_take(lib, ann)
+    take.history.cut(1.0, 2.0)
+    take.transcript_checked()
+    lib.autosave(take)
+    old = lib.autosave_file(take)
+    lib.move_take(take, ben)
+    assert not old.exists() and take.changed
+    lib.autosave(take)
+    assert lib.autosave_file(take).is_file() and lib.autosave_file(take).parent.parent.name == ben
+    [back] = Library(lib.root, trash=lib.trash).load_takes(ben)
+    assert back.changed and back.history.edits == take.history.edits

@@ -13,7 +13,8 @@ from .palette import color
 from .widgets import ElidedCombo, button, caption, chip, hbox, label, vbox
 
 SOURCES = {'mic': 'Mic', 'system': 'System', 'import': 'Import'}
-STATUS_COLOURS = {'In review': 'amber', 'Kept': 'green', 'Not kept': 'muted', 'Recording': 'red', 'Not saved': 'red'}
+STATUS_COLOURS = {'In review': 'amber', 'Kept': 'green', 'Changed': 'amber', 'Not kept': 'muted', 'Recording': 'red',
+                  'Not saved': 'red'}
 THUMB_COLUMNS = 90
 EMPTY_TEXT = 'No takes yet.\nPress Record (F9), or import a recording.'
 
@@ -282,6 +283,8 @@ class LibraryPanel(QWidget):
         text = ' '.join(str(take.meta.get('transcript') or '').split())
         if text:
             lines.append(f'"{text[:140]}{"..." if len(text) > 140 else ""}"')
+        if take.changed:
+            lines.append('Changed since it was kept. Update kept clip writes the changes.')
         if take.kept:
             lines.append('Drag the card into Explorer or another program to copy the clip.')
         return '\n'.join(lines)
@@ -330,7 +333,7 @@ class LibraryPanel(QWidget):
                 card.setToolTip('')
                 continue
             number = len(takes) - takes.index(item)            # counted in the whole list, so a filter keeps the numbers
-            status = ('Kept' if item.kept else 'Not saved' if item.unsaved else
+            status = ('Changed' if item.changed else 'Kept' if item.kept else 'Not saved' if item.unsaved else
                       'In review' if item is workspace.current else 'Not kept')
             name = clean_label(item.meta.get('label'))
             if name:

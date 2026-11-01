@@ -198,7 +198,7 @@ def test_keep_removes_the_autosave_file_and_the_sidecar_holds_the_work(lib, slug
     assert not path.exists()
     data = json.loads(paths['sidecar'].read_text(encoding='utf-8'))
     assert data['label'] == 'Greeting' and data['edits'] and data['consent_confirmed'] is True
-    assert lib.autosave(take) is False and not path.exists()           # a kept take is not autosaved again
+    assert lib.autosave(take) is False and not path.exists()           # nothing has changed since
 
 
 # ---- a file that cannot be used ----------------------------------------------------------------------------------------
@@ -356,3 +356,60 @@ def test_renaming_a_speaker_to_the_name_it_has_writes_nothing(lib, slug):
     stamp = path.stat().st_mtime_ns
     lib.rename_speaker(slug, 'Test Speaker')
     assert path.stat().st_mtime_ns == stamp
+
+
+# ---- a kept take changed again -----------------------------------------------------------------------------------------
+
+def test_a_kept_take_has_changed_when_its_edits_or_text_differ_from_its_sidecar(lib, slug):
+    take = saved_take(lib, slug, **KEEPABLE)
+    assert not take.changed                                               # not kept
+    lib.keep(slug, take)
+    assert not take.changed
+    take.meta['notes'] = 'a note'
+    assert take.changed
+    take.meta['notes'] = ''
+    take.history.set_chain('highpass', 'High-pass on', enabled=True)
+    assert take.changed
+    take.history.undo()
+    assert not take.changed
+    assert not restart(lib, slug)[0].changed
+
+
+def test_a_label_alone_does_not_make_a_kept_take_changed(lib, slug):
+    take = saved_take(lib, slug, **KEEPABLE)
+    lib.keep(slug, take)
+    take.meta['label'] = 'Greeting'
+    assert not take.changed
+
+
+def test_a_kept_take_keeps_its_flags_and_device_from_the_sidecar(lib, slug):
+    take = saved_take(lib, slug, **KEEPABLE)
+    take.flags = ['interrupted']
+    lib.keep(slug, take)
+    take.history.cut(1.0, 2.0)
+    take.transcript_checked()
+    lib.autosave(take)
+    [back] = restart(lib, slug)
+    assert back.changed and 'recovered' not in back.flags and 'interrupted' in back.flags
+    assert back.device == {'name': 'test mic'} and back.needs_transcript_review is False
+
+
+def test_a_damaged_autosave_file_leaves_a_kept_take_as_it_was_kept(lib, slug):
+    take = saved_take(lib, slug, **KEEPABLE)
+    lib.keep(slug, take)
+    take.history.cut(1.0, 2.0)
+    lib.autosave(take)
+    lib.autosave_file(take).write_text('{"schema": ', encoding='utf-8')
+    [back] = restart(lib, slug)
+    assert not back.changed and 'damaged' in back.autosave_problem
+
+
+def test_a_kept_take_with_no_label_written_keeps_the_sidecars_label(lib, slug):
+    take = saved_take(lib, slug, label='Greeting', **KEEPABLE)
+    lib.keep(slug, take)
+    take.history.cut(1.0, 2.0)
+    lib.autosave(take)
+    data = written(lib, take)
+    data['label'] = 'An older name'
+    lib.autosave_file(take).write_text(json.dumps(data), encoding='utf-8')
+    assert restart(lib, slug)[0].meta['label'] == 'Greeting'

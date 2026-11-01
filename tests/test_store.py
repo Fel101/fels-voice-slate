@@ -1,11 +1,13 @@
 import json
+import os
+from pathlib import Path
 
 import numpy as np
 import pytest
 import soundfile as sf
 
 from helpers import RATE, speech
-from recorder import clean
+from recorder import clean, store
 from recorder.store import KeepBlocked, Library, Take, TrashUnavailable
 
 
@@ -430,3 +432,273 @@ def test_the_masters_stay_untouched_by_every_edit(lib, slug):
     take.needs_transcript_review = False
     lib.keep(slug, take)
     assert master.read_bytes() == before
+
+
+# ---- a Keep that cannot write ------------------------------------------------------------------------------------------
+# A folder standing where a file has to go makes the real write fail with the real error. A stand-in that raised OSError is
+# how a failed Keep came to look like a kept clip: SoundFile raises an error of its own, which nothing was catching.
+
+@pytest.mark.parametrize('blocked', ['{stem}.wav.tmp', '{stem}.json.tmp', '{stem}.wav', '{stem}.json'])
+def test_a_keep_that_cannot_write_leaves_the_take_not_kept_and_nothing_half_done(lib, slug, blocked):
+    take = complete_take()
+    lib.save_master(slug, take)
+    obstacle = lib.folder(slug) / blocked.format(stem=take.stem)
+    obstacle.mkdir()
+    with pytest.raises(OSError):
+        lib.keep(slug, take)
+    assert not take.kept and take.export_path is None and take.sidecar_path is None
+    assert [p.name for p in lib.folder(slug).iterdir() if p.is_file()] == []
+    obstacle.rmdir()
+    paths = lib.keep(slug, take)                                 # and it goes through once the problem is gone
+    assert take.kept and paths['export'].is_file() and paths['sidecar'].is_file()
+
+
+def test_a_keep_that_fails_after_writing_the_original_counts_the_original_as_saved(lib, slug):
+    take = complete_take()
+    take.unsaved = True
+    (lib.folder(slug) / f'{take.stem}.wav.tmp').mkdir(parents=True)
+    with pytest.raises(OSError):
+        lib.keep(slug, take)
+    assert take.master_path.is_file() and not take.unsaved and not take.kept
+
+
+def test_a_keep_that_cannot_write_the_original_leaves_the_take_in_memory(lib, slug):
+    take = complete_take()
+    take.unsaved = True
+    lib.folder(slug).mkdir(parents=True)
+    (lib.folder(slug) / 'masters').write_text('a file where the folder should be', encoding='utf-8')
+    with pytest.raises(OSError):
+        lib.keep(slug, take)
+    assert take.unsaved and not take.kept and take.master_path is None
+
+
+def test_an_update_that_cannot_write_leaves_the_kept_clip_and_the_changes_alone(lib, slug):
+    take = complete_take(seconds=14.0)
+    paths = lib.keep(slug, take)
+    before = paths['export'].read_bytes(), paths['sidecar'].read_bytes()
+    take.history.cut(0.0, 1.0)
+    (lib.folder(slug) / (paths['export'].name + '.tmp')).mkdir()
+    with pytest.raises(OSError):
+        lib.keep(slug, take)
+    assert (paths['export'].read_bytes(), paths['sidecar'].read_bytes()) == before
+    assert take.kept and take.changed
+
+
+def test_a_keep_survives_a_speaker_list_that_cannot_be_written(lib, slug, monkeypatch):
+    """The clip is whole by then: only the texts offered for the next take are lost, which is no reason to report a failure."""
+    monkeypatch.setattr(lib, 'remember', lambda *a: (_ for _ in ()).throw(OSError('speakers.json is locked')))
+    take = complete_take()
+    assert lib.keep(slug, take)['export'].is_file() and take.kept
+
+
+def test_files_reach_the_disk_before_they_are_renamed_into_place(lib, slug, monkeypatch):
+    events, sync, replace = [], store.sync_file, os.replace
+
+    def noted_sync(path):
+        events.append(('sync', Path(path).name))
+        sync(path)
+
+    def noted_replace(source, target):
+        events.append(('replace', Path(source).name))
+        replace(source, target)
+
+    monkeypatch.setattr(store, 'sync_file', noted_sync)
+    monkeypatch.setattr(os, 'replace', noted_replace)
+    take = complete_take()
+    lib.keep(slug, take)
+    take.history.cut(1.0, 2.0)
+    lib.autosave(take)
+    renamed = [name for kind, name in events if kind == 'replace']
+    assert len(renamed) == 5                                     # the original, the WAV, the sidecar, the speakers, the autosave
+    assert all(events.index(('sync', name)) < events.index(('replace', name)) for name in renamed)
+
+
+# ---- what a sidecar records --------------------------------------------------------------------------------------------
+
+def test_flags_describe_the_clip_as_it_is_kept_now_and_not_as_it_was(lib, slug):
+    take = complete_take(seconds=14.0)
+    take.flags = ['interrupted']
+    take.history.cut(0.0, 1.0)
+    take.history.set_chain('level', 'Level', gain_db=3.0)
+    take.history.set_chain('limiter', 'Limiter', enabled=True)
+    paths = lib.keep(slug, take)
+    assert json.loads(paths['sidecar'].read_text(encoding='utf-8'))['flags'] == ['edited', 'interrupted', 'level_changed',
+                                                                                 'limited']
+    back = lib.load_kept(slug)[0]
+    back.history.remove(0)
+    back.history.set_chain('level', 'Level', gain_db=0.0)
+    back.history.set_chain('limiter', 'Limiter', enabled=False)
+    lib.keep(slug, back)
+    assert json.loads(paths['sidecar'].read_text(encoding='utf-8'))['flags'] == ['interrupted']
+
+
+def clipped_take():
+    return Take(source='mic', samples=np.clip(speech(12.0, amp=3.0), -1.0, 1.0), rate=RATE, meta=complete_take().meta)
+
+
+def test_gain_and_the_limiter_cannot_hide_clipping_from_the_sidecar(lib, slug):
+    take = clipped_take()
+    take.history.set_chain('level', 'Level', gain_db=-12.0)
+    take.history.set_chain('limiter', 'Limiter', enabled=True)
+    data = json.loads(lib.keep(slug, take)['sidecar'].read_text(encoding='utf-8'))
+    assert 'clipped' in data['flags'] and data['measurements']['clipped_fraction'] == 0.0
+    assert data['measurements']['recording_clipped_fraction'] > 0.2
+
+
+def test_a_clip_with_the_clipped_part_cut_out_is_not_flagged(lib, slug):
+    take = complete_take(seconds=12.0)
+    samples = take.samples.copy()
+    samples[int(RATE * 5.0):int(RATE * 6.0)] = 1.0
+    take = Take(source='mic', samples=samples, rate=RATE, meta=take.meta)
+    take.history.cut(4.9, 6.1)
+    data = json.loads(lib.keep(slug, take)['sidecar'].read_text(encoding='utf-8'))
+    assert 'clipped' not in data['flags'] and data['measurements']['recording_clipped_fraction'] == 0.0
+
+
+def test_the_time_of_the_permission_is_kept_with_it_and_none_is_made_up(lib, slug):
+    take = complete_take(consent_confirmed_at='2026-10-31T10:00:00+00:00')
+    paths = lib.keep(slug, take)
+    assert json.loads(paths['sidecar'].read_text(encoding='utf-8'))['consent_confirmed_at'] == '2026-10-31T10:00:00+00:00'
+    back = lib.load_kept(slug)[0]
+    lib.keep(slug, back)
+    assert json.loads(paths['sidecar'].read_text(encoding='utf-8'))['consent_confirmed_at'] == '2026-10-31T10:00:00+00:00'
+    older = complete_take()                                      # a clip kept before the time was recorded has none
+    data = json.loads(lib.keep(slug, older)['sidecar'].read_text(encoding='utf-8'))
+    assert 'consent_confirmed_at' not in data
+
+
+# ---- what cannot come in -----------------------------------------------------------------------------------------------
+
+@pytest.mark.parametrize('field, value, reason', [
+    ('created', None, 'incomplete'), ('created', 12345, 'incomplete'), ('created', 'last Tuesday', 'creation time'),
+    ('id', None, 'incomplete'), ('source', 5, 'incomplete'),
+    ('transcript', 123, 'transcript is not text'), ('origin', ['a'], 'origin is not text'),
+    ('allowed_use', {'a': 1}, 'allowed_use is not text'), ('notes', 7, 'notes is not text'),
+    ('source_url', 9, 'source_url is not text'),
+    ('flags', 'edited', 'flags'), ('flags', [1], 'flags'), ('device', 'a microphone', 'device'),
+])
+def test_a_sidecar_with_a_value_of_the_wrong_kind_costs_that_clip_and_no_other(lib, slug, field, value, reason):
+    good, bad = complete_take(), complete_take()
+    lib.keep(slug, good)
+    paths = lib.keep(slug, bad)
+    data = json.loads(paths['sidecar'].read_text(encoding='utf-8'))
+    data[field] = value
+    text = json.dumps(data)
+    paths['sidecar'].write_text(text, encoding='utf-8')
+    assert [take.id for take in lib.load_kept(slug)] == [good.id]
+    assert lib.skipped[0][0] == paths['sidecar'].name and reason in lib.skipped[0][1]
+    assert paths['sidecar'].read_text(encoding='utf-8') == text
+
+
+def test_an_unknown_transcript_status_is_read_as_typed(lib, slug):
+    paths = lib.keep(slug, complete_take())
+    data = json.loads(paths['sidecar'].read_text(encoding='utf-8'))
+    data['transcript_status'] = ['not', 'a', 'status']
+    paths['sidecar'].write_text(json.dumps(data), encoding='utf-8')
+    assert lib.load_kept(slug)[0].meta['transcript_status'] == 'typed'
+
+
+def test_remembered_texts_that_are_not_text_are_left_out(lib, slug):
+    data = json.loads((lib.root / 'speakers.json').read_text(encoding='utf-8'))
+    data[slug].update(origin=5, allowed_use=['a'])
+    (lib.root / 'speakers.json').write_text(json.dumps(data), encoding='utf-8')
+    assert lib.speaker_defaults(slug) == {'origin': '', 'allowed_use': ''}
+
+
+def test_a_file_with_no_audio_in_it_is_not_imported(lib, slug, tmp_path):
+    path = tmp_path / 'empty.wav'
+    sf.write(str(path), np.zeros(0, np.float32), RATE)
+    with pytest.raises(ValueError, match='no audio'):
+        lib.import_file(slug, path)
+    assert lib.list_unkept(slug) == []
+
+
+@pytest.mark.parametrize('bad', [float('nan'), float('inf')])
+def test_a_file_whose_samples_are_not_numbers_is_not_imported(lib, slug, tmp_path, bad):
+    path = tmp_path / 'damaged.wav'
+    samples = speech(8.0)
+    samples[100] = bad
+    sf.write(str(path), samples, RATE, subtype='FLOAT')
+    with pytest.raises(ValueError, match='damaged'):
+        lib.import_file(slug, path)
+    assert lib.list_unkept(slug) == []
+
+
+@pytest.mark.parametrize('name, folder', [('Nul', 'speaker-nul'), ('CON', 'speaker-con'), ('aux', 'speaker-aux'),
+                                          ('Com1', 'speaker-com1'), ('LPT9', 'speaker-lpt9'), ('Nula', 'nula')])
+def test_a_speaker_called_what_windows_keeps_for_a_device_gets_a_folder_that_works(lib, name, folder):
+    slug = lib.add_speaker(name)
+    assert slug == folder and lib.save_master(slug, complete_take()).is_file()
+
+
+# ---- a recording cut short ---------------------------------------------------------------------------------------------
+
+def spooled(lib, slug, seconds=3.0, channels=1, line=None):
+    """What is left on disk when the program stops in the middle of a take."""
+    spool = lib.open_spool(slug, RATE, channels, 'mic', {'name': 'test mic'}, line)
+    block = speech(seconds)
+    spool.write([block if channels == 1 else np.stack([block] * channels, axis=1)])
+    spool.close()
+    return spool.path
+
+
+def test_a_recording_cut_short_becomes_a_take_that_can_be_kept(lib, slug):
+    lib.remember(slug, 'my room', 'my own voice')
+    path = spooled(lib, slug, 8.0, line='A line to read aloud.')
+    [take] = lib.load_takes(slug)
+    assert lib.recovered == 1 and not path.exists() and take.master_path.is_file()
+    assert take.seconds == pytest.approx(8.0) and np.allclose(take.samples, speech(8.0), atol=1e-6)
+    assert take.flags == ['recovered', 'interrupted'] and take.device == {'name': 'test mic'}
+    assert take.meta['transcript'] == 'A line to read aloud.' and take.meta['transcript_status'] == 'read_from_script'
+    assert take.meta['origin'] == 'my room' and take.meta['allowed_use'] == 'my own voice'
+    take.meta['consent_confirmed'] = True
+    data = json.loads(lib.keep(slug, take)['sidecar'].read_text(encoding='utf-8'))
+    assert 'interrupted' in data['flags'] and data['master_seconds'] == pytest.approx(8.0)
+    assert Library(lib.root, trash=lib.trash).load_takes(slug)[0].id == take.id          # once, and not again
+
+
+def test_a_spool_cut_off_in_the_middle_of_a_frame_keeps_the_whole_frames(lib, slug):
+    path = spooled(lib, slug, 2.0, channels=2)
+    with open(path, 'ab') as f:
+        f.write(b'\x01\x02\x03')
+    [take] = lib.load_takes(slug)
+    assert take.samples.shape == (2 * RATE, 2)
+
+
+def test_a_spool_that_ended_before_any_audio_arrived_leaves_nothing(lib, slug):
+    spool = lib.open_spool(slug, RATE, 1, 'mic', {})
+    spool.close()
+    assert lib.load_takes(slug) == [] and lib.recovered == 0 and not spool.path.exists()
+
+
+@pytest.mark.parametrize('first_line', [b'not json at all', b'[1, 2]', b'{"schema": "something-else"}',
+                                        b'{"schema": "voice-slate-spool-v1"}',
+                                        b'{"schema": "voice-slate-spool-v1", "rate": 0, "channels": 1}',
+                                        b'{"schema": "voice-slate-spool-v1", "rate": 48000, "channels": 1, "created": "?"}'])
+def test_a_spool_that_cannot_be_read_is_reported_and_left_alone(lib, slug, first_line):
+    path = lib.folder(slug) / 'masters' / f'20261031-120000_mic_0a1b2c3d{store.SPOOL_SUFFIX}'
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(first_line + b'\n' + b'\x00' * 400)
+    assert lib.load_takes(slug) == [] and path.is_file() and path.read_bytes().startswith(first_line)
+    assert 'could not be recovered' in dict(lib.skipped)[path.name]
+
+
+def test_the_recording_being_made_is_not_taken_for_one_cut_short(lib, slug):
+    path = spooled(lib, slug)
+    assert lib.load_takes(slug, recover=False) == [] and path.is_file() and lib.recovered == 0
+
+
+def test_writing_the_original_ends_the_need_for_the_spool(lib, slug):
+    path = spooled(lib, slug)
+    take = complete_take()
+    take.spool = path
+    lib.save_master(slug, take)
+    assert not path.exists() and take.spool is None
+
+
+def test_discarding_a_take_takes_its_spool_with_it(lib, slug, recycle):
+    path = spooled(lib, slug)
+    take = complete_take()
+    take.spool = path
+    lib.discard(take)
+    assert recycle.sent == [[path.name]] and not path.exists()

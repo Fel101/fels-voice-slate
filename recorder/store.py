@@ -10,6 +10,11 @@ The work on a take that is not kept yet (its cuts, Process settings, text and la
 `masters/`, beside the original, shortly after each change, so a crash or a close does not lose it. The take comes back
 with that work when the program starts again. The autosave file never holds the permission tick: that is never
 remembered, and is given again at Keep. Keep deletes the autosave file, because the sidecar holds the work from then on.
+A kept take that is changed again gets one too, until Keep writes the changes or they are dropped. It names the kept
+clip it builds on, so one that was left behind by a later Keep is not read.
+
+A take being recorded goes to a spool file in `masters/` as it happens (see Spool), so a crash in the middle of a take
+costs a moment and not the whole take. Every file that matters is forced to the disk before it is renamed into place.
 """
 import datetime as dt
 import hashlib
@@ -30,7 +35,7 @@ from . import audio_core as ac
 from . import clean
 from .core import chain as chain_mod
 from .core import render
-from .core.edits import History, validate_edits
+from .core.edits import History, validate_edits, words_key
 from .settings import default_root
 
 SCHEMA = 'voice-recorder-clip-v2'
@@ -39,9 +44,14 @@ MASTER_SUBTYPE = 'PCM_24'
 STEM_PATTERN = re.compile(r'(\d{8})-(\d{6})_(mic|system|import)_([0-9a-f]{8})\.raw\.wav$')
 AUTOSAVE_SCHEMA = 'voice-slate-autosave-v1'
 AUTOSAVE_SUFFIX = '.autosave.json'
+SPOOL_SCHEMA = 'voice-slate-spool-v1'
+SPOOL_SUFFIX = '.spool'
 AUTOSAVE_TEXT_MAX = 20000           # a text field in an autosave file is cut to this when it is read back
 TRANSCRIPT_STATUSES = ('typed', 'read_from_script', 'asr_draft', 'edited')
 LABEL_MAX = 80
+# What Keep works out afresh each time. Anything else among a take's flags is a fact about how it was recorded.
+WORKED_OUT_FLAGS = {'recovered', 'imported', 'clipped', 'edited', 'filtered', 'cleaned', 'level_changed', 'limited'}
+RESERVED_NAMES = {'CON', 'PRN', 'AUX', 'NUL', *(f'COM{n}' for n in range(10)), *(f'LPT{n}' for n in range(10))}
 
 
 class KeepBlocked(ValueError):
@@ -80,8 +90,33 @@ def file_sha256(path):
     return digest.hexdigest()
 
 
+def sync_file(path):
+    """Put what has been written to a file on the disk now. A file renamed while it is still only in Windows' cache can be
+    left empty under its final name by a power cut."""
+    with open(path, 'rb+') as f:
+        os.fsync(f.fileno())
+
+
+def _write_audio(path, samples, rate, subtype):
+    """Write a WAV file and put it on the disk. SoundFile reports its failures as RuntimeError; this raises OSError."""
+    try:
+        sf.write(str(path), samples, int(rate), subtype=subtype, format='WAV')
+    except RuntimeError as e:
+        raise OSError(f'{path.name} could not be written: {e}') from e
+    sync_file(path)
+
+
+def _remove(path):
+    """Delete a leftover if it is there. Failing to is not worth reporting: it is not anybody's work."""
+    try:
+        Path(path).unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
 def slugify(name):
-    return re.sub(r'[^a-z0-9]+', '-', str(name).lower()).strip('-')[:48] or 'speaker'
+    slug = re.sub(r'[^a-z0-9]+', '-', str(name).lower()).strip('-')[:48] or 'speaker'
+    return f'speaker-{slug}' if slug.upper() in RESERVED_NAMES else slug        # Windows keeps these names for devices
 
 
 def new_take_id():
@@ -101,6 +136,15 @@ def clean_label(value):
 def _label_of(data):
     label = data.get('label')
     return clean_label(label) if isinstance(label, str) else ''
+
+
+def _work_of(take):
+    """What Keep writes of a take, apart from its label, which reaches the sidecar by its own way. Every card in the list
+    asks this on every keystroke, so nothing is copied: a state of the recipe is replaced and never changed in place."""
+    history, meta = take.history, take.meta
+    text = ('transcript', 'origin', 'allowed_use', 'source_url', 'notes')
+    return {'edits': history.edits, 'chain': history.chain, 'fade_ms': history.fade_ms,
+            **{key: str(meta.get(key) or '').strip() for key in text}}
 
 
 def _moves_of(data):
@@ -138,6 +182,10 @@ class Take:
     restored: bool = field(default=False, repr=False)          # its edits and text came back from an autosave file
     autosave_problem: str = field(default='', repr=False)      # why an autosave file beside its original was not used
     moves: list = field(default_factory=list, repr=False)      # where a kept clip has been filed before: from, to, at
+    confirmed_words: str = field(default=None, repr=False)     # the cuts and silences the transcript was checked against
+    kept_work: dict = field(default=None, repr=False)          # what the sidecar holds, to tell when a kept take has changed
+    kept_sha256: str = field(default=None, repr=False)         # the kept WAV's SHA-256, which names the Keep it came from
+    spool: Path = field(default=None, repr=False)              # the recording on disk, until its original is written
 
     def __post_init__(self):
         if self.history is None:
@@ -172,8 +220,53 @@ class Take:
         return self.export_path is not None
 
     @property
+    def changed(self):
+        """True when a kept take holds edits or text that its kept clip and sidecar do not have yet."""
+        return self.kept and self.kept_work is not None and self.kept_work != _work_of(self)
+
+    @property
     def join_fade_ms(self):
         return self.history.fade_ms
+
+    def transcript_checked(self):
+        """The transcript has been compared with the words left in the clip as it is now."""
+        self.needs_transcript_review = False
+        self.confirmed_words = words_key(self.history)
+
+
+class Spool:
+    """A take being recorded, on disk as it happens. If the program stops, the next start makes a take of it.
+
+    The file is one line of JSON saying what it is, then the samples as 32-bit floats. There is no length to fill in at the
+    end, so it can be read however it stops. `write` hands the audio to Windows, which is enough if the program crashes;
+    `sync` puts it on the disk, which is what a power cut needs.
+    """
+
+    def __init__(self, path, about):
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._file = open(self.path, 'wb')
+        self._file.write(json.dumps(about, ensure_ascii=False).encode('utf-8') + b'\n')
+        self._file.flush()
+
+    def write(self, blocks):
+        for block in blocks:
+            self._file.write(np.asarray(block, dtype='<f4').tobytes())
+        self._file.flush()
+
+    def sync(self):
+        self._file.flush()
+        os.fsync(self._file.fileno())
+
+    def close(self):
+        try:
+            self._file.close()
+        except OSError:
+            pass                                    # the audio is in memory: this file is only the copy for a crash
+
+    def remove(self):
+        self.close()
+        _remove(self.path)
 
 
 class Library:
@@ -181,6 +274,7 @@ class Library:
         self.root = Path(root or default_root())
         self.recovery_note = None         # set when speakers.json was damaged and rebuilt, for the window to show
         self.skipped = []                 # (sidecar name, reason) for clips the last load could not use
+        self.recovered = 0                # recordings the last load made takes of after the program stopped mid-take
         self.cache = render.RenderCache()
         self.trash = trash or send_to_trash
 
@@ -237,7 +331,7 @@ class Library:
     def speaker_defaults(self, slug):
         """Origin and allowed-use text remembered for a speaker. Consent is never remembered."""
         speaker = self.speakers().get(slug, {})
-        return {'origin': speaker.get('origin', ''), 'allowed_use': speaker.get('allowed_use', '')}
+        return {key: speaker[key] if isinstance(speaker.get(key), str) else '' for key in ('origin', 'allowed_use')}
 
     def add_speaker(self, name):
         name = str(name).strip()
@@ -290,12 +384,10 @@ class Library:
         tmp = path.with_name(path.name + '.tmp')
         try:
             tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
+            sync_file(tmp)
             os.replace(tmp, path)
         except BaseException:
-            try:
-                tmp.unlink(missing_ok=True)         # a failed write leaves no half-written file behind
-            except OSError:
-                pass
+            _remove(tmp)                            # a failed write leaves no half-written file behind
             raise
 
     # ---- original captures --------------------------------------------------------------------------------------------
@@ -304,8 +396,11 @@ class Library:
     def _write_master(path, samples, rate):
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_name(path.name + '.tmp')
-        sf.write(str(tmp), np.asarray(samples, dtype=np.float32), int(rate), subtype=MASTER_SUBTYPE, format='WAV')
-        os.replace(tmp, path)
+        try:
+            _write_audio(tmp, np.asarray(samples, dtype=np.float32), rate, MASTER_SUBTYPE)
+            os.replace(tmp, path)
+        finally:
+            _remove(tmp)
         return path
 
     def save_master(self, slug, take):
@@ -314,11 +409,16 @@ class Library:
                                               take.samples, take.rate)
         take.unsaved = False
         take.save_error = ''
+        self._drop_spool(take)
         return take.master_path
 
     def import_file(self, slug, path):
         """Copy a recording from anywhere on disk into the speaker's masters, as a take ready to edit."""
         samples, rate = sf.read(str(path), dtype='float32', always_2d=False)
+        if samples.size == 0:
+            raise ValueError('the file holds no audio')
+        if not np.isfinite(samples).all():
+            raise ValueError('the file is damaged: some of its samples are not numbers')
         # Only the file's name goes in the take, and so into the sidecar that travels with the clip: where the file was
         # on this computer (a user name, say) is nobody else's business.
         take = Take(source='import', samples=samples, rate=int(rate),
@@ -332,15 +432,15 @@ class Library:
 
         Raises TrashUnavailable, with nothing removed, when the Recycle Bin cannot take them.
         """
-        paths = [Path(p) for p in (take.master_path, take.export_path, take.sidecar_path, self.autosave_file(take))
-                 if p is not None and Path(p).exists()]
+        paths = [Path(p) for p in (take.master_path, take.export_path, take.sidecar_path, take.spool,
+                                   self.autosave_file(take)) if p is not None and Path(p).exists()]
         if paths:
             if permanent:
                 for path in paths:
                     path.unlink()
             else:
                 self.trash(paths)
-        take.master_path = take.export_path = take.sidecar_path = None
+        take.master_path = take.export_path = take.sidecar_path = take.spool = None
         self.cache.drop(take.id)
 
     def list_unkept(self, slug):
@@ -377,9 +477,14 @@ class Library:
         self._restore_autosave(take, path)
         return take
 
-    def load_takes(self, slug):
-        """Load usable kept and unkept takes, reporting individual damaged files without modifying them."""
+    def load_takes(self, slug, recover=True):
+        """Load usable kept and unkept takes, reporting individual damaged files without modifying them.
+
+        With `recover`, a recording the program was making when it stopped becomes a take first: `self.recovered` says how
+        many did. It is off while a recording runs, because that recording's own spool is in the same folder.
+        """
         takes = self.load_kept(slug)
+        self.recovered = self._recover_spools(slug) if recover else 0
         for path in self.list_unkept(slug):
             try:
                 takes.append(self.load_unkept(slug, path))
@@ -406,11 +511,14 @@ class Library:
             if not isinstance(data, dict) or data.get('schema') not in KNOWN_SCHEMAS:
                 continue
             try:
-                takes.append(self._take_from_sidecar(folder, sidecar, data))
+                take = self._take_from_sidecar(folder, sidecar, data)
             except SidecarProblem as e:
                 self.skipped.append((sidecar.name, str(e)))
             except (OSError, KeyError, TypeError, ValueError):
                 self.skipped.append((sidecar.name, 'it is incomplete or holds a value that cannot be read'))
+            else:
+                self._restore_autosave(take, take.master_path)
+                takes.append(take)
         return takes
 
     @staticmethod
@@ -429,12 +537,33 @@ class Library:
             raise SidecarProblem('it names a file outside its own folder') from None
         return path
 
+    @staticmethod
+    def _check_fields(data):
+        """Refuse a sidecar whose fields are not the kinds of value the program works with. A sidecar is a text file that
+        can be edited or arrive from elsewhere, and one bad value must cost that clip, not the whole list."""
+        source, take_id, created = data['source'], data['id'], data['created']
+        if not all(isinstance(value, str) and value for value in (source, take_id, created)):
+            raise SidecarProblem('it is incomplete')
+        try:
+            dt.datetime.fromisoformat(created)
+        except ValueError:
+            raise SidecarProblem('its creation time cannot be read') from None
+        for key in ('transcript', 'origin', 'allowed_use', 'notes', 'source_url'):
+            if not isinstance(data.get(key) or '', str):
+                raise SidecarProblem(f'its {key} is not text')
+        flags = data.get('flags') or []
+        if not isinstance(flags, list) or not all(isinstance(flag, str) for flag in flags):
+            raise SidecarProblem('its flags cannot be read')
+        if not isinstance(data.get('device') or {}, dict):
+            raise SidecarProblem('its device cannot be read')
+
     def _take_from_sidecar(self, folder, sidecar, data):
         try:
             master_name, export_name = data['master']['file'], data['export']['file']
-            source, take_id, created = data['source'], data['id'], data['created']
+            self._check_fields(data)
         except (KeyError, TypeError):
             raise SidecarProblem('it is incomplete') from None
+        source, take_id, created = data['source'], data['id'], data['created']
         master_path, export_path = self.inside(folder, master_name), self.inside(folder, export_name)
         if not master_path.exists():
             raise SidecarProblem('its master file is missing')
@@ -444,19 +573,23 @@ class Library:
             raise SidecarProblem('its master file could not be read') from None
         history = self._recipe_from(data, samples, rate, self._chain_from_sidecar)
         label = _label_of(data)
+        status = data.get('transcript_status')
+        text = {key: data.get(key) or '' for key in ('transcript', 'origin', 'allowed_use', 'source_url', 'notes')}
+        confirmed_at = data.get('consent_confirmed_at')
         take = Take(source=source, samples=samples, rate=int(rate), device=data.get('device') or {},
                     flags=list(data.get('flags') or []), id=take_id, created=created, speaker=folder.name,
                     history=history,
-                    meta={'transcript': data.get('transcript', ''),
-                          'transcript_status': data.get('transcript_status', 'typed'),
-                          'origin': data.get('origin', ''), 'allowed_use': data.get('allowed_use', ''),
+                    meta={**text, 'transcript_status': status if status in TRANSCRIPT_STATUSES else 'typed',
                           'consent_confirmed': bool(data.get('consent_confirmed')),
-                          'source_url': data.get('source_url') or '', 'notes': data.get('notes', ''),
-                          'saved_transcript': data.get('transcript', ''), 'label': label, 'saved_label': label})
+                          'consent_confirmed_at': confirmed_at if isinstance(confirmed_at, str) else '',
+                          'saved_transcript': text['transcript'], 'label': label, 'saved_label': label})
         take.master_path = master_path
         take.export_path = export_path
         take.sidecar_path = sidecar
         take.moves = _moves_of(data)
+        take.kept_sha256 = data['export'].get('sha256')
+        take.kept_work = _work_of(take)
+        take.confirmed_words = words_key(history)
         return take
 
     @staticmethod
@@ -526,38 +659,53 @@ class Library:
         return render.export_samples(take.samples, take.rate, recipe or take.history, self._denoiser(), self.cache,
                                      take.id)
 
+    def stats_for(self, take, export, recipe=None):
+        """What the keep rules judge: the measurements of `export`, and the clipping of the recording it was made from."""
+        return {**ac.measure(export, ac.EXPORT_RATE),
+                **render.recorded_clipping(take.samples, take.rate, recipe or take.history)}
+
+    def _place_master(self, folder, take):
+        """The stem a take is kept under. Its original is written now if it is not on disk yet."""
+        if take.master_path is not None and Path(take.master_path).exists():
+            return Path(take.master_path).name[:-len('.raw.wav')]
+        stem = self._unique_stem(folder, take.stem)
+        target = folder / 'masters' / f'{stem}.raw.wav'
+        legacy = take.device.get('file') if take.device.get('legacy_pending') else None
+        if legacy and Path(legacy).exists():
+            target.parent.mkdir(parents=True, exist_ok=True)
+            os.replace(legacy, target)
+            take.master_path = target
+            take.device = {k: v for k, v in take.device.items() if k not in ('legacy_pending', 'file')}
+        else:
+            take.master_path = self._write_master(target, take.samples, take.rate)
+        return stem
+
     def keep(self, slug, take):
-        """Write the export and sidecar for a take. Raises KeepBlocked when the take fails the rules."""
+        """Write the export and sidecar for a take.
+
+        Raises KeepBlocked when the take fails the rules, and OSError when a file cannot be written. The take counts as kept
+        only once both files are in place, so a Keep that fails leaves it as it was, still being autosaved.
+        """
         if take.needs_transcript_review:
             raise KeepBlocked(['Confirm that the transcript still matches the words kept after the cuts.'])
         export = self.export_for(take)
-        stats = ac.measure(export, ac.EXPORT_RATE)
+        stats = self.stats_for(take, export)
         problems = ac.keep_problems(take.meta, ac.take_warnings(stats, take.flags))
         if problems:
             raise KeepBlocked(problems)
 
         folder = self.folder(slug)
-        if take.export_path is None:
-            if take.master_path is not None and Path(take.master_path).exists():
-                stem = Path(take.master_path).name[:-len('.raw.wav')]
-            else:
-                stem = self._unique_stem(folder, take.stem)
-                target = folder / 'masters' / f'{stem}.raw.wav'
-                legacy = take.device.get('file') if take.device.get('legacy_pending') else None
-                if legacy and Path(legacy).exists():
-                    target.parent.mkdir(parents=True, exist_ok=True)
-                    os.replace(legacy, target)
-                    take.master_path = target
-                    take.device = {k: v for k, v in take.device.items() if k not in ('legacy_pending', 'file')}
-                else:
-                    take.master_path = self._write_master(target, take.samples, take.rate)
-            take.export_path = folder / f'{stem}.wav'
-            take.sidecar_path = folder / f'{stem}.json'
-
+        first = take.export_path is None
+        if first:
+            stem = self._place_master(folder, take)
+            export_path, sidecar_path = folder / f'{stem}.wav', folder / f'{stem}.json'
+        else:
+            export_path, sidecar_path = Path(take.export_path), Path(take.sidecar_path)
         take.unsaved = False              # the original is on disk from here on, whether it was just written or already was
+        self._drop_spool(take)
         chain = take.history.chain
-        flags = set(take.flags) - {'recovered', 'imported'}
-        if stats['clipped']:
+        flags = set(take.flags) - WORKED_OUT_FLAGS
+        if stats['clipped'] or stats['recording_clipped']:
             flags.add('clipped')
         if take.history.edits:
             flags.add('edited')
@@ -569,22 +717,42 @@ class Library:
             flags.add('level_changed')
         if chain['limiter']['enabled']:
             flags.add('limited')
-        sidecar = self._sidecar(slug, take, stats, export, sorted(flags))
+        sidecar = self._sidecar(slug, take, stats, export, sorted(flags), export_path)
 
-        export_tmp = take.export_path.with_name(take.export_path.name + '.tmp')
-        sf.write(str(export_tmp), export, ac.EXPORT_RATE, subtype='PCM_16', format='WAV')
-        os.replace(export_tmp, take.export_path)
-        sidecar['export']['sha256'] = file_sha256(take.export_path)
-        sidecar_tmp = take.sidecar_path.with_name(take.sidecar_path.name + '.tmp')
-        sidecar_tmp.write_text(json.dumps(sidecar, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
-        os.replace(sidecar_tmp, take.sidecar_path)
+        # Both files are finished under temporary names before either goes in place, so anything that fails on the way leaves
+        # the take's files as they were.
+        export_tmp = export_path.with_name(export_path.name + '.tmp')
+        sidecar_tmp = sidecar_path.with_name(sidecar_path.name + '.tmp')
+        try:
+            _write_audio(export_tmp, export, ac.EXPORT_RATE, 'PCM_16')
+            sidecar['export']['sha256'] = file_sha256(export_tmp)
+            sidecar_tmp.write_text(json.dumps(sidecar, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
+            sync_file(sidecar_tmp)
+            os.replace(export_tmp, export_path)
+            try:
+                os.replace(sidecar_tmp, sidecar_path)
+            except OSError:
+                if first:
+                    _remove(export_path)            # a WAV with no sidecar is not a kept clip
+                raise
+        finally:
+            _remove(export_tmp)
+            _remove(sidecar_tmp)
+        take.export_path, take.sidecar_path = export_path, sidecar_path
+        take.kept_sha256 = sidecar['export']['sha256']
+        take.kept_work = _work_of(take)
+        take.confirmed_words = words_key(take.history)
         take.meta['saved_label'] = clean_label(take.meta.get('label'))
+        take.meta['saved_transcript'] = sidecar['transcript']
         self.remove_autosave(take)                  # the sidecar holds the work from here on
-        self.remember(slug, take.meta['origin'], take.meta['allowed_use'])
+        try:
+            self.remember(slug, take.meta['origin'], take.meta['allowed_use'])
+        except OSError:
+            pass                                    # the clip is safe; only the texts offered for the next take are not
         take.save_error = ''
         return {'export': take.export_path, 'master': take.master_path, 'sidecar': take.sidecar_path}
 
-    def _sidecar(self, slug, take, stats, export, flags):
+    def _sidecar(self, slug, take, stats, export, flags, export_path):
         channels = 1 if take.samples.ndim == 1 else take.samples.shape[1]
         text = str(take.meta['transcript']).strip()
         recipe = take.history.to_json()
@@ -599,11 +767,12 @@ class Library:
             'speaker': slug,
             'source': take.source,
             'device': take.device,
-            'export': {'file': take.export_path.name, 'sample_rate': ac.EXPORT_RATE, 'channels': 1, 'bit_depth': 16,
+            'export': {'file': export_path.name, 'sample_rate': ac.EXPORT_RATE, 'channels': 1, 'bit_depth': 16,
                        'duration_seconds': round(len(export) / ac.EXPORT_RATE, 3), 'sha256': ''},
             'master': {'file': f'masters/{take.master_path.name}', 'sample_rate': take.rate,
                        'bit_depth': 24, 'channels': channels},
-            'measurements': {k: stats[k] for k in ('peak_dbfs', 'rms_dbfs', 'clipped_fraction', 'silence_fraction')},
+            'measurements': {k: stats[k] for k in ('peak_dbfs', 'rms_dbfs', 'clipped_fraction', 'silence_fraction',
+                                                   'recording_clipped_fraction')},
             'transcript': text,
             'transcript_status': take.meta['transcript_status'],
             'origin': str(take.meta['origin']).strip(),
@@ -618,6 +787,9 @@ class Library:
             'notes': str(take.meta.get('notes') or ''),
             'flags': flags,
         }
+        confirmed_at = take.meta.get('consent_confirmed_at')
+        if confirmed_at:                            # a clip kept before this was recorded has none: no date is made up
+            sidecar['consent_confirmed_at'] = confirmed_at
         label = clean_label(take.meta.get('label'))
         if label:                                   # a take with no label has no such field, as before
             sidecar['label'] = label
@@ -638,7 +810,7 @@ class Library:
         return master.with_name(master.name[:-len('.raw.wav')] + AUTOSAVE_SUFFIX)
 
     def autosave_file(self, take):
-        """Where the work on a take that is not kept yet is saved: beside its original. None while it has no original."""
+        """Where the work on a take is saved until Keep writes it: beside its original. None while it has no original."""
         master = self._master_file(take)
         return self._autosave_beside(master) if master is not None else None
 
@@ -646,15 +818,18 @@ class Library:
         """Save what has changed on a take since Keep last wrote it. Returns True if a file was written.
 
         A take that is not kept gets an autosave file beside its original, holding its cuts, Process settings, text and
-        label. A kept take has its sidecar already, so only a changed label is written there. A take whose original is
-        not on disk (yet, or any more) has nowhere to be saved, and nothing is written. Raises OSError or ValueError
-        when the write fails.
+        label. So does a kept take that has been changed since, until Keep writes the changes; its label goes straight into
+        its sidecar, and a kept take that has been put back as it was loses the file. A take whose original is not on disk
+        (yet, or any more) has nowhere to be saved, and nothing is written. Raises OSError or ValueError when the write
+        fails.
         """
-        if take.kept:
-            return self._save_label(take)
+        wrote = self._save_label(take) if take.kept else False
         master = self._master_file(take)
         if master is None or not master.is_file():
-            return False
+            return wrote
+        if take.kept and not take.changed:
+            self.remove_autosave(take)
+            return wrote
         self._write_json(self._autosave_beside(master), self._autosave_data(take, master))
         return True
 
@@ -665,7 +840,7 @@ class Library:
             if path is not None:
                 path.unlink(missing_ok=True)
         except OSError:
-            pass                                    # a leftover is harmless: a take with a sidecar never reads it
+            pass                                    # a leftover is harmless: it names a Keep that is not the latest
 
     @staticmethod
     def _autosave_data(take, master):
@@ -673,6 +848,7 @@ class Library:
         text = {key: str(meta.get(key) or '') for key in ('transcript', 'origin', 'allowed_use', 'source_url', 'notes',
                                                              'draft_text')}
         line = meta.get('script_line')
+        kept = {'kept_sha256': take.kept_sha256} if take.kept else {}
         return {
             'schema': AUTOSAVE_SCHEMA,
             'software': {'name': 'voice-slate', 'version': __version__},
@@ -688,7 +864,9 @@ class Library:
             'transcript_status': str(meta.get('transcript_status') or 'typed'),
             'script_line': line if isinstance(line, str) else None,
             'needs_transcript_review': bool(take.needs_transcript_review),
+            'confirmed_words': take.confirmed_words,
             'draft_key': take.draft_key if isinstance(take.draft_key, str) else None,
+            **kept,
             # No permission tick: it is never remembered, and is given again when the clip is kept.
         }
 
@@ -708,6 +886,8 @@ class Library:
     def _apply_autosave(self, take, master, data):
         if not isinstance(data, dict) or data.get('schema') != AUTOSAVE_SCHEMA:
             raise SidecarProblem('it is not an autosave file of this program')
+        if take.kept and data.get('kept_sha256') != take.kept_sha256:
+            return                                  # left behind by a Keep that failed to delete it: the sidecar is newer
         about = data.get('master')
         if not isinstance(about, dict) or about.get('file') != master.name or about.get('frames') != len(take.samples) \
                 or about.get('sample_rate') != take.rate:
@@ -716,20 +896,29 @@ class Library:
         # Everything is checked before anything is applied, so a file that fails halfway leaves the take as recorded.
         meta = {key: data[key][:AUTOSAVE_TEXT_MAX] for key in
                 ('transcript', 'origin', 'allowed_use', 'source_url', 'notes', 'draft_text') if isinstance(data.get(key), str)}
-        meta['label'] = _label_of(data)
         meta['transcript_status'] = data['transcript_status'] if data.get('transcript_status') in TRANSCRIPT_STATUSES \
             else 'typed'
         if isinstance(data.get('script_line'), str):
             meta['script_line'] = data['script_line']
+        if take.kept:
+            # The sidecar's permission was given for what it says. New words for the same clip need it given again.
+            if any(meta.get(key, '').strip() != take.meta[key].strip() for key in ('origin', 'allowed_use')):
+                take.meta.update(consent_confirmed=False, consent_confirmed_at='')
+        else:
+            meta['label'] = _label_of(data)         # a kept take's label went straight into its sidecar
         take.history = history
         take.meta.update(meta)
         take.needs_transcript_review = bool(data.get('needs_transcript_review')) and history.words_changed
+        confirmed = data.get('confirmed_words')
+        take.confirmed_words = confirmed if isinstance(confirmed, str) else \
+            None if take.needs_transcript_review else words_key(history)
         take.draft_key = data['draft_key'] if isinstance(data.get('draft_key'), str) else None
-        if isinstance(data.get('device'), dict) and not take.device.get('legacy_pending'):
-            take.device = data['device']
-        flags = data.get('flags')
-        if isinstance(flags, list):
-            take.flags = ['recovered'] + [f for f in flags if isinstance(f, str) and f != 'recovered']
+        if not take.kept:
+            if isinstance(data.get('device'), dict) and not take.device.get('legacy_pending'):
+                take.device = data['device']
+            flags = data.get('flags')
+            if isinstance(flags, list):
+                take.flags = ['recovered'] + [f for f in flags if isinstance(f, str) and f != 'recovered']
         take.restored = True
 
     def _save_label(self, take):
@@ -746,11 +935,80 @@ class Library:
             data['label'] = label
         else:
             data.pop('label', None)
-        tmp = path.with_name(path.name + '.tmp')
-        tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
-        os.replace(tmp, path)
+        self._write_json(path, data)
         take.meta['saved_label'] = label
         return True
+
+    def revert(self, take):
+        """Put a kept take back as its sidecar describes it, dropping the changes made since Keep (and their undo steps).
+
+        Raises SidecarProblem, OSError or ValueError, with the take as it was, when the sidecar cannot be used.
+        """
+        sidecar = Path(take.sidecar_path)
+        kept = self._take_from_sidecar(sidecar.parent, sidecar, json.loads(sidecar.read_text(encoding='utf-8')))
+        take.history, take.meta = kept.history, kept.meta
+        take.kept_work, take.kept_sha256 = kept.kept_work, kept.kept_sha256
+        take.needs_transcript_review, take.confirmed_words = False, kept.confirmed_words
+        take.draft_key = take.draft_request = None
+        take.restored = False
+        self.remove_autosave(take)
+
+    # ---- a take being recorded ----------------------------------------------------------------------------------------
+
+    def open_spool(self, slug, rate, channels, source, device, script_line=None):
+        """Start writing a recording to disk as it is made. Returns the Spool. Raises OSError if the file cannot be made."""
+        take_id, created = new_take_id(), now_iso()
+        stamp = dt.datetime.fromisoformat(created).strftime('%Y%m%d-%H%M%S')
+        return Spool(self.folder(slug) / 'masters' / f'{stamp}_{source}_{take_id}{SPOOL_SUFFIX}',
+                     {'schema': SPOOL_SCHEMA, 'id': take_id, 'created': created, 'source': source, 'rate': int(rate),
+                      'channels': int(channels), 'device': device, 'script_line': script_line})
+
+    @staticmethod
+    def _drop_spool(take):
+        """The take's original is on disk, so the copy made while it was recorded is not needed any more."""
+        if take.spool is not None:
+            _remove(take.spool)
+            take.spool = None
+
+    def _take_from_spool(self, slug, path):
+        """The take a spool file holds, or None if it stopped before any audio arrived. Raises ValueError for a file that
+        cannot be read, and KeyError or TypeError for one that lacks what it should say."""
+        with open(path, 'rb') as f:
+            about = json.loads(f.readline())
+            raw = f.read()
+        if not isinstance(about, dict) or about.get('schema') != SPOOL_SCHEMA:
+            raise ValueError('it is not a recording of this program')
+        rate, channels = int(about['rate']), int(about['channels'])
+        if rate <= 0 or channels <= 0:
+            raise ValueError('it does not say how it was recorded')
+        dt.datetime.fromisoformat(about['created'])
+        samples = np.frombuffer(raw, dtype='<f4', count=len(raw) // (4 * channels) * channels).astype(np.float32)
+        samples = samples[:int(ac.MAX_SECONDS * rate) * channels]
+        if samples.size == 0:
+            return None
+        line = about.get('script_line') if isinstance(about.get('script_line'), str) else None
+        return Take(source=about['source'], samples=samples if channels == 1 else samples.reshape(-1, channels), rate=rate,
+                    device=about['device'] if isinstance(about.get('device'), dict) else {}, flags=['interrupted'],
+                    id=about['id'], created=about['created'], speaker=slug,
+                    meta={**self.speaker_defaults(slug), 'transcript': line or '', 'script_line': line,
+                          'transcript_status': 'read_from_script' if line else 'typed'})
+
+    def _recover_spools(self, slug):
+        """Make takes of the recordings the program was making when it stopped. Returns how many it made. A file that cannot
+        be used is left where it is and reported in `self.skipped`."""
+        masters = self.folder(slug) / 'masters'
+        recovered = 0
+        for path in sorted(masters.glob(f'*{SPOOL_SUFFIX}')) if masters.is_dir() else []:
+            try:
+                take = self._take_from_spool(slug, path)
+                if take is not None:
+                    self.save_master(slug, take)
+                    self.autosave(take)             # how it ended, and the script line it was reading
+                    recovered += 1
+                path.unlink()
+            except (OSError, KeyError, TypeError, ValueError) as e:
+                self.skipped.append((path.name, f'the recording could not be recovered: {e}'))
+        return recovered
 
     # ---- moving a take to another speaker -----------------------------------------------------------------------------
 
@@ -760,14 +1018,12 @@ class Library:
         tmp = destination.with_name(destination.name + '.tmp')
         try:
             shutil.copyfile(source, tmp)
+            sync_file(tmp)
             if file_sha256(tmp) != file_sha256(source):
                 raise OSError(f'{source.name} could not be copied exactly')
             os.replace(tmp, destination)
         except BaseException:
-            try:
-                tmp.unlink(missing_ok=True)
-            except OSError:
-                pass
+            _remove(tmp)
             raise
 
     @staticmethod

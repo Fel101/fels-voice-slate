@@ -8,8 +8,9 @@ welcome.
 Voice Slate records, tidies and documents clean voice clips on Windows, and keeps a record of where each clip came
 from and whether the person had the right to use the voice. That last part is a requirement, not a feature to trade away.
 
-- **Changes that weaken the consent step will not be merged.** That includes skipping or pre-filling the origin,
-  allowed-use or permission fields, or making them optional. See [Responsible use](docs/responsible-use.md).
+- **Changes that weaken the consent step will not be merged.** That includes skipping or remembering the permission tick,
+  making the origin, allowed-use or permission fields optional, or filling in the origin or allowed use with anything but
+  the person's own words for that speaker, which are shown for them to check. See [Responsible use](docs/responsible-use.md).
 - **No network access and no telemetry.** The program does not connect to anything. Optional tools (FFmpeg, a speech
   recognizer) run as separate programs. The user installs FFmpeg; the recognizer is installed by
   `setup-transcripts.bat` (`recorder/asr_setup.py`), which downloads only when the user runs it and agrees, and says what

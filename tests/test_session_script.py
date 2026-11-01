@@ -1,6 +1,7 @@
 """Script mode (the prompts a speaker reads) and the bus the window listens to."""
 import pytest
 
+from recorder.session import script as script_mod
 from recorder.session.bus import Bus
 from recorder.session.script import Script
 
@@ -43,11 +44,32 @@ def test_a_script_file_is_read_as_utf8(script, tmp_path):
     assert script.current == "Café au lait, s'il vous plaît."
 
 
-def test_a_file_that_is_not_utf8_is_refused_with_a_notice(script, tmp_path):
+@pytest.mark.parametrize('encoding', ['utf-8-sig', 'utf-16', 'utf-16-le-bom', 'utf-16-be-bom'])
+def test_what_notepad_saves_is_read_without_a_stray_mark_in_the_first_line(script, tmp_path, encoding):
     path = tmp_path / 'lines.txt'
-    path.write_bytes('Café'.encode('latin-1') + b' and more words here.\n')
+    text = 'Café au lait.\nSecond line.\n'
+    if encoding.endswith('-bom'):
+        name = encoding[:-4]
+        path.write_bytes(('\ufeff' + text).encode(name))
+    else:
+        path.write_text(text, encoding=encoding)
+    assert script.load_file(path) is True
+    assert script.lines == ['Café au lait.', 'Second line.']
+
+
+def test_a_file_in_the_windows_code_page_is_read(script, tmp_path, monkeypatch):
+    monkeypatch.setattr(script_mod.locale, 'getencoding', lambda: 'cp1252')
+    path = tmp_path / 'lines.txt'
+    path.write_bytes('Café and “quotes”.\n'.encode('cp1252'))
+    assert script.load_file(path) is True and script.current == 'Café and “quotes”.'
+
+
+@pytest.mark.parametrize('raw', [b'\x00\x01\x02 not text', 'Words\x00in\x00UTF-16 with no mark'.encode('utf-16-le')])
+def test_a_file_that_is_not_text_is_refused_with_a_notice(script, tmp_path, raw):
+    path = tmp_path / 'lines.bin'
+    path.write_bytes(raw)
     assert script.load_file(path) is False
-    assert 'UTF-8' in script.bus.notices[-1].text and script.lines == []
+    assert 'not plain text' in script.bus.notices[-1].text and script.lines == []
 
 
 def test_a_missing_script_file_is_refused_with_a_notice(script, tmp_path):

@@ -1,8 +1,42 @@
 """Capture behaviour that needs no audio hardware: a fake backend stands in for the device."""
+from types import SimpleNamespace
+
 import numpy as np
 import pytest
 
 from recorder import capture as cap
+
+
+class FakeStream:
+    def __init__(self, **options):
+        self.callback = options['callback']
+
+    def start(self):
+        pass
+
+
+def test_the_microphone_passes_on_what_the_sound_library_says_it_lost():
+    """The flags come from sounddevice, whose names a test with a fake backend would never touch."""
+    streams = []
+
+    def stream(**options):
+        streams.append(FakeStream(**options))
+        return streams[-1]
+
+    backend = cap._MicBackend.__new__(cap._MicBackend)
+    backend._sd, backend.device, backend.rate, backend.channels = SimpleNamespace(InputStream=stream), 1, 48000, 1
+    heard = []
+    backend.open(lambda block, lost: heard.append(lost))
+    silence = np.zeros((480, 1), dtype=np.float32)
+    sounddevice = pytest.importorskip('sounddevice')
+    for flags, lost in ((0, False), (sounddevice._lib.paInputOverflow, True), (sounddevice._lib.paInputUnderflow, True)):
+        streams[0].callback(silence, 480, None, sounddevice.CallbackFlags(flags))
+        assert heard[-1] is lost
+
+
+def test_system_audio_can_read_the_flags_it_needs_from_its_library():
+    pyaudio = pytest.importorskip('pyaudiowpatch')
+    assert pyaudio.paInputOverflow and pyaudio.paInputUnderflow
 
 
 class FakeBackend:
@@ -106,4 +140,37 @@ def test_the_envelope_of_a_stereo_capture_is_its_mono_mix():
     backend.on_block(np.tile(np.array([[0.6, -0.2]], dtype=np.float32), (480, 1)))
     row = capture.envelope()[0]
     assert row[1] == pytest.approx(0.2) and row[2] == pytest.approx(0.2)
+    capture.stop()
+
+
+def test_audio_the_device_says_it_lost_is_counted_while_recording():
+    backend = FakeBackend()
+    backend.kind = 'mic'
+    capture = cap.Capture(backend, pre_roll_seconds=0.02)
+    capture.arm()
+    backend.on_block(block(0.1), True)                              # lost before the take: not this take's problem
+    capture.start()
+    assert capture.dropouts == 0
+    backend.on_block(block(0.1), True)                              # the first block of a take can say so about nothing
+    backend.on_block(block(0.1))
+    backend.on_block(block(0.1), True)
+    backend.on_block(block(0.1), True)
+    assert capture.dropouts == 2
+    capture.stop()
+    capture.start()
+    assert capture.dropouts == 0
+
+
+def test_new_blocks_hands_each_block_over_once_and_starts_with_the_pre_roll():
+    backend = FakeBackend()
+    backend.kind = 'mic'
+    capture = cap.Capture(backend, pre_roll_seconds=0.05)
+    capture.arm()
+    backend.on_block(block(0.5))
+    capture.start()
+    backend.on_block(block(0.25))
+    assert [float(b[0, 0]) for b in capture.new_blocks()] == [0.5, 0.25]
+    assert capture.new_blocks() == []
+    backend.on_block(block(0.125))
+    assert [float(b[0, 0]) for b in capture.new_blocks()] == [0.125]
     capture.stop()

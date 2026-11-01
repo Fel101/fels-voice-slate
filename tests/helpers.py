@@ -52,6 +52,7 @@ class FakeCapture:
         self.channels = 1
         self.elapsed = 1.0
         self.close_error = None
+        self.dropouts = 0
         self.stopped = False
         self.closed = False
         self._level_error = level_error
@@ -79,6 +80,9 @@ class FakeCapture:
         rows = [(min(end, len(x)) / self.rate, float(x[end - step:end].min()), float(x[end - step:end].max()))
                 for end in ends if len(x[end - step:end])]
         return np.array(rows, dtype=np.float32).reshape(-1, 3)
+
+    def new_blocks(self):
+        return []
 
     def stalled(self):
         return self.stall

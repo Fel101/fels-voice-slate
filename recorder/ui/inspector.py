@@ -217,8 +217,8 @@ class ProcessPage(QWidget):
         layout.addWidget(self.hum)
 
         lo, hi = chain_mod.LIMITS[('denoise', 'nf')]
-        self.denoise = StepCard('Noise reduction', 'Reduces steady background noise with FFmpeg (the afftdn filter). '
-                                                   'Values nearer -20 dB clean more, and can change the voice.')
+        self.denoise = StepCard('Noise reduction', 'Reduces steady background noise with FFmpeg (afftdn). Best about 5 dB '
+                                                   'above the noise floor; higher values change the voice.')
         self.denoise_slider = self.denoise.add_slider(lo, hi)
         self.denoise_note = self.denoise.add_note('Voice identity is not checked. Listen first.')
         self.denoise.switch.toggled.connect(self.session.editor.set_denoise)
@@ -671,8 +671,8 @@ class RecordCard(QFrame):
             layout.addLayout(row)
             self.values[key] = value
         layout.addSpacing(6)
-        layout.addWidget(label('Editing opens when you stop. The original is written to disk first, so Stop never loses a '
-                               'take.', 'muted', wrap=True))
+        layout.addWidget(label('Editing opens when you stop. The take is written to disk as it records, so a crash does not '
+                               'lose it, and the original is written at Stop.', 'muted', wrap=True))
 
     def refresh(self):
         info = self.session.capturing.info()

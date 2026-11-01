@@ -2,9 +2,10 @@
 import json
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 
-from helpers import RATE, FakeCapture, speech
+from helpers import RATE, FakeCapture, fill, speech
 from recorder import capture as cap
 from recorder.capture import Capture
 
@@ -336,3 +337,190 @@ def test_the_script_does_not_move_on_until_the_take_is_kept(session, open_fake, 
     clock.advance(1)
     session.tick()
     assert session.script.index == 0
+
+
+# ---- staying armed ----------------------------------------------------------------------------------------------------
+
+def finish(session, clock):
+    session.capturing.stop()
+    clock.advance(1)
+    session.tick()
+
+
+def test_an_armed_input_is_armed_again_after_a_take(session, open_fake, clock):
+    """Otherwise only the first take of a session has its first word kept, and the meter goes dead between takes."""
+    session.capturing.toggle_arm()
+    session.capturing.start()
+    finish(session, clock)
+    assert session.capturing.armed and session.capturing.state == 'armed' and len(session.workspace.takes) == 1
+    assert open_fake[0].closed and open_fake[1].armed and session.capturing.capture is open_fake[1]
+    assert 'Take saved' in session.status_text
+    session.capturing.start()                                       # the next take starts from the armed input
+    finish(session, clock)
+    assert len(session.workspace.takes) == 2 and session.capturing.armed
+
+
+def test_an_input_that_was_not_armed_is_let_go_after_a_take(session, open_fake, clock):
+    session.capturing.start()
+    finish(session, clock)
+    assert session.capturing.capture is None and not session.capturing.armed and session.capturing.state == 'stopped'
+
+
+def test_disarming_after_a_take_really_lets_go(session, open_fake, clock):
+    session.capturing.toggle_arm()
+    session.capturing.start()
+    finish(session, clock)
+    session.capturing.toggle_arm()
+    assert session.capturing.capture is None and session.capturing.state == 'idle' and open_fake[1].closed
+
+
+def test_a_device_that_failed_is_not_opened_again_by_itself(session, open_fake):
+    session.capturing.toggle_arm()
+    session.capturing.start()
+    open_fake[0].stall = True
+    session.tick()
+    assert session.capturing.state == 'interrupted' and session.capturing.capture is None and len(open_fake) == 1
+
+
+def test_closing_the_program_does_not_open_the_microphone_again(session, open_fake):
+    session.capturing.toggle_arm()
+    session.capturing.start()
+    assert session.close() == []
+    assert len(open_fake) == 1 and session.capturing.capture is None
+
+
+def test_an_input_that_cannot_be_armed_again_says_so_and_the_take_is_safe(session, open_fake, clock, monkeypatch):
+    session.capturing.toggle_arm()
+    session.capturing.start()
+    monkeypatch.setattr(cap, 'open_capture', lambda *a: (_ for _ in ()).throw(OSError('the device has gone')))
+    finish(session, clock)
+    assert len(session.workspace.takes) == 1 and session.capturing.capture is None
+    assert session.capturing.state == 'stopped' and 'could not be armed again: the device has gone' in session.status_text
+
+
+# ---- audio the device lost --------------------------------------------------------------------------------------------
+
+def test_a_take_that_lost_audio_says_so_and_the_clip_records_it(session):
+    fake = FakeCapture(speech(12.0))
+    fake.dropouts = 2
+    session.capturing.capture = fake
+    take = session.capturing.finish_take()
+    assert take.flags == ['dropouts'] and 'lost audio 2 times' in session.status_text
+    fill(session)
+    assert 'dropouts' in json.loads(session.keep()['sidecar'].read_text(encoding='utf-8'))['flags']
+
+
+def test_a_take_that_lost_nothing_says_nothing_about_it(session):
+    session.capturing.capture = FakeCapture(speech(3.0))
+    assert session.capturing.finish_take().flags == [] and 'lost audio' not in session.status_text
+
+
+# ---- the take on disk while it is recorded ------------------------------------------------------------------------------
+
+class Device:
+    """Stands in for the sound hardware under a real Capture."""
+
+    kind, name, hostapi, rate, channels = 'mic', 'synthetic', 'test', RATE, 1
+
+    def open(self, on_block):
+        self.send = on_block
+
+    def alive(self):
+        return True
+
+    def close(self):
+        pass
+
+
+@pytest.fixture
+def device(monkeypatch):
+    hardware = Device()
+    monkeypatch.setattr(cap, 'open_capture', lambda source, index, pre_roll: Capture(hardware, pre_roll))
+    return hardware
+
+
+def spools(session):
+    return sorted((session.lib.folder(session.workspace.speaker) / 'masters').glob('*.spool'))
+
+
+def test_a_take_is_on_disk_while_it_is_recorded_and_goes_at_stop(session, device, clock):
+    session.capturing.start()
+    device.send(speech(1.0).reshape(-1, 1))
+    session.tick()
+    [path] = spools(session)
+    assert path.stat().st_size > RATE * 4
+    device.send(speech(1.0).reshape(-1, 1))
+    finish(session, clock)
+    assert spools(session) == [] and session.workspace.takes[0].master_path.is_file()
+
+
+def test_a_crash_in_the_middle_of_a_take_costs_only_the_last_moment(session, make_session, device):
+    session.script.load_text('A line to read aloud.')
+    session.capturing.start()
+    device.send(speech(3.0).reshape(-1, 1))
+    session.tick()
+    device.send(speech(1.0).reshape(-1, 1))                         # never reaches the disk: the crash comes first
+    session.capturing._spool.close()                                # what the end of the process does to an open file
+    fresh = make_session()                                          # the first session is simply abandoned
+    [back] = fresh.workspace.takes
+    assert back.seconds == pytest.approx(3.0) and back.flags == ['recovered', 'interrupted'] and not back.kept
+    assert np.allclose(back.samples, speech(3.0), atol=1e-6)
+    assert back.meta['transcript'] == 'A line to read aloud.' and back.meta['transcript_status'] == 'read_from_script'
+    assert spools(fresh) == [] and 'Recovered 1 recording cut short' in fresh.status_text
+
+
+def test_the_spool_reaches_the_disk_every_couple_of_seconds(session, device, clock, monkeypatch):
+    synced = []
+    session.capturing.start()
+    monkeypatch.setattr(session.capturing._spool, 'sync', lambda: synced.append(clock()))
+    session.tick()
+    assert synced == []
+    clock.advance(2.1)
+    session.tick()
+    clock.advance(0.5)
+    session.tick()
+    clock.advance(1.6)
+    session.tick()
+    assert len(synced) == 2
+
+
+def test_a_spool_that_cannot_be_opened_does_not_stop_the_recording(session, device, monkeypatch, clock):
+    monkeypatch.setattr(session.lib, 'open_spool', lambda *a: (_ for _ in ()).throw(OSError('disk full')))
+    assert session.capturing.start() is True
+    assert session.capturing.recording and 'only in memory until you stop: disk full' in session.status_text
+    device.send(speech(1.0).reshape(-1, 1))
+    finish(session, clock)
+    assert len(session.workspace.takes) == 1
+
+
+def test_a_spool_that_fails_while_recording_does_not_stop_the_recording(session, device, monkeypatch, clock):
+    session.capturing.start()
+    device.send(speech(1.0).reshape(-1, 1))
+    path = session.capturing._spool.path
+    monkeypatch.setattr(session.capturing._spool, 'write', lambda blocks: (_ for _ in ()).throw(OSError('disk full')))
+    session.tick()
+    assert session.capturing.recording and session.capturing._spool is None and not path.exists()
+    assert 'only in memory until you stop: disk full' in session.status_text
+    device.send(speech(1.0).reshape(-1, 1))
+    finish(session, clock)
+    assert session.workspace.takes[0].seconds == pytest.approx(2.0)
+
+
+def test_a_take_whose_original_cannot_be_written_keeps_its_spool_until_it_can(session, device, monkeypatch, clock):
+    real = session.lib.save_master
+    monkeypatch.setattr(session.lib, 'save_master', lambda *a: (_ for _ in ()).throw(OSError('disk full')))
+    session.capturing.start()
+    device.send(speech(2.0).reshape(-1, 1))
+    finish(session, clock)
+    [take] = session.workspace.takes
+    [path] = spools(session)
+    assert take.unsaved and take.spool == path
+    monkeypatch.setattr(session.lib, 'save_master', real)
+    assert session.close() == []
+    assert not take.unsaved and spools(session) == [] and take.spool is None
+
+
+def test_nothing_captured_leaves_no_spool(session, device, clock):
+    session.capturing.start()
+    finish(session, clock)
+    assert session.workspace.takes == [] and spools(session) == []
