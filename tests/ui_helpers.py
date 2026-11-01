@@ -56,11 +56,18 @@ class StubDialogs:
         self.number_answer = None
         self.folder_answer = None
         self.file_answer = None
+        self.save_answer = None                  # the file name chosen to save to
+        self.item_answer = None                  # the position chosen from a list
+        self.copy_answer = None                  # (format, sample rate) for a copy of a clip
+        self.manifest_answer = None              # ('speaker' or 'all', 'jsonl' or 'csv')
+        self.asked = []                          # (what, details) of each question about files, in order
         self.settings_answer = None
         self.settings_seen = None
 
     def notice(self, level, title, text):
-        self.notices.append(SimpleNamespace(level=level, title=title, text=text))
+        # `busy`: a wait cursor was still showing when the dialog opened, so it would sit over the dialog
+        self.notices.append(SimpleNamespace(level=level, title=title, text=text,
+                                            busy=QApplication.overrideCursor() is not None))
 
     def confirm(self, title, text, yes='OK', no='Cancel', danger=False):
         self.confirmations.append(SimpleNamespace(title=title, text=text, yes=yes, danger=danger))
@@ -78,6 +85,22 @@ class StubDialogs:
 
     def choose_file(self, title, start='', filter=''):
         return self.file_answer
+
+    def choose_save_file(self, title, start='', filter=''):
+        self.asked.append(('save', SimpleNamespace(title=title, start=str(start), filter=filter)))
+        return self.save_answer
+
+    def choose_item(self, title, prompt, items):
+        self.asked.append(('item', SimpleNamespace(title=title, prompt=prompt, items=list(items))))
+        return self.item_answer
+
+    def copy_options(self, name):
+        self.asked.append(('copy', SimpleNamespace(name=name)))
+        return self.copy_answer
+
+    def manifest_options(self, speaker_name):
+        self.asked.append(('manifest', SimpleNamespace(speaker=speaker_name)))
+        return self.manifest_answer
 
     def settings(self, values):
         self.settings_seen = dict(values)

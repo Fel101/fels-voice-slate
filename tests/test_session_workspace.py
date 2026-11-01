@@ -1,5 +1,6 @@
 """Speakers, takes, keep and discard, restarts, and the cases where a take must never be lost."""
 import json
+from datetime import datetime
 
 import numpy as np
 import pytest
@@ -137,12 +138,153 @@ def test_a_draft_that_is_kept_unchanged_is_saved_as_a_draft(session):
     assert data['transcript_status'] == 'asr_draft'
 
 
+def test_a_draft_that_was_corrected_is_saved_as_edited(session):
+    take = record(session, 10.0)
+    session.drafts.receive(take, 'A draft from the audio.', None)
+    fill(session, transcript='A draft from the audio, corrected.')
+    session.keep()
+    assert json.loads(take.sidecar_path.read_text(encoding='utf-8'))['transcript_status'] == 'edited'
+
+
+def test_a_transcript_stays_edited_when_the_clip_is_kept_again(session):
+    take = record(session, 10.0)
+    session.drafts.receive(take, 'A draft from the audio.', None)
+    fill(session, transcript='A draft from the audio, corrected.')
+    session.keep()
+    session.keep()
+    assert json.loads(take.sidecar_path.read_text(encoding='utf-8'))['transcript_status'] == 'edited'
+
+
+def test_a_kept_draft_corrected_after_a_restart_is_saved_as_edited(session, make_session):
+    take = record(session, 10.0)
+    session.drafts.receive(take, 'A draft from the audio.', None)
+    fill(session, transcript='A draft from the audio.')
+    session.keep()
+    fresh = make_session()
+    assert fresh.current.meta['transcript_status'] == 'asr_draft'
+    fresh.workspace.set_meta(transcript='A draft that somebody corrected.')
+    fresh.keep()
+    assert json.loads(take.sidecar_path.read_text(encoding='utf-8'))['transcript_status'] == 'edited'
+
+
+def test_typed_text_stays_typed(session):
+    take = record(session, 10.0)
+    fill(session)
+    session.keep()
+    session.workspace.set_meta(transcript='Different words, typed by hand.')
+    session.keep()
+    assert json.loads(take.sidecar_path.read_text(encoding='utf-8'))['transcript_status'] == 'typed'
+
+
 def test_keeping_the_script_take_steps_to_the_next_line(session):
     session.script.load_text('First line to read aloud.\nSecond line to read aloud.')
     session.workspace.add_take(speech(10.0), RATE, 'mic', {}, script_line=session.script.current)
     fill(session, transcript=session.script.current)
     session.keep()
     assert session.script.index == 1
+
+
+def test_updating_a_kept_clip_does_not_skip_a_line_of_the_script(session):
+    session.script.load_text('Line one to read.\nLine two to read.\nLine three to read.')
+    first = session.workspace.add_take(speech(10.0), RATE, 'mic', {}, script_line=session.script.current)
+    fill(session, transcript=session.script.current)
+    session.keep()
+    assert session.script.label == '2 of 3'
+    session.workspace.open_take(first)
+    session.keep()
+    assert session.script.label == '2 of 3'
+
+
+def test_keeping_a_take_of_an_earlier_line_does_not_move_the_script(session):
+    session.script.load_text('Line one to read.\nLine two to read.\nLine three to read.')
+    older = session.workspace.add_take(speech(10.0), RATE, 'mic', {}, script_line=session.script.current)
+    fill(session, transcript=session.script.current)
+    session.workspace.add_take(speech(10.0), RATE, 'mic', {}, script_line=session.script.current)
+    fill(session, transcript=session.script.current)
+    session.keep()
+    assert session.script.index == 1
+    session.workspace.open_take(older)
+    session.keep()
+    assert session.script.index == 1
+
+
+# ---- the permission --------------------------------------------------------------------------------------------------
+
+@pytest.mark.parametrize('field', ['allowed_use', 'origin'])
+def test_new_words_for_what_the_permission_covers_need_the_box_ticked_again(session, field):
+    take = record(session, 10.0)
+    fill(session)
+    session.workspace.set_meta(**{field: 'something else entirely'})
+    assert take.meta['consent_confirmed'] is False and take.meta['consent_confirmed_at'] == ''
+    assert 'tick the box again' in session.status_text
+    with pytest.raises(KeepBlocked, match='permission'):
+        session.keep()
+
+
+def test_a_kept_clip_cannot_change_its_allowed_use_without_the_box_being_ticked_again(session):
+    take = record(session, 10.0)
+    fill(session)
+    session.keep()
+    session.workspace.set_meta(allowed_use='sold to anyone who asks')
+    assert take.meta['consent_confirmed'] is False
+    with pytest.raises(KeepBlocked, match='permission'):
+        session.keep()
+    data = json.loads(take.sidecar_path.read_text(encoding='utf-8'))
+    assert data['allowed_use'] == 'my own voice references'
+    session.workspace.set_meta(consent_confirmed=True)
+    assert json.loads(session.keep()['sidecar'].read_text(encoding='utf-8'))['allowed_use'] == 'sold to anyone who asks'
+
+
+def test_spaces_around_the_words_change_nothing_the_permission_covers(session):
+    take = record(session, 10.0)
+    fill(session)
+    session.workspace.set_meta(allowed_use='my own voice references  ')
+    assert take.meta['consent_confirmed'] is True
+
+
+def test_other_fields_leave_the_permission_alone(session):
+    take = record(session, 10.0)
+    fill(session)
+    session.workspace.set_meta(transcript='Different words.', notes='a note', label='A name', source_url='https://a.example')
+    assert take.meta['consent_confirmed'] is True
+
+
+def test_the_sidecar_says_when_the_box_was_ticked(session):
+    take = record(session, 10.0)
+    fill(session, consent=False)
+    assert take.meta.get('consent_confirmed_at', '') == ''
+    session.workspace.set_meta(consent_confirmed=True)
+    moment = take.meta['consent_confirmed_at']
+    assert datetime.fromisoformat(moment).tzinfo is not None
+    assert json.loads(session.keep()['sidecar'].read_text(encoding='utf-8'))['consent_confirmed_at'] == moment
+
+
+# ---- what a load can survive --------------------------------------------------------------------------------------------
+
+@pytest.mark.parametrize('field, value', [('created', None), ('created', 12345), ('created', 'not a date'),
+                                          ('transcript', 123), ('flags', 7), ('device', 'mic')])
+def test_one_damaged_sidecar_does_not_stop_the_program_opening(session, make_session, field, value):
+    good, bad = record(session, 10.0), record(session, 10.0)
+    session.workspace.open_take(good)
+    fill(session)
+    session.keep()
+    session.workspace.open_take(bad)
+    fill(session)
+    paths = session.keep()
+    data = json.loads(paths['sidecar'].read_text(encoding='utf-8'))
+    data[field] = value
+    paths['sidecar'].write_text(json.dumps(data), encoding='utf-8')
+    fresh = make_session()
+    assert [take.id for take in fresh.workspace.takes] == [good.id]
+    assert '1 saved clip(s) not loaded' in fresh.status_text and paths['sidecar'].name in fresh.status_text
+
+
+def test_a_file_with_no_audio_is_refused_when_it_is_imported(session, tmp_path):
+    path = tmp_path / 'empty.wav'
+    sf.write(str(path), np.zeros(0, np.float32), RATE)
+    assert session.workspace.import_file(path) is None
+    assert session.bus.notices[-1].title == 'Could not import' and 'empty.wav: the file holds no audio' in session.bus.notices[-1].text
+    assert session.workspace.takes == []
 
 
 # ---- discard ----------------------------------------------------------------------------------------------------------

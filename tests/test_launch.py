@@ -73,6 +73,40 @@ def test_an_uncaught_error_is_logged_with_its_traceback(isolated_log):
     assert 'Uncaught error' in text and 'ValueError: boom' in text and 'Traceback' in text
 
 
+def test_an_uncaught_error_reaches_the_window_as_well_as_the_log(isolated_log):
+    heard = []
+    launch.start_logging(isolated_log)
+    launch.report_errors_to(heard.append)
+    try:
+        try:
+            raise ValueError('boom')
+        except ValueError as error:
+            sys.excepthook(type(error), error, error.__traceback__)
+        thread = threading.Thread(target=lambda: 1 / 0)
+        thread.start()
+        thread.join()
+    finally:
+        launch.report_errors_to(None)
+    assert [type(error) for error in heard] == [ValueError, ZeroDivisionError]
+    flush()
+    assert 'ValueError: boom' in isolated_log.read_text(encoding='utf-8')
+
+
+def test_a_window_that_cannot_be_told_does_not_make_things_worse(isolated_log):
+    launch.start_logging(isolated_log)
+    launch.report_errors_to(lambda error: 1 / 0)
+    try:
+        try:
+            raise ValueError('boom')
+        except ValueError as error:
+            sys.excepthook(type(error), error, error.__traceback__)
+    finally:
+        launch.report_errors_to(None)
+    flush()
+    text = isolated_log.read_text(encoding='utf-8')
+    assert 'ValueError: boom' in text and 'could not be told' in text
+
+
 def test_an_error_in_a_worker_thread_is_logged_too(isolated_log):
     launch.start_logging(isolated_log)
 
@@ -223,6 +257,12 @@ def test_setup_makes_the_icon_in_the_program_folder():
     """setup.bat is the one way most people make the icon, and a shortcut file cannot be shared, so it must still make it."""
     setup = (settings.program_dir() / 'setup.bat').read_text(encoding='utf-8')
     assert '-m recorder --shortcut folder' in setup
+
+
+def test_setup_finds_a_python_newer_than_the_ones_it_names():
+    """The README says 3.12 or newer, and a new Python is often only known to the launcher."""
+    setup = (settings.program_dir() / 'setup.bat').read_text(encoding='utf-8')
+    assert 'py -3 -c' in setup and setup.index('(3.14 3.13 3.12)') < setup.index('py -3 -c') < setup.index('python -c')
 
 
 def test_the_desktop_shortcut_goes_where_windows_keeps_the_desktop(monkeypatch, tmp_path, capsys):

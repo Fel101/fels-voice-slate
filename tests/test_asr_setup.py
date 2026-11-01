@@ -23,6 +23,7 @@ class Machine:
         self.installed = False
         self.fail = None                    # 'venv', 'pip', 'fetch' or 'worker': that step exits with an error
         self.worker_text = ''
+        self.listed = ''                    # what `py -0p` prints; None means there is no Python launcher
 
     @property
     def python(self):
@@ -33,8 +34,12 @@ class Machine:
 
     def run(self, command, **kwargs):
         command = [str(part) for part in command]
-        if command[1:3] == ['-m', 'venv']:
-            return self._step('venv', command, lambda: self._make_python(Path(command[3])))
+        if command == ['py', '-0p']:
+            if self.listed is None:
+                raise FileNotFoundError('py')
+            return subprocess.CompletedProcess(command, 0, stdout=self.listed, stderr='')
+        if '-m' in command and command[command.index('-m') + 1] == 'venv':
+            return self._step('venv', command, lambda: self._make_python(Path(command[-1])))
         if command[1:3] == ['-m', 'pip']:
             return self._step('pip', command, lambda: setattr(self, 'installed', True))
         if command[1:3] == ['-I', '-c'] and command[3] == 'import faster_whisper':
@@ -57,7 +62,7 @@ class Machine:
 
     def _make_python(self, venv):
         python = venv / 'Scripts' / 'python.exe'
-        python.parent.mkdir(parents=True)
+        python.parent.mkdir(parents=True, exist_ok=True)
         python.write_bytes(b'')
 
     @staticmethod
@@ -77,6 +82,12 @@ def machine(tmp_path, monkeypatch):
     folder = tmp_path / 'program'
     folder.mkdir()
     (folder / asr_setup.REQUIREMENTS).write_text('faster-whisper==1.2.1\n', encoding='utf-8')
+    system = tmp_path / 'System32'
+    system.mkdir()
+    for name in asr_setup.RUNTIME:
+        (system / name).write_bytes(b'')
+    monkeypatch.setattr(asr_setup, 'SYSTEM_FOLDER', system)
+    monkeypatch.setattr(asr_setup, 'THIS_PYTHON', asr_setup.PYTHONS[0])     # whichever Python runs the tests
     pretend = Machine(folder)
     monkeypatch.setattr(subprocess, 'run', pretend.run)
     return pretend
@@ -296,6 +307,76 @@ def test_not_enough_free_space_stops_before_anything_is_downloaded(machine, monk
     monkeypatch.setattr(shutil, 'disk_usage', lambda path: SimpleNamespace(total=10**9, used=0, free=100 * 1024 * 1024))
     assert asr_setup.run('base', 'en', yes=True, folder=machine.folder) == 1
     assert 'not enough free space' in capsys.readouterr().out and machine.calls == [] and saved() == {}
+
+
+def too_new(monkeypatch, machine, listed):
+    """The program runs on a Python the recognizer is not built for, as a new computer's does now."""
+    monkeypatch.setattr(asr_setup, 'THIS_PYTHON', '3.15')
+    machine.listed = listed
+
+
+def test_a_python_too_new_for_the_recognizer_says_what_to_install_before_any_question(machine, monkeypatch, capsys):
+    too_new(monkeypatch, machine, ' -V:3.15 *        C:\\Python315\\python.exe\n')
+    say(monkeypatch)                                                        # a question would fail the test
+    assert asr_setup.run(folder=machine.folder) == 1
+    assert machine.calls == [] and saved() == {}
+    out = capsys.readouterr().out
+    assert 'Python 3.12 to 3.14' in out and 'running on Python 3.15' in out and 'py install 3.14' in out
+    assert 'Nothing in your settings was changed' in out
+
+
+def test_a_python_too_new_uses_the_newest_older_one_on_the_computer_for_the_recognizer(machine, monkeypatch, capsys):
+    too_new(monkeypatch, machine, ' -V:3.15 *        C:\\Python315\\python.exe\n'
+                                  ' -V:3.13          C:\\Python313\\python.exe\n'
+                                  ' -V:3.12          C:\\Python312\\python.exe\n'
+                                  ' -V:Astral\\CPython3.14.1 C:\\uv\\python.exe\n')
+    assert asr_setup.run('base', 'en', yes=True, folder=machine.folder) == 0
+    assert machine.command('venv')[:4] == ['py', '-3.13', '-m', 'venv']
+    assert machine.steps() == ['venv', 'pip', 'fetch', 'worker'] and saved()['asr_python'] == str(machine.python)
+
+
+@pytest.mark.parametrize('listed', [' -V:3.14-32       C:\\Python314-32\\python.exe\n',
+                                    ' -V:3.14t         C:\\Python314t\\python.exe\n',
+                                    ' -V:3.14-arm64    C:\\Python314-arm64\\python.exe\n',
+                                    ' -V:3.11          C:\\Python311\\python.exe\n',
+                                    '',
+                                    None])
+def test_a_python_the_recognizer_has_no_build_for_does_not_count(machine, monkeypatch, capsys, listed):
+    too_new(monkeypatch, machine, listed)
+    assert asr_setup.run('base', 'en', yes=True, folder=machine.folder) == 1
+    assert 'py install 3.14' in capsys.readouterr().out and machine.calls == []
+
+
+def test_a_recognizer_that_works_on_a_newer_python_is_left_alone(machine, monkeypatch):
+    """It was set up by hand or by a later version of this list. Nothing about the Python matters if it loads."""
+    too_new(monkeypatch, machine, '')
+    machine._make_python(machine.folder / asr_setup.VENV)
+    machine.installed = True
+    machine.make_model(machine.folder / asr_setup.MODELS / 'faster-whisper-base.en')
+    assert asr_setup.run('base', 'en', folder=machine.folder) == 0
+    assert machine.steps() == ['worker']
+
+
+def test_an_environment_a_failed_attempt_left_behind_is_made_again(machine):
+    """A Python too new for the recognizer leaves a .venv-asr with nothing in it: installing into it would fail for good."""
+    machine._make_python(machine.folder / asr_setup.VENV)
+    assert asr_setup.run('base', 'en', yes=True, folder=machine.folder) == 0
+    assert machine.steps() == ['venv', 'pip', 'fetch', 'worker'] and '--clear' in machine.command('venv')
+
+
+@pytest.mark.parametrize('name', asr_setup.RUNTIME)
+def test_a_computer_without_microsofts_runtime_is_told_before_any_question(machine, monkeypatch, capsys, name):
+    (asr_setup.SYSTEM_FOLDER / name).unlink()
+    say(monkeypatch)                                                        # a question would fail the test
+    assert asr_setup.run(folder=machine.folder) == 1
+    out = capsys.readouterr().out
+    assert name in out and 'Visual C++' in out and asr_setup.RUNTIME_PAGE in out
+    assert machine.calls == [] and saved() == {}
+
+
+def test_the_pythons_the_setup_accepts_are_the_ones_the_requirements_file_gives():
+    text = (settings.program_dir() / asr_setup.REQUIREMENTS).read_text(encoding='utf-8')
+    assert f'every one has a wheel for Python {asr_setup.PYTHONS[-1]} to {asr_setup.PYTHONS[0]}' in text
 
 
 def test_a_missing_requirements_file_is_explained(machine, capsys):

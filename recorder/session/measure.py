@@ -1,7 +1,8 @@
 """Measurements of the current recipe, computed in the background and remembered per take.
 
 `derived(take)` returns the measurement of the take as it is now, or None while it is being computed. The result
-holds the export's statistics (what the keep rules judge), the rows of the Check tab and the processed clip's length.
+holds the statistics the keep rules judge (the export's, and the clipping in the recording behind it), the rows of the
+Check tab and the processed clip's length.
 The spectrogram is the master's, so it does not change with the recipe.
 """
 import copy
@@ -9,7 +10,6 @@ import json
 from collections import namedtuple
 from types import SimpleNamespace
 
-from .. import audio_core as ac
 from ..core import analysis
 
 Derived = namedtuple('Derived', 'key stats report error')
@@ -44,7 +44,9 @@ class Measurements:
 
             def work():
                 export = lib.export_for(take, recipe)
-                return Derived(key, ac.measure(export, ac.EXPORT_RATE), analysis.quality_report(export), '')
+                stats = lib.stats_for(take, export, recipe)
+                report = analysis.quality_report(export, recorded_clipped=stats['recording_clipped_fraction'])
+                return Derived(key, stats, report, '')
 
             def done(result):
                 if take.cache.get('derived_requested') == key:      # a result for a recipe since changed is dropped

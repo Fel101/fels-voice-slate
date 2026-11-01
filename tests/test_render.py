@@ -199,6 +199,44 @@ def test_the_export_is_mono_24k_and_clipped_to_full_scale():
     assert float(np.abs(out).max()) <= 1.0
 
 
+# ---- clipping in the recording ----------------------------------------------------------------------------------------
+
+def clipped(seconds=6.0):
+    return np.clip(tone(seconds, amp=3.0), -1.0, 1.0)
+
+
+def test_clipping_in_the_recording_shows_through_gain_and_the_limiter():
+    x = clipped()
+    h = History(seconds=6.0)
+    h.set_chain('level', 'Level', gain_db=-12.0)
+    h.set_chain('limiter', 'Limiter', enabled=True)
+    assert ac.measure(render.export_samples(x, RATE, h), ac.EXPORT_RATE)['clipped_fraction'] == 0.0
+    found = render.recorded_clipping(x, RATE, h)
+    assert found['recording_clipped'] is True and found['recording_clipped_fraction'] > 0.5
+
+
+def test_a_clean_recording_has_no_clipping_to_report():
+    assert render.recorded_clipping(tone(6.0), RATE, History(seconds=6.0)) == {'recording_clipped': False,
+                                                                                'recording_clipped_fraction': 0.0}
+
+
+@pytest.mark.parametrize('remove', ['cut', 'silence'])
+def test_clipping_in_a_part_the_clip_leaves_out_does_not_count(remove):
+    x = tone(6.0)
+    x[2 * RATE:3 * RATE] = 1.0
+    h = History(seconds=6.0)
+    assert render.recorded_clipping(x, RATE, h)['recording_clipped'] is True
+    getattr(h, remove)(1.9, 3.1)
+    assert render.recorded_clipping(x, RATE, h) == {'recording_clipped': False, 'recording_clipped_fraction': 0.0}
+
+
+def test_clipping_on_one_channel_is_found_though_the_mono_mix_hides_it():
+    left = clipped()
+    stereo = np.stack([left, np.zeros_like(left)], axis=1)
+    assert np.abs(ac.to_mono(stereo)).max() <= 0.5
+    assert render.recorded_clipping(stereo, RATE, History(seconds=6.0))['recording_clipped'] is True
+
+
 # ---- master time and edited time --------------------------------------------------------------------------------------
 
 def test_edited_time_maps_back_to_the_master_timeline():

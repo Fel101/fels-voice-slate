@@ -6,20 +6,14 @@ for that and has not touched the text since asking. A result for a take that has
 While the transcript is still the recognizer's own text it follows the edits: once the cutting pauses, the draft is made
 again from the edited audio, so the words match the clip. Text that was typed or corrected is never replaced that way.
 """
-import json
 import time
 
 from .. import settings, transcript
 from ..clean import CleanError
-from ..core.edits import WORD_OPS
+from ..core.edits import words_key
 from .measure import frozen
 
 FOLLOW_DELAY_SECONDS = 1.5          # how long the cuts must stay still before the draft is made again
-
-
-def words_key(history):
-    """What decides the spoken words of a clip: its cuts and silences. Level, filters and fades do not change them."""
-    return json.dumps([[e['op'], e['start_seconds'], e['end_seconds']] for e in history.edits if e['op'] in WORD_OPS])
 
 
 class Drafts:
@@ -101,12 +95,12 @@ class Drafts:
             take.meta['transcript_status'] = 'asr_draft'
             take.draft_key = request[2] if request is not None else words_key(take.history)
             if take.draft_key == words_key(take.history):
-                take.needs_transcript_review = False        # made from the clip as it is now: it matches the cuts
+                take.transcript_checked()                   # made from the clip as it is now: it matches the cuts
             self.bus.status('Draft transcript filled in. Listen to the clip and correct any wrong words before Keep.'
                             + (' A repeated ending was removed.' if tidied else ''))
         else:
             self.bus.status('Draft ready. Your typed transcript was kept; use Suggest from audio to replace it.')
-        self.bus.notify('meta')
+        self.bus.notify('meta', take)           # the take whose text changed, which may not be the one in front
         return True
 
     # ---- following the edits ------------------------------------------------------------------------------------------

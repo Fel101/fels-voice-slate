@@ -1,5 +1,9 @@
 """Recording: devices, start, stop with a tail, and what happens when a device fails or the take reaches 40 s.
 
+While a take runs, what has arrived is written to a spool file on each tick, so a crash costs a moment and not the whole
+take. That writing can never disturb the recording: if it fails, the take carries on in memory, as it would have anyway.
+Stop writes the original and the spool goes; if the program never gets that far, the next start makes a take of the spool.
+
 There are no timers here. The window calls `Session.tick()` about twenty times a second, and `tick` checks the meter,
 the device and the stop deadline against an injectable clock, so the whole state machine runs in tests with no
 toolkit and no sleeping.
@@ -11,6 +15,7 @@ from .. import capture as cap
 from .. import settings
 
 PRE_ROLL_SECONDS = 0.5
+SPOOL_SYNC_SECONDS = 2.0            # how often the spool is forced to the disk: the most a power cut can cost
 
 STATES = {
     'idle': 'Idle',
@@ -42,6 +47,9 @@ class Capturing:
         self.take_script_line = None
         self.tail_seconds = settings.tail_seconds(settings.load(settings_file))
         self._stop = None                   # (capture, deadline) while a stop tail is pending
+        self._stay_armed = False            # the input was armed when this take started, so it is armed again after it
+        self._spool = None                  # where the running take is being written as it is made
+        self._spool_synced = 0.0
 
     # ---- state --------------------------------------------------------------------------------------------------------
 
@@ -149,6 +157,7 @@ class Capturing:
         self._cancel_stop()
         if not self.workspace.speaker:
             self.workspace.ensure_speaker()
+        self._stay_armed = self.armed
         try:
             capture = self._ensure_capture()
             self.take_script_line = self.script.current
@@ -159,7 +168,7 @@ class Capturing:
             self.close_capture()
             return False
         self._set_state('recording')
-        self.bus.status('Recording. Press F9 or Stop when finished.')
+        self.bus.status(self._open_spool(capture) or 'Recording. Press F9 or Stop when finished.')
         return True
 
     def stop(self):
@@ -184,6 +193,7 @@ class Capturing:
         self.level = tuple(capture.level)
         if not capture.recording:
             return
+        self._write_spool(capture)
         self.elapsed = max(capture.elapsed, capture.wall_elapsed)       # the clock keeps counting if the device stops
         if not capture.alive() or capture.stalled():
             self.interrupted = True
@@ -222,15 +232,18 @@ class Capturing:
         capture = self.capture
         if capture is None or not capture.recording:
             return None
+        self._write_spool(capture)
         samples = capture.stop()
         close_error = capture.close_error
         rate = capture.rate
-        device = {'name': capture.backend.name, 'hostapi': capture.backend.hostapi, 'native_rate': rate,
-                  'channels': capture.channels}
+        device = self._device_of(capture)
         kind = capture.backend.kind
+        dropouts = capture.dropouts
         self.close_capture()
-        flags = ['interrupted'] if self.interrupted else []
+        flags = (['interrupted'] if self.interrupted else []) + (['dropouts'] if dropouts else [])
+        # If this fails the spool stays on disk: it is the take, for the next start to pick up.
         take = self.workspace.add_take(samples, rate, kind, device, flags, script_line=self.take_script_line)
+        self._drop_spool(take)
         if take is None:
             self._set_state('idle')
             return None
@@ -240,8 +253,13 @@ class Capturing:
                             'memory: free up space, then press Keep to write it.')
         elif close_error is not None:
             self.bus.status(f'Saved. The device reported an error as it stopped: {close_error}')
+        elif dropouts:
+            self.bus.status(f'Take saved, but the device lost audio {dropouts} time{"" if dropouts == 1 else "s"} during '
+                            'it. Listen for gaps before you keep it.')
         else:
             self.bus.status(message or 'Take saved. Review it, then Keep.')
+        if self._stay_armed and not self.interrupted and close_error is None and not self.workspace.closing:
+            self._rearm()
         return take
 
     def close_capture(self):
@@ -254,3 +272,55 @@ class Capturing:
         self.capture = None
         self.level = (-120.0, -120.0)
         self.bus.notify('recording')
+
+    # ---- the take on disk while it is recorded ----------------------------------------------------------------------------
+
+    @staticmethod
+    def _device_of(capture):
+        return {'name': capture.backend.name, 'hostapi': capture.backend.hostapi, 'native_rate': capture.rate,
+                'channels': capture.channels}
+
+    def _open_spool(self, capture):
+        """Start writing the take to disk. Returns what to say if that is not possible."""
+        try:
+            self._spool = self.workspace.lib.open_spool(self.workspace.speaker, capture.rate, capture.channels,
+                                                        capture.backend.kind, self._device_of(capture),
+                                                        self.take_script_line)
+        except OSError as e:
+            self._spool = None
+            return f'Recording, but only in memory until you stop: {e}'
+        self._spool_synced = self.clock()
+        return None
+
+    def _write_spool(self, capture):
+        if self._spool is None:
+            return
+        try:
+            self._spool.write(capture.new_blocks())
+            if self.clock() - self._spool_synced >= SPOOL_SYNC_SECONDS:
+                self._spool.sync()
+                self._spool_synced = self.clock()
+        except (OSError, ValueError) as e:      # a full disk, say. The audio is in memory, and Stop writes it
+            self._drop_spool()
+            self.bus.status(f'This take is only in memory until you stop: {e}')
+
+    def _drop_spool(self, take=None):
+        """The take is finished. Its spool goes, unless it is the only copy on disk until the original can be written."""
+        spool, self._spool = self._spool, None
+        if spool is None:
+            return
+        if take is not None and take.unsaved:
+            spool.close()
+            take.spool = spool.path
+        else:
+            spool.remove()
+
+    def _rearm(self):
+        """The input was armed before this take, so the next one has its meter and its first word kept too."""
+        try:
+            self._ensure_capture().arm()
+        except Exception as e:                  # the device has gone, or something else took it
+            self.close_capture()
+            self.bus.status(f'The input could not be armed again: {e}')
+            return
+        self._set_state('armed')

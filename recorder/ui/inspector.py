@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (QCheckBox, QFrame, QLabel, QLineEdit, QListWidget
 from .. import audio_core as ac
 from .. import clean
 from ..core import chain as chain_mod
+from ..store import LABEL_MAX
 from . import theme
 from .palette import PALETTE, color
 from .widgets import Segmented, Switch, button, caption, card, chip, clear_layout, hbox, label, set_chip, vbox
@@ -41,6 +42,14 @@ class ClipPage(QWidget):
         self.session = session
         self._loading = False
         layout = vbox(self, spacing=8)
+        self.name_edit = QLineEdit()                    # no caption of its own: the page has no room to spare
+        self.name_edit.setAccessibleName('Label')
+        self.name_edit.setPlaceholderText('Name this take (optional)')
+        self.name_edit.setToolTip('A label for this take. It is shown in the list, and the filter box above the list '
+                                  'searches it (F2)')
+        self.name_edit.setMaxLength(LABEL_MAX)
+        self.name_edit.textEdited.connect(lambda text: self._write(label=text))
+        layout.addWidget(self.name_edit)
         head = hbox(spacing=8)
         head.addWidget(caption('Transcript'))
         head.addStretch(1)
@@ -121,6 +130,9 @@ class ClipPage(QWidget):
             value = str(meta.get(key) or '')
             if edit.text() != value:
                 edit.setText(value)
+        name = str(meta.get('label') or '')
+        if self.name_edit.text() != name:
+            self.name_edit.setText(name)
         value = str(meta.get('transcript') or '')
         if self.transcript.toPlainText() != value:
             self.transcript.setPlainText(value)
@@ -205,8 +217,8 @@ class ProcessPage(QWidget):
         layout.addWidget(self.hum)
 
         lo, hi = chain_mod.LIMITS[('denoise', 'nf')]
-        self.denoise = StepCard('Noise reduction', 'Reduces steady background noise with FFmpeg (the afftdn filter). '
-                                                   'Values nearer -20 dB clean more, and can change the voice.')
+        self.denoise = StepCard('Noise reduction', 'Reduces steady background noise with FFmpeg (afftdn). Best about 5 dB '
+                                                   'above the noise floor; higher values change the voice.')
         self.denoise_slider = self.denoise.add_slider(lo, hi)
         self.denoise_note = self.denoise.add_note('Voice identity is not checked. Listen first.')
         self.denoise.switch.toggled.connect(self.session.editor.set_denoise)
@@ -659,8 +671,8 @@ class RecordCard(QFrame):
             layout.addLayout(row)
             self.values[key] = value
         layout.addSpacing(6)
-        layout.addWidget(label('Editing opens when you stop. The original is written to disk first, so Stop never loses a '
-                               'take.', 'muted', wrap=True))
+        layout.addWidget(label('Editing opens when you stop. The take is written to disk as it records, so a crash does not '
+                               'lose it, and the original is written at Stop.', 'muted', wrap=True))
 
     def refresh(self):
         info = self.session.capturing.info()
@@ -781,6 +793,12 @@ class Inspector(QWidget):
     def show_tab(self, index):
         self.tabs.set_current(index)
         self.pages.setCurrentIndex(index)
+
+    def focus_label(self):
+        """Show the Clip tab with the cursor in the Label field, ready to give the take a name."""
+        self.show_tab(self.CLIP_TAB)
+        self.clip.name_edit.setFocus()
+        self.clip.name_edit.selectAll()
 
     def refresh_meta(self, derived):
         self.clip.refresh()

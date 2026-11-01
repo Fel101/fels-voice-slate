@@ -1,7 +1,24 @@
 """Script mode: the prompts a speaker reads, one per take."""
+import codecs
+import locale
 from pathlib import Path
 
 from .. import audio_core as ac
+
+
+def decode(raw):
+    """A text file's bytes as text: what Notepad saves as UTF-8 or Unicode (with or without a byte-order mark), then what
+    older programs save in the Windows code page. Raises UnicodeDecodeError, or ValueError for something that is not text."""
+    if raw.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)):
+        text = raw.decode('utf-16')
+    else:
+        try:
+            text = raw.decode('utf-8-sig')
+        except UnicodeDecodeError:
+            text = raw.decode(locale.getencoding())
+    if '\x00' in text:
+        raise ValueError('it holds characters that are not text')
+    return text
 
 
 class Script:
@@ -27,9 +44,9 @@ class Script:
 
     def load_file(self, path):
         try:
-            text = Path(path).read_text(encoding='utf-8')
-        except UnicodeDecodeError:
-            self.bus.notice('error', 'Script', 'The file is not UTF-8 text. Save it as UTF-8 and load it again.')
+            text = decode(Path(path).read_bytes())
+        except ValueError:                      # UnicodeDecodeError is one
+            self.bus.notice('error', 'Script', 'The file is not plain text. Save it as UTF-8 text and load it again.')
             return False
         except OSError as e:
             self.bus.notice('error', 'Script', f'The file could not be read: {e}')

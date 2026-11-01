@@ -11,7 +11,7 @@ from PySide6.QtCore import QByteArray, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QApplication, QLabel, QMainWindow, QMenu, QWidget
 
-from .. import asr_setup, transcript
+from .. import asr_setup, launch, manifest, share, transcript
 from .. import audio_core as ac
 from .. import clean, settings
 from ..clean import CleanError
@@ -19,7 +19,7 @@ from ..core import render
 from ..core.edits import describe
 from ..session import Session
 from ..session.measure import recipe_key
-from ..store import KeepBlocked, TrashUnavailable
+from ..store import KeepBlocked, TrashUnavailable, clean_label
 from .actions import SPEC, Actions, shortcut_text
 from .dialogs import Dialogs
 from .editor_panel import EditorPanel
@@ -39,6 +39,7 @@ ALERT_MS = 2000                    # how long the taskbar button flashes when F9
 
 class MainWindow(QMainWindow):
     closed = Signal()
+    unexpected = Signal(str)                # an error nothing caught, from any thread (recorder/ui/__init__.py sends these)
 
     def __init__(self, session=None, dialogs=None, settings_file=None, hotkey=None):
         """`hotkey` is the key that reaches this window from other programs (recorder/hotkey.py); without one, F9 only
@@ -54,6 +55,7 @@ class MainWindow(QMainWindow):
         self._shut = False                  # set when the window has closed for good
         self._last_head = None
         self._edited_seconds = 0.0
+        self._errors_shown = set()
         self.setWindowTitle(settings.APP_NAME)
         self.setMinimumSize(MIN_SIZE)
         self.resize(self._first_size())
@@ -83,6 +85,7 @@ class MainWindow(QMainWindow):
         self._analysis_timer.setInterval(ANALYSIS_DELAY_MS)
         self._analysis_timer.timeout.connect(self._request_analysis)
         self.session.bus.listen(self._heard)
+        self.unexpected.connect(self._show_unexpected, Qt.ConnectionType.QueuedConnection)
         self._refresh({'speakers', 'devices', 'takes', 'current', 'recording', 'transport', 'script', 'settings'})
         self._show_status(self.session.status_text)
         if self.hotkey is not None:
@@ -123,9 +126,12 @@ class MainWindow(QMainWindow):
 
     def _build_menu(self):
         a, menu = self.actions, self.topbar.menu
-        for name in ('settings', 'import_recording', 'new_speaker', 'load_script', 'clear_script', 'open_folder'):
-            menu.addAction(a[name])
-        menu.addSeparator()
+        for group in (('settings', 'import_recording', 'new_speaker', 'rename_speaker'),
+                      ('move_take', 'save_copy', 'export_manifest'),
+                      ('load_script', 'clear_script', 'open_folder')):
+            for name in group:
+                menu.addAction(a[name])
+            menu.addSeparator()
         menu.addAction(a.refresh_devices)
         menu.addSeparator()
         menu.addAction(a.shortcuts)
@@ -169,8 +175,13 @@ class MainWindow(QMainWindow):
         a.keep.triggered.connect(self.keep)
         a.discard.triggered.connect(self.discard)
         a.rerecord.triggered.connect(self.rerecord)
+        a.rename.triggered.connect(self.rename_take)
         a.import_recording.triggered.connect(self.import_recording)
         a.new_speaker.triggered.connect(self.new_speaker)
+        a.rename_speaker.triggered.connect(self.rename_speaker)
+        a.move_take.triggered.connect(self.move_take)
+        a.save_copy.triggered.connect(self.save_copy)
+        a.export_manifest.triggered.connect(self.export_manifest)
         a.open_folder.triggered.connect(self.open_folder)
         a.refresh_devices.triggered.connect(capturing.refresh_devices)
         a.load_script.triggered.connect(self.load_script)
@@ -186,6 +197,7 @@ class MainWindow(QMainWindow):
         self.topbar.deviceChanged.connect(capturing.select_device)
         self.library.speakerPicked.connect(workspace.select_speaker)
         self.library.newSpeakerRequested.connect(self.new_speaker)
+        self.library.speakerContext.connect(self._speaker_menu)
         self.library.takePicked.connect(self._take_picked)
         self.library.takeContext.connect(self._take_menu)
         self.library.importRequested.connect(self.import_recording)
@@ -243,6 +255,16 @@ class MainWindow(QMainWindow):
     def _show_status(self, text):
         self.status_text.set_full_text(text)
 
+    def _show_unexpected(self, text):
+        """Something failed that nothing here was ready for. Say so instead of leaving the person to wonder why nothing
+        happened, but once for each message: a fault in something that repeats would otherwise open a dialog twenty times a
+        second."""
+        self._show_status(f'Something went wrong: {text}')
+        if text not in self._errors_shown:
+            self._errors_shown.add(text)
+            self.dialogs.notice('error', 'Something went wrong', f'{text}\n\nThe last action may not have finished. Your '
+                                f'recordings are not affected. The details are in {launch.log_path()}')
+
     def _derived(self):
         """The measurement of the current recipe if it is ready (never starts one)."""
         take = self.session.current
@@ -289,6 +311,8 @@ class MainWindow(QMainWindow):
             self.inspector.refresh_analysis(self._derived())
             self._analysis_timer.start()
             self._repaint_timelines()
+            if s.current is not None and s.current.kept:
+                self.library.refresh_takes()            # its card says whether it still matches the kept clip
         if topics & {'selection', 'playhead'}:
             panel.info.refresh()
             self._repaint_timelines()
@@ -365,8 +389,12 @@ class MainWindow(QMainWindow):
             'select_all': has_take, 'set_in': has_take, 'set_out': has_take, 'check_joins': has_take and bool(history.cuts),
             'play': has_take, 'stop': has_take and s.transport.active, 'loop': has_take, 'ab': has_take,
             'zoom_in': has_take, 'zoom_out': has_take, 'fit': has_take,
-            'keep': has_take, 'discard': has_take, 'rerecord': has_take,
+            'keep': has_take, 'discard': has_take, 'rerecord': has_take, 'rename': has_take,
             'import_recording': idle, 'new_speaker': idle, 'settings': idle, 'arm': idle,
+            'rename_speaker': idle and s.workspace.speaker is not None,
+            'move_take': has_take and not take.unsaved and len(s.workspace.speakers) > 1,
+            'save_copy': has_take and take.kept,
+            'export_manifest': idle and s.workspace.speaker is not None,
             'prev_line': bool(s.script.lines) and s.script.index > 0,
             'next_line': bool(s.script.lines) and s.script.index < len(s.script.lines) - 1,
             'clear_script': bool(s.script.lines),
@@ -531,6 +559,21 @@ class MainWindow(QMainWindow):
                 'Re-record?', 'This take moves to the Recycle Bin and a new recording starts straight away.'):
             self.session.capturing.start()
 
+    def revert_take(self, take):
+        """Drop what has been changed on a kept clip since Keep, after asking."""
+        if not self.dialogs.confirm('Go back to the kept clip?', 'The changes made since this clip was kept will be '
+                                    'dropped. The kept clip itself has not changed.', yes='Drop the changes', danger=True):
+            return
+        try:
+            self.session.workspace.revert(take)
+        except (OSError, ValueError) as e:
+            self.dialogs.notice('error', 'Could not go back to the kept clip', str(e))
+
+    def rename_take(self):
+        """Put the cursor in the Label field of the take in front, so it can be given a name."""
+        if self.session.current is not None and not self.session.capturing.recording:
+            self.inspector.focus_label()
+
     def import_recording(self):
         path = self.dialogs.choose_file('Import a recording', self.session.lib.root)
         if path:
@@ -543,6 +586,146 @@ class MainWindow(QMainWindow):
                 self.session.workspace.add_speaker(name)
             except ValueError as e:
                 self.dialogs.notice('warning', 'New speaker', str(e))
+
+    def rename_speaker(self):
+        workspace = self.session.workspace
+        slug = workspace.speaker
+        if not slug:
+            return
+        old = workspace.name_of(slug)
+        name = self.dialogs.ask_text('Rename speaker', 'The name to show this voice under:', old)
+        if name and name != old:
+            try:
+                workspace.rename_speaker(slug, name)
+            except ValueError as e:
+                self.dialogs.notice('warning', 'Rename speaker', str(e))
+
+    def _other_speakers(self, take):
+        return [(slug, name) for slug, name in self.session.workspace.speakers if slug != take.speaker]
+
+    def move_take(self):
+        """Ask which speaker, then file the open take under them."""
+        take = self.session.current
+        if take is None:
+            return
+        others = self._other_speakers(take)
+        if not others:
+            self.dialogs.notice('info', 'Move take', 'There is no other speaker yet. Add one with New speaker, then move '
+                                                      'the take.')
+            return
+        index = self.dialogs.choose_item('Move take', 'File this take under:', [name for _, name in others])
+        if index is not None:
+            self._move(take, others[index][0])
+
+    def _move(self, take, slug):
+        """File `take` under the speaker `slug`. A kept clip asks first: it is a statement about whose voice it is."""
+        workspace = self.session.workspace
+        if self.session.capturing.recording:
+            self.session.bus.status('Stop the recording before moving a take.')
+            return
+        if take.kept and not self.dialogs.confirm(
+                'Move this kept clip?',
+                f'The clip will be filed under {workspace.name_of(slug)}. Its permission, origin and allowed use go with '
+                f'it, and its saved description will say it was moved from {workspace.name_of(take.speaker)}.',
+                yes='Move clip'):
+            return
+        try:
+            workspace.move_take(slug, take)
+        except (ValueError, OSError) as e:
+            self.dialogs.notice('error', 'Could not move the take', str(e))
+
+    @staticmethod
+    def _with_ending(path, ending, known):
+        """The chosen file name with the ending the format needs: added if it has none, put in place of another ending of
+        a format on offer, and left alone otherwise."""
+        path = Path(path)
+        if path.suffix.lower() == ending:
+            return path
+        if path.suffix.lower() in known:
+            return path.with_suffix(ending)
+        return path.with_name(path.name + ending)
+
+    def save_copy(self):
+        """Save a copy of the open kept clip as WAV, FLAC, MP3 or Ogg, at a sample rate chosen here."""
+        s = self.session
+        take = s.current
+        if take is None or not take.kept or s.capturing.recording:
+            return
+        if not Path(take.export_path).is_file():
+            self.dialogs.notice('error', 'Save a copy', f'The kept clip {Path(take.export_path).name} is not in its folder '
+                                                        'any more.')
+            return
+        name = clean_label(take.meta.get('label')) or ' '.join(str(take.meta.get('transcript') or '').split())[:60] \
+            or Path(take.export_path).stem
+        choice = self.dialogs.copy_options(name)
+        if choice is None:
+            return
+        kind, rate = choice
+        text, ending = share.FORMATS[kind][:2]
+        known = {entry[1] for entry in share.FORMATS.values()}
+        path = self.dialogs.choose_save_file('Save a copy', share.filename_for(name, Path(take.export_path).stem) + ending,
+                                             f'{text} (*{ending})')
+        if not path:
+            return
+        path = self._with_ending(path, ending, known)
+        try:
+            Path(path).resolve().relative_to(s.lib.root.resolve())
+        except (ValueError, OSError):
+            pass
+        else:
+            self.dialogs.notice('warning', 'Save a copy', 'Choose a place outside the output folder, so that the copy is not '
+                                                          'mistaken for a kept clip.')
+            return
+        try:
+            share.save_copy(take.export_path, path, kind, rate)
+        except OSError as e:                        # share.CopyError is one
+            self.dialogs.notice('error', 'Could not save the copy', str(e))
+            return
+        s.bus.status(f'Saved a copy ({share.rate_text(rate)}) to {path}')
+
+    def export_manifest(self):
+        """List the kept clips of this speaker, or of everyone, in a CSV or JSON Lines file."""
+        s = self.session
+        workspace = s.workspace
+        slug = workspace.speaker
+        if slug is None or s.capturing.recording:
+            return
+        choice = self.dialogs.manifest_options(workspace.name_of(slug))
+        if choice is None:
+            return
+        scope, kind = choice
+        text, ending = manifest.FORMATS[kind]
+        known = {entry[1] for entry in manifest.FORMATS.values()}
+        folder = s.lib.folder(slug) if scope == 'speaker' and s.lib.folder(slug).is_dir() else s.lib.root
+        name = f'{slug}-manifest' if scope == 'speaker' else 'manifest'
+        path = self.dialogs.choose_save_file('Export manifest', folder / (name + ending), f'{text} (*{ending})')
+        if not path:
+            return
+        path = self._with_ending(path, ending, known)
+        error = None
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            rows, left_out = manifest.collect(s.lib, [slug] if scope == 'speaker' else None, base=path.parent)
+            if rows:
+                manifest.write(path, rows, kind)
+        except (OSError, ValueError) as e:
+            error = e
+        finally:
+            QApplication.restoreOverrideCursor()
+        if error is not None:                       # said once the busy cursor is gone, not under it
+            self.dialogs.notice('error', 'Could not export the manifest', str(error))
+            return
+        detail = '\n'.join(f'- {file}: {reason}' for file, reason in left_out)
+        if not rows:
+            self.dialogs.notice('info', 'Export manifest', 'There are no kept clips to list yet.' +
+                                (f'\n\nLeft out:\n{detail}' if detail else ''))
+            return
+        s.bus.status(f'Listed {len(rows)} clip{"s" if len(rows) != 1 else ""} in {path}' +
+                     (f'. {len(left_out)} left out.' if left_out else ''))
+        if left_out:
+            self.dialogs.notice('warning', 'Some clips were left out',
+                                f'{len(rows)} clip{"s are" if len(rows) != 1 else " is"} in the manifest. These are not:'
+                                f'\n\n{detail}')
 
     def open_folder(self):
         s = self.session
@@ -642,8 +825,18 @@ class MainWindow(QMainWindow):
     def build_take_menu(self, take):
         menu = QMenu(self)
         menu.addAction('Open', lambda: self._take_picked(take))
+        menu.addAction('Rename', lambda: (self._take_picked(take), self.rename_take()))
         copy = menu.addAction('Copy file path', lambda: QApplication.clipboard().setText(str(take.export_path or take.master_path)))
         copy.setEnabled((take.export_path or take.master_path) is not None)
+        if take.kept:
+            menu.addAction('Save a copy...', lambda: (self._take_picked(take), self.save_copy()))
+        others = [] if take.unsaved else self._other_speakers(take)
+        if others:
+            move = menu.addMenu('Move to speaker')
+            for slug, name in others:
+                move.addAction(name, lambda checked=False, slug=slug: self._move(take, slug))
+        if take.changed:
+            menu.addAction('Go back to the kept clip...', lambda: self.revert_take(take))
         menu.addSeparator()
         menu.addAction('Discard...', lambda: (self._take_picked(take), self.discard()))
         return menu
@@ -651,6 +844,15 @@ class MainWindow(QMainWindow):
     def _take_menu(self, take, pos):
         if not self.session.capturing.recording:
             self.dialogs.popup(self.build_take_menu(take), pos)
+
+    def build_speaker_menu(self):
+        menu = QMenu(self)
+        menu.addAction(self.actions.rename_speaker)
+        menu.addAction(self.actions.new_speaker)
+        return menu
+
+    def _speaker_menu(self, pos):
+        self.dialogs.popup(self.build_speaker_menu(), pos)
 
     # ---- dropping files ----------------------------------------------------------------------------------------------
 
@@ -688,8 +890,8 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         failures = self.session.close()
         if failures:
-            self.dialogs.notice('error', 'Could not save every recording',
-                                '\n'.join(failures) + '\n\nThe window stays open so the audio is not lost. Free up space or '
+            self.dialogs.notice('error', 'Could not save everything',
+                                '\n'.join(failures) + '\n\nThe window stays open so nothing is lost. Free up space or '
                                 'fix the folder, then close again.')
             event.ignore()
             return

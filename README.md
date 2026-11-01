@@ -18,9 +18,12 @@ is in it and whether you had the right to record it.
 ## What it does
 
 - **Record** from a microphone, or from what your computer is playing. An armed input keeps the half second before you
-  press Record, so the first word is never cut off. Script mode shows one prompt per take.
-- **Never loses a take.** The original recording is written to disk the moment you stop. Edits are a list of steps kept
-  beside it, so they can always be undone and the original is never changed.
+  press Record, so the first word is never cut off, and it stays armed from one take to the next. Script mode shows one
+  prompt per take.
+- **Never loses a take.** A take is written to disk while you record it, and the original recording is written the moment
+  you stop. Your edits, settings and typed text are saved beside it a moment after each change, on a kept clip as well, so
+  a close loses nothing and a crash costs only the last moment. Edits are a list of steps, so the original is never
+  changed.
 - **Edit** by dragging on the waveform: cut, trim, silence, fade in and out, gain on a part, trim the pauses at the
   ends, shorten long pauses, and compare the original with the edited clip. Undo and redo have a clickable history.
 - **Process** the whole take: high-pass filter, mains-hum notch (50 or 60 Hz), noise reduction (optional, needs
@@ -29,10 +32,14 @@ is in it and whether you had the right to record it.
   silence, each with a verdict and a short explanation.
 - **Auto analyze and Auto fix**: one button looks at the take and says in plain words what could be better (long
   silences, hum, rumble, noise, a quiet voice, clipping); the other repairs what can be repaired safely, in one step
-  that Undo takes back. Noise reduction, which can change the voice, is only used on a clearly noisy clip, and only if
-  it helps.
+  that Undo takes back. Noise reduction, which can change the voice, is only used on a clearly noisy clip, set from the
+  noise that clip has, and only if it lowers the noise and leaves the voice.
 - **Keep** only when the clip is ready: it needs a transcript, the origin of the recording, the allowed use, and your
   confirmation that you have the right to use the voice. Keep writes the 24 kHz mono WAV and a sidecar JSON file.
+- **Name and find takes.** Give a take a label, rename a speaker, and filter the list of takes by the words in their
+  labels, transcripts and notes. A take recorded under the wrong speaker can be moved to the right one.
+- **Share.** Drag a kept clip into Explorer or another program, save a copy as WAV, FLAC, MP3 or Ogg at 16 to 48 kHz, or
+  export a manifest of the kept clips (JSON Lines or CSV) that speech toolkits can read. The kept clips are never changed.
 - **Draft transcripts** (optional) from a speech recognizer that runs on your own computer, set up in one step.
 - **Stays on your computer.** No account, no network access, no telemetry. Discard sends files to the Recycle Bin.
 
@@ -45,9 +52,10 @@ is in it and whether you had the right to record it.
 
 ## Install
 
-You need 64-bit **Windows** and **Python 3.12 or newer** ([python.org](https://www.python.org/downloads/)). It is
-developed and tested on Windows 11; Windows 10 has not been tested. A microphone is needed to record; importing audio
-files works without one.
+You need 64-bit **Windows** and **Python 3.12 or newer** ([python.org](https://www.python.org/downloads/)). Draft
+transcripts need Python 3.12 to 3.14, because their packages are not built for newer versions yet. If you have Python 3.15,
+install 3.14 beside it (`py install 3.14`) and the setup finds it by itself. It is developed and tested on Windows 11;
+Windows 10 has not been tested. A microphone is needed to record; importing audio files works without one.
 
 1. Download this repository (the green **Code** button, then **Download ZIP**, and unzip it) or clone it with Git.
 2. Double-click **`setup.bat`** once. It creates a private Python environment in the `.venv` folder, installs the
@@ -72,6 +80,16 @@ python -m venv .venv
 `--check` says what is installed and what is missing, and `--shortcut folder` makes the icon in the program folder
 (`--shortcut` alone makes one on the desktop, `--shortcut start-menu` one in the Start menu). Nothing is installed
 outside the project folder, apart from the settings file, the log file and your recordings (see below).
+
+## Updating
+
+Your recordings are in the `voice-clips` folder inside the program folder, unless you chose another in **Settings**, so
+**do not delete the old program folder until you have moved that folder out of it.**
+
+- **If you cloned it with Git**, close Voice Slate, run `git pull` in the program folder, and run `setup.bat` again. Git
+  leaves `voice-clips` alone.
+- **If you downloaded a ZIP**, close Voice Slate and unzip the new version over the old folder, or unzip it somewhere new,
+  move `voice-clips` and `settings.json` (if you have one) from the old folder into the new one, and run `setup.bat` there.
 
 ## Your first clip
 
@@ -101,15 +119,17 @@ is used instead. Change it in **Settings** (the gear at the top right).
 ```text
 voice-clips\
   speakers.json
-  my-voice\                                   one folder per speaker
+  my-voice\                                      one folder per speaker
     masters\
-      20261020-161204_mic_3f9a1c2e.raw.wav    the original recording, 24-bit, never changed
-    20261020-161204_mic_3f9a1c2e.wav          the kept clip: 24 kHz, mono, 16-bit
-    20261020-161204_mic_3f9a1c2e.json         the sidecar: transcript, origin, allowed use, edits, measurements
+      20261020-161204_mic_3f9a1c2e.raw.wav       the original recording, 24-bit, never changed
+      20261020-161204_mic_3f9a1c2e.autosave.json your edits and text, until Keep writes them
+    20261020-161204_mic_3f9a1c2e.wav             the kept clip: 24 kHz, mono, 16-bit
+    20261020-161204_mic_3f9a1c2e.json            the sidecar: transcript, origin, allowed use, edits, measurements
 ```
 
 The sidecar holds everything needed to see how the clip was made, including the edit list and the processing settings.
-Its fields are described in [Clip format](docs/clip-format.md), so other programs can read it.
+Its fields are described in [Clip format](docs/clip-format.md), so other programs can read it. The autosave file is there
+only until Keep writes your work: Keep deletes it, and it is not part of the format that other programs read.
 
 Recordings of a voice are personal data. Keep the folder out of OneDrive, Dropbox and other synced folders unless you
 want a copy in the cloud, leave `voice-clips` out when you zip or share the program folder, and see
@@ -140,6 +160,10 @@ folders stay beside the program, and Git ignores them. The only other traces are
 folder: pip's, and a few small files in Hugging Face's. When the recognizer has run once on a second of silence, the
 setup fills in the matching lines in **Settings** for you. Start Voice Slate again, and the status bar at the bottom
 says "Draft transcripts: ready".
+
+The recognizer needs Python 3.12 to 3.14, which can sit beside a newer Python that runs the program, and Microsoft's Visual
+C++ runtime, which most computers already have. If either is missing, the setup says what to install before it downloads
+anything.
 
 Voice Slate itself never goes online: the setup is the only thing that downloads, only when you run it and agree, and
 it sends nothing about you or your recordings. The worker that makes the drafts refuses anything but a local model

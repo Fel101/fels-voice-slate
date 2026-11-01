@@ -2,7 +2,7 @@
 
 Topics: status, notice, speakers, devices, takes, current, meta, edits, selection, playhead, recording, transport,
 analysis, script, settings. A listener refreshes whatever it draws from the topic it hears; the session never
-calls into a window.
+calls into a window. `meta` carries the take whose text changed when it was a change worth saving.
 """
 from collections import namedtuple
 

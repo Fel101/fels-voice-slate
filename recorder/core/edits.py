@@ -5,6 +5,7 @@ fade. Times are seconds on the master timeline (the untouched capture), so opera
 The history keeps every state, so Undo, Redo and "go back to step N" all work, and a failed change leaves it untouched.
 """
 import copy
+import json
 import math
 
 from .. import audio_core as ac
@@ -39,6 +40,11 @@ def validate_edits(edits, seconds):
             if not math.isfinite(gain) or not GAIN_LIMITS[0] <= gain <= GAIN_LIMITS[1]:
                 raise ValueError(f'gain_db must be between {GAIN_LIMITS[0]:g} and {GAIN_LIMITS[1]:g}')
     return True
+
+
+def words_key(history):
+    """What decides the spoken words of a clip: its cuts and silences. Level, filters and fades do not change them."""
+    return json.dumps([[e['op'], e['start_seconds'], e['end_seconds']] for e in history.edits if e['op'] in WORD_OPS])
 
 
 def describe(edit):

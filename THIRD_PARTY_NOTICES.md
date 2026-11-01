@@ -68,11 +68,14 @@ into this repository and are not modified, and each one stays under its own lice
 | [NumPy](https://numpy.org) | 2.5.4 | BSD-3-Clause, with bundled code under 0BSD, MIT, Zlib and CC0-1.0 | Audio arrays |
 
 Installed alongside them, with the versions the last test of the setup installed (`pip` picks the newest that fit, so
-yours may be newer): anyio 4.15.1 (MIT), click 8.5.0 (BSD-3-Clause), colorama 0.4.6 (BSD-3-Clause), filelock 4.2.4 (MIT),
-flatbuffers 25.12.19 (Apache-2.0), fsspec 2026.9.0 (BSD-3-Clause), h11 0.16.0 (MIT), hf-xet 1.7.1 (Apache-2.0), httpcore2
+yours may be newer): anyio 4.15.1 (MIT), click 8.5.0 (BSD-3-Clause), colorama 0.4.6 (BSD-3-Clause), filelock 4.2.6 (MIT),
+flatbuffers 25.12.19 (Apache-2.0), fsspec 2026.9.0 (BSD-3-Clause), h11 0.16.0 (MIT), hf-xet 1.8.0 (Apache-2.0), httpcore2
 and httpx2 2.16.0 (BSD-3-Clause), idna 3.20 (BSD-3-Clause), packaging 26.3 (Apache-2.0 or BSD-2-Clause), protobuf 7.36.2
 (BSD-3-Clause), PyYAML 6.0.3 (MIT), setuptools 84.2.1 (MIT), tqdm 4.70.1 (MPL-2.0 and MIT), truststore 0.10.5 (MIT) and
 typing-extensions 4.16.0 (PSF-2.0).
+
+CTranslate2 and ONNX Runtime also need **Microsoft's Visual C++ runtime**. The setup does not install it: most computers
+already have it, and the setup says where Microsoft offers it if yours does not.
 
 **The speech models** are not part of this repository either. The setup downloads one of the faster-whisper conversions
 published by SYSTRAN on Hugging Face (`Systran/faster-whisper-tiny.en`, `-base.en`, `-small.en`, or the multilingual

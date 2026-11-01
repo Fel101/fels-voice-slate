@@ -13,7 +13,7 @@ from scipy.signal import butter, filtfilt, iirnotch, sosfiltfilt
 DEFAULT_CHAIN = {
     'highpass': {'enabled': False, 'hz': 80.0},
     'hum': {'enabled': False, 'hz': 60.0, 'harmonics': 3},
-    'denoise': {'enabled': False, 'nf': -25.0},
+    'denoise': {'enabled': False, 'nf': -45.0},
     'level': {'gain_db': 0.0},
     'limiter': {'enabled': False, 'ceiling_db': -1.0},
 }

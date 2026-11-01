@@ -73,7 +73,8 @@ def test_right_clicking_a_card_offers_the_take_menu(window, session, dialogs):
     record(session, 12.0)
     window.flush()
     QTest.mouseClick(cards(window)[0], Qt.MouseButton.RightButton)
-    assert len(dialogs.menus) == 1 and [a.text() for a in dialogs.menus[0].actions()][:2] == ['Open', 'Copy file path']
+    assert len(dialogs.menus) == 1
+    assert [a.text() for a in dialogs.menus[0].actions()][:3] == ['Open', 'Rename', 'Copy file path']
 
 
 def test_the_take_list_says_what_to_do_when_it_is_empty(window, session):

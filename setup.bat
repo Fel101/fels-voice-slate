@@ -3,12 +3,16 @@ rem Set up Fel's Voice Slate: create the .venv, install what the program needs, 
 rem It downloads the packages listed in requirements.txt from PyPI, so it needs an internet connection.
 cd /d "%~dp0"
 
-rem Find a Python 3.12 or newer: the newest one the Python launcher knows, else the one on PATH.
+rem Find a Python 3.12 or newer. 3.12 to 3.14 come first, because the packages for draft transcripts are not built for newer
+rem versions yet; then the newest one the Python launcher knows, and last the one on PATH.
 set "PY="
 for %%V in (3.14 3.13 3.12) do (
     if not defined PY (
         py -%%V -c "pass" >nul 2>nul && set "PY=py -%%V"
     )
+)
+if not defined PY (
+    py -3 -c "import sys; sys.exit(0 if sys.version_info >= (3, 12) else 1)" >nul 2>nul && set "PY=py -3"
 )
 if not defined PY (
     python -c "import sys; sys.exit(0 if sys.version_info >= (3, 12) else 1)" >nul 2>nul && set "PY=python"

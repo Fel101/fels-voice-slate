@@ -22,6 +22,7 @@ MUTEX_NAME = 'Local\\' + settings.APP_ID + '.SingleInstance'
 ERROR_ALREADY_EXISTS = 183
 HAS_CONSOLE = sys.stderr is not None            # pythonw.exe has no stdout or stderr; read before start_logging gives it some
 _held = []                                      # what must last as long as the process: the instance mutex, the crash log
+_on_error = None                                # told of each error nothing caught: the window shows it
 
 
 def log_path():
@@ -90,11 +91,22 @@ def release():
             kernel32.CloseHandle(item)
 
 
+def report_errors_to(listener):
+    """Have `listener` told of each error that nothing caught, on whatever thread it happened. None stops it."""
+    global _on_error
+    _on_error = listener
+
+
 def _log_uncaught(kind, error, trace):
     if issubclass(kind, KeyboardInterrupt):
         sys.__excepthook__(kind, error, trace)
         return
     logging.getLogger('recorder').error('Uncaught error', exc_info=(kind, error, trace))
+    if _on_error is not None:
+        try:
+            _on_error(error)
+        except Exception:                       # the window may be going away; the log has it
+            logging.getLogger('recorder').exception('The window could not be told of an error')
 
 
 def tell(text, title=settings.APP_NAME, error=True):

@@ -83,6 +83,8 @@ A recording of a voice is **personal data**, and a voiceprint can identify a per
 - **Never publish them by accident.** Do not commit recordings to a public repository, post them in an issue, or send them
   in a bug report. This project's `.gitignore` leaves audio out, and bug reports should use synthetic or your own audio.
 - **Share only for the allowed use**, and send the clip's sidecar file with it, so the permission travels with the audio.
+  Dragging a clip out of the window or saving a copy of it sends only the audio, so add the sidecar yourself. A manifest
+  carries each clip's origin and allowed use in its rows, but it is a list of clips, not a release.
 - **Delete on request, and when you no longer need them.** **Discard** in the program moves a take's files to the
   Recycle Bin, which is not a secure erase: empty it. To remove everything for a speaker, delete the speaker's folder.
   The name stays in the speaker list, empty, until you remove its entry from `speakers.json`.

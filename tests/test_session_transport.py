@@ -31,6 +31,47 @@ def test_play_edited_starts_at_the_playhead_on_the_edited_timeline(session, play
     assert session.transport.mode == 'edited' and session.transport.playing
 
 
+def test_the_status_line_names_what_space_is_playing(session, cut_take):
+    session.transport.toggle()
+    assert 'edited clip' in session.status_text
+    session.transport.stop()
+    session.transport.set_listen('original')
+    session.transport.toggle()
+    assert 'Playing the original' in session.status_text
+    session.transport.stop()
+    session.transport.set_listen('edited')
+    session.transport.play(edited=False)
+    assert 'Playing the original' in session.status_text
+    session.transport.stop()
+    session.transport.play(edited=True)
+    assert 'edited clip' in session.status_text
+
+
+def no_output(*args, **kwargs):
+    raise OSError('Error opening OutputStream: Invalid device')
+
+
+def test_a_device_that_will_not_play_says_so(session, player, cut_take, monkeypatch):
+    monkeypatch.setattr(player, 'play', no_output)
+    assert session.transport.play() is False
+    notice = session.bus.notices[-1]
+    assert notice.level == 'error' and notice.title == 'Could not play' and 'Invalid device' in notice.text
+    assert session.transport.mode is None and not session.transport.active
+
+
+def test_a_device_that_cannot_be_loaded_says_so_too(session, player, cut_take, monkeypatch):
+    monkeypatch.setattr(player, 'load', no_output)
+    assert session.transport.play() is False and session.bus.notices[-1].title == 'Could not play'
+
+
+def test_the_join_check_says_so_too(session, player, cut_take, monkeypatch):
+    take = record(session, 10.0)
+    take.history.cut(4.0, 5.0)
+    monkeypatch.setattr(player, 'play', no_output)
+    assert session.transport.check_cuts() is False
+    assert session.bus.notices[-1].title == 'Could not play' and session.transport.mode is None
+
+
 def test_play_original_plays_the_untouched_recording_from_the_playhead(session, player, cut_take):
     session.editor.set_playhead(3.0)
     session.transport.play(edited=False)

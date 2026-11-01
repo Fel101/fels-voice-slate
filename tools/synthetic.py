@@ -66,6 +66,7 @@ class SyntheticCapture:
         self.recording = True
         self.armed = True
         self.close_error = None
+        self.dropouts = 0
         self.backend = type('Backend', (), {'name': 'Synthetic input', 'hostapi': 'demo', 'kind': 'mic'})()
         self._samples = take(max(seconds, 14.0), rate)[:int(seconds * rate)]
         self.elapsed = self.wall_elapsed = float(seconds)
@@ -76,6 +77,9 @@ class SyntheticCapture:
 
     def alive(self):
         return True
+
+    def new_blocks(self):
+        return []
 
     def stalled(self):
         return False

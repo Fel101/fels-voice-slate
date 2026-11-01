@@ -37,6 +37,17 @@ DEFAULT_SIZE = 'base'
 ENGLISH = 'en'
 SPARE_MB = 200                          # free space to leave over, besides what the setup itself needs
 
+# The Pythons that every package in requirements-asr.txt is built for, newest first. The program can run on a newer one,
+# and then the recognizer needs one of these beside it: for anything else pip finds nothing to install.
+PYTHONS = ('3.14', '3.13', '3.12')
+THIS_PYTHON = f'{sys.version_info.major}.{sys.version_info.minor}'
+LISTED_PYTHON = re.compile(r'^\s*-V:(3\.\d+)\s', re.MULTILINE)          # in `py -0p`: leaves out 3.14-32, 3.14t and the like
+# Microsoft's C++ runtime. ctranslate2 and onnxruntime need it and do not bring it. The window's Qt brings its own copy, so
+# a computer without it runs the whole program and fails only here.
+RUNTIME = ('msvcp140.dll', 'msvcp140_1.dll')
+RUNTIME_PAGE = 'https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist'
+SYSTEM_FOLDER = Path(os.environ.get('SystemRoot', r'C:\Windows')) / 'System32'
+
 # The files of a faster-whisper model, and where each model lives on Hugging Face (SYSTRAN's conversions of OpenAI's
 # Whisper). faster-whisper's own download_model fetches exactly these, but switches the progress bars off, which would
 # leave the window looking frozen for minutes on the larger models; huggingface_hub's snapshot_download shows them.
@@ -73,6 +84,17 @@ and Suggest from audio fills in a draft for you to listen to and correct.
 The recognizer is in {venv} and the model in {model}. To undo all this, delete those two folders and clear the speech
 recognizer lines in Settings.
 """
+
+TOO_NEW = """Draft transcripts need Python {oldest} to {newest}, and Fel's Voice Slate is running on Python {version}.
+
+The speech recognizer is not built for Python {version} yet, and no other Python was found on this computer. Install
+Python {newest} beside it, which changes nothing else: type  py install {newest}  in a terminal, or download it from
+https://www.python.org/downloads/. The program can stay on the Python it has."""
+
+NO_RUNTIME = """The speech recognizer needs Microsoft's Visual C++ runtime, and this computer does not have it ({missing}).
+
+The rest of Fel's Voice Slate brings its own copy, which is why everything else works. Install the X64 "Visual C++
+Redistributable" from Microsoft: {page}"""
 
 
 class SetupError(Exception):
@@ -144,16 +166,41 @@ def _confirm(question):
 
 # ---- what is already there --------------------------------------------------------------------------------------------
 
-def recognizer_ready(python):
-    """True when the recognizer's environment exists and can load faster-whisper."""
-    if not Path(python).is_file():
-        return False
+def _ask_quietly(command):
+    """(True when the command ran without an error, what it printed), with nothing on the console."""
     try:
-        done = subprocess.run([str(python), '-I', '-c', 'import faster_whisper'], capture_output=True, check=False,
+        done = subprocess.run(command, capture_output=True, text=True, errors='replace', check=False,
                               creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
     except OSError:
-        return False
-    return done.returncode == 0
+        return False, ''
+    return done.returncode == 0, done.stdout or ''
+
+
+def recognizer_ready(python):
+    """True when the recognizer's environment exists and can load faster-whisper."""
+    return Path(python).is_file() and _ask_quietly([str(python), '-I', '-c', 'import faster_whisper'])[0]
+
+
+def python_for_recognizer():
+    """The command that starts a Python the recognizer is built for: this one, or one the Python launcher has.
+
+    The launcher is only asked for its list. Told to run a version, it can download that version, and nothing may be
+    downloaded before the person has agreed.
+    """
+    if THIS_PYTHON in PYTHONS:
+        return [sys.executable]
+    listed = LISTED_PYTHON.findall(_ask_quietly(['py', '-0p'])[1])
+    for version in PYTHONS:
+        if version in listed:
+            return ['py', f'-{version}']
+    raise SetupError(TOO_NEW.format(oldest=PYTHONS[-1], newest=PYTHONS[0], version=THIS_PYTHON))
+
+
+def check_runtime():
+    """Stop before any download on a computer that does not have Microsoft's C++ runtime."""
+    missing = [name for name in RUNTIME if not (SYSTEM_FOLDER / name).is_file()]
+    if missing:
+        raise SetupError(NO_RUNTIME.format(missing=', '.join(missing), page=RUNTIME_PAGE))
 
 
 def model_complete(folder):
@@ -182,15 +229,18 @@ def _run(command, doing, env=None):
         raise SetupError(f'Setup stopped while {doing}. The messages above say why.')
 
 
-def make_environment(folder):
-    """Create the recognizer's environment if it is missing and install the pinned packages. Returns its python.exe."""
+def make_environment(folder, starter):
+    """Make the recognizer's environment with the Python that `starter` runs, and install the pinned packages.
+
+    Returns its python.exe. One that is there already goes first: it cannot load the recognizer, or this would not be
+    called, and if a Python too new for the recognizer made it, installing into it again would fail the same way.
+    """
     requirements = folder / REQUIREMENTS
     if not requirements.is_file():
         raise SetupError(f'{REQUIREMENTS} is missing from {folder}, so there is nothing to install.')
     python = folder / VENV / 'Scripts' / 'python.exe'
-    if not python.is_file():
-        print(f'Creating the recognizer environment in {VENV} ...')
-        _run([sys.executable, '-m', 'venv', str(folder / VENV)], 'creating the environment')
+    print(f'Creating the recognizer environment in {VENV} ...')
+    _run([*starter, '-m', 'venv', '--clear', str(folder / VENV)], 'creating the environment')
     print('Installing the recognizer (faster-whisper and what it needs) from PyPI ...')
     _run([str(python), '-m', 'pip', 'install', '--disable-pip-version-check', '--only-binary=:all:',
           '-r', str(requirements)], 'installing the recognizer')
@@ -256,6 +306,12 @@ def save_settings(python, model, language):
 
 def _set_up(folder, size, language, yes):
     print(INTRO)
+    python = folder / VENV / 'Scripts' / 'python.exe'
+    get_recognizer = not recognizer_ready(python)
+    starter = None
+    if get_recognizer:                                  # what cannot work is said now, before any question or download
+        check_runtime()
+        starter = python_for_recognizer()
     try:
         size = size_choice(size) if size else _ask_size()
         language = language_code(language) if language is not None else _ask_language()
@@ -263,9 +319,8 @@ def _set_up(folder, size, language, yes):
         print(e)
         return 2
     name = model_name(size, language)
-    python = folder / VENV / 'Scripts' / 'python.exe'
     model = folder / MODELS / f'faster-whisper-{name}'
-    get_recognizer, get_model = not recognizer_ready(python), not model_complete(model)
+    get_model = not model_complete(model)
     if get_recognizer or get_model:
         print('\nThis will download:')
         if get_recognizer:
@@ -279,7 +334,7 @@ def _set_up(folder, size, language, yes):
     else:
         print(f'\nThe recognizer and {describe(size, language)} are already here; they only need checking and connecting.')
     if get_recognizer:
-        python = make_environment(folder)
+        python = make_environment(folder, starter)
     if get_model:
         fetch_model(python, name, model, SIZES[size][0])
     print('Checking that the recognizer works ...')

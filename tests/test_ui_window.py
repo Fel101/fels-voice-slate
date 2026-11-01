@@ -2,6 +2,8 @@
 
 Everything runs on Qt's offscreen platform with a fake player, a fake capture and canned dialogs.
 """
+import threading
+
 import pytest
 
 pytest.importorskip('PySide6')
@@ -190,12 +192,92 @@ def test_keep_with_missing_permission_shows_the_reasons_and_writes_nothing(windo
     assert dialogs.notices[-1].level == 'warning' and 'permission' in dialogs.notices[-1].text.lower()
 
 
-def test_keep_reports_a_failed_write(window, session, dialogs, monkeypatch):
+def test_keep_reports_a_failed_write(window, session, dialogs):
+    """A folder standing where the file has to go makes the real write fail with the real error. SoundFile's is not an
+    OSError, so a stand-in raising one proves nothing."""
     take = record(session, 14.0)
     fill(session)
-    monkeypatch.setattr(session.lib, 'keep', lambda slug, t: (_ for _ in ()).throw(OSError('disk full')))
+    obstacle = session.lib.folder(session.workspace.speaker) / f'{take.stem}.wav.tmp'
+    obstacle.mkdir()
+    window.flush()
     window.keep()
-    assert not take.kept and dialogs.notices[-1].level == 'error' and 'disk full' in dialogs.notices[-1].text
+    window.flush()
+    assert not take.kept and dialogs.notices[-1].level == 'error' and dialogs.notices[-1].title == 'Could not write the files'
+    assert take.stem in dialogs.notices[-1].text
+    assert window.library._cards[0].status == 'In review'
+    assert window.inspector.ready.keep.text().startswith('Keep clip')
+    obstacle.rmdir()
+    window.keep()
+    assert take.kept and take.export_path.is_file()
+
+
+def test_a_card_says_when_a_kept_clip_has_changes_it_does_not_hold(window, session):
+    take = record(session, 14.0)
+    fill(session)
+    window.keep()
+    window.flush()
+    assert window.library._cards[0].status == 'Kept'
+    session.editor.set_selection(2.0, 3.0)
+    session.editor.cut_selection()
+    window.flush()
+    card = window.library._cards[0]
+    assert card.status == 'Changed' and 'Changed since it was kept' in card.toolTip()
+    assert any(advice.key == 'changed' for advice in session.workspace.readiness().advice)
+    session.editor.undo()
+    window.flush()
+    assert window.library._cards[0].status == 'Kept' and take.kept
+
+
+def test_the_take_menu_offers_a_way_back_to_the_kept_clip_only_when_there_is_one(window, session, dialogs):
+    take = record(session, 14.0)
+    fill(session)
+    window.keep()
+    window.flush()
+    words = 'Go back to the kept clip...'
+    assert words not in [a.text() for a in window.build_take_menu(take).actions()]
+    session.editor.set_selection(2.0, 3.0)
+    session.editor.cut_selection()
+    window.flush()
+    [action] = [a for a in window.build_take_menu(take).actions() if a.text() == words]
+    dialogs.confirm_answer = False
+    action.trigger()
+    assert take.changed and dialogs.confirmations[-1].danger
+    dialogs.confirm_answer = True
+    action.trigger()
+    window.flush()
+    assert not take.changed and take.history.edits == [] and window.library._cards[0].status == 'Kept'
+
+
+def test_going_back_says_so_when_it_cannot(window, session, dialogs):
+    take = record(session, 14.0)
+    fill(session)
+    window.keep()
+    session.editor.set_selection(2.0, 3.0)
+    session.editor.cut_selection()
+    take.sidecar_path.unlink()
+    window.revert_take(take)
+    assert dialogs.notices[-1].title == 'Could not go back to the kept clip' and take.changed
+
+
+def test_a_failure_nothing_caught_is_shown_once_and_stays_in_the_status_line(qapp, window, dialogs):
+    for _ in range(5):
+        window.unexpected.emit('the sound library fell over')
+    ui_helpers.pump(qapp)
+    shown = [notice for notice in dialogs.notices if notice.title == 'Something went wrong']
+    assert len(shown) == 1 and shown[0].level == 'error' and 'the sound library fell over' in shown[0].text
+    assert 'voice-slate.log' in shown[0].text
+    assert window.status_text.full_text == 'Something went wrong: the sound library fell over'
+    window.unexpected.emit('something else')
+    ui_helpers.pump(qapp)
+    assert len([notice for notice in dialogs.notices if notice.title == 'Something went wrong']) == 2
+
+
+def test_the_failure_can_come_from_another_thread(qapp, window, dialogs):
+    thread = threading.Thread(target=lambda: window.unexpected.emit('from a worker'))
+    thread.start()
+    thread.join()
+    ui_helpers.pump(qapp)
+    assert any('from a worker' in notice.text for notice in dialogs.notices)
 
 
 def test_discard_asks_then_sends_the_files_to_the_recycle_bin(window, session, dialogs, recycle):
@@ -490,10 +572,10 @@ def test_the_take_menu_opens_copies_and_discards(window, session, dialogs, qapp)
     second = record(session, 10.0)
     window.flush()
     menu = window.build_take_menu(first)
-    assert [a.text() for a in menu.actions() if a.text()] == ['Open', 'Copy file path', 'Discard...']
+    assert [a.text() for a in menu.actions() if a.text()] == ['Open', 'Rename', 'Copy file path', 'Discard...']
     menu.actions()[0].trigger()
     assert session.current is first
-    menu.actions()[1].trigger()
+    next(a for a in menu.actions() if a.text() == 'Copy file path').trigger()
     assert qapp.clipboard().text() == str(first.master_path)
     next(a for a in menu.actions() if a.text() == 'Discard...').trigger()
     assert session.workspace.takes == [second]

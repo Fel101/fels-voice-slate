@@ -166,6 +166,46 @@ def snr_db(x, rate):
     return round(ac.voiced_rms_db(x, rate) - noise_floor_db(x, rate), 1)
 
 
+VOICE_BANDS = ((1000.0, 4000.0), (4000.0, 11000.0))     # where the consonants are, which noise cleaning takes first
+VOICE_CHECK_SECONDS = 60.0                              # plenty to judge by, and a long import stays quick
+
+
+def voice_loss_db(before, after, rate):
+    """How far a cleaned clip has fallen below the voice in the clip it was made from, in its worst band, in dB. Zero when it
+    has not fallen, or when the clip has no pauses or no speech to tell them apart.
+
+    A measure of the noise alone cannot see this harm: taking the voice away along with the noise lowers the noise too, so
+    speech above the noise goes up. There is no clean voice to compare with, so one is worked out: the speech holds the
+    voice and the noise together and the pauses hold the noise alone, and the difference in each band is the voice. A band
+    where the voice is buried in the noise is left out, since nothing can be said about it.
+    """
+    frame = max(1, int(rate * ac.FRAME_SECONDS))
+    x, y = ac.to_mono(before), ac.to_mono(after)
+    count = min(min(len(x), len(y)) // frame, int(VOICE_CHECK_SECONDS / ac.FRAME_SECONDS))
+    speech = frame_db(x, rate)[:count] > speech_threshold_db(x, rate)
+    if not speech.any() or speech.all():
+        return 0.0
+    window = np.hanning(frame).astype(np.float32)
+    freqs = np.fft.rfftfreq(frame, 1.0 / rate)
+
+    def power(signal):
+        return np.abs(np.fft.rfft(signal[:count * frame].reshape(-1, frame) * window, axis=1)) ** 2
+
+    was, now = power(x), power(y)
+    worst = 0.0
+    for low, high in VOICE_BANDS:
+        band = (freqs >= low) & (freqs < high)
+        if not band.any():
+            continue
+        mixed = float(was[speech][:, band].sum(axis=1).mean())
+        noise = float(was[~speech][:, band].sum(axis=1).mean())
+        left = float(now[speech][:, band].sum(axis=1).mean())
+        voice = mixed - noise
+        if voice > noise:
+            worst = max(worst, 10.0 * math.log10(voice / max(left, 1e-30)))
+    return round(worst, 1)
+
+
 _K_SHELF = ([1.53512485958697, -2.69169618940638, 1.19839281085285], [1.0, -1.69065929318241, 0.73248077421585])
 _K_HIGHPASS = ([1.0, -2.0, 1.0], [1.0, -1.99004745483398, 0.99007225036621])
 
@@ -309,8 +349,12 @@ def shorten_pause_ranges(x, rate, keep_seconds=0.5):
 Check = namedtuple('Check', 'key label value status hint')     # status: ok, warn, bad or info
 
 
-def quality_report(x, rate=ac.EXPORT_RATE):
-    """The measurements of a finished clip, each with a status, in the order the Check tab shows them."""
+def quality_report(x, rate=ac.EXPORT_RATE, recorded_clipped=0.0):
+    """The measurements of a finished clip, each with a status, in the order the Check tab shows them.
+
+    `recorded_clipped` is the share of the recording behind it that is at full scale (render.recorded_clipping), which the
+    finished clip can hide.
+    """
     stats = ac.measure(x, rate)
     seconds = stats['seconds']
     speech = ac.voiced_rms_db(x, rate)
@@ -318,7 +362,7 @@ def quality_report(x, rate=ac.EXPORT_RATE):
     lead, tail = edge_silence(x, rate)
     hum = detect_hum(x, rate)
     band = bandwidth_hz(x, rate)
-    clipped = stats['clipped_fraction']
+    clipped = max(stats['clipped_fraction'], recorded_clipped)
 
     def rank(value, ok, warn):
         return 'ok' if ok(value) else 'warn' if warn(value) else 'bad'
@@ -334,7 +378,8 @@ def quality_report(x, rate=ac.EXPORT_RATE):
               'ok' if stats['peak_dbfs'] <= -1.0 else 'warn',
               'Peaks above -1 dBFS leave no headroom; the limiter keeps them under the ceiling.'),
         Check('clipping', 'Clipping', f'{clipped * 100:.3f}% of samples', 'ok' if clipped <= 0.001 else 'bad',
-              'More than 0.1% of samples at full scale is flagged as clipped.'),
+              'More than 0.1% of samples at full scale is flagged as clipped. The recording counts too: gain and the '
+              'limiter can hide clipping, but not repair it.'),
         Check('loudness', 'Loudness', f'{loudness_lufs(x, rate):.1f} LUFS', 'info',
               'Integrated loudness (ITU-R BS.1770). For comparison only.'),
         Check('noise', 'Noise floor', f'{floor:.1f} dB',

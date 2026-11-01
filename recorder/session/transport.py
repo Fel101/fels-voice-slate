@@ -104,11 +104,23 @@ class Transport:
             self.mode = None
             self.bus.status('Nothing is left to play from the playhead.')
             return False
-        self.player.load(data, take.rate)
-        self.player.play(begin, loop=self._loop_range())
-        self.bus.status('Playing the edited clip from the playhead. The playhead follows it.' if edited
+        if not self._start(data, take.rate, begin, looping=True):
+            return False
+        self.bus.status('Playing the edited clip from the playhead. The playhead follows it.' if mode == 'edited'
                         else 'Playing the original from the playhead.')
         self.bus.notify('transport')
+        return True
+
+    def _start(self, data, rate, begin, looping=False):
+        """Hand the audio to the player. A device that will not play says so, instead of nothing happening at all."""
+        try:
+            self.player.load(data, rate)
+            self.player.play(begin, loop=self._loop_range() if looping else None)
+        except Exception as e:                  # the sound library's own errors; a missing output device is the usual one
+            self.mode = None
+            self.bus.notice('error', 'Could not play', f'The sound could not be played: {e}')
+            self.bus.notify('transport')
+            return False
         return True
 
     def toggle(self):
@@ -220,8 +232,8 @@ class Transport:
         for j in joins:
             pieces.extend([rendered[max(0, j - take.rate): j + take.rate], gap])
         self.mode, self._segments, self._rate = 'joins', None, take.rate
-        self.player.load(np.concatenate(pieces), take.rate)
-        self.player.play(0.0)
+        if not self._start(np.concatenate(pieces), take.rate, 0.0):
+            return False
         self.bus.status('Playing 1 s either side of each join.')
         self.bus.notify('transport')
         return True

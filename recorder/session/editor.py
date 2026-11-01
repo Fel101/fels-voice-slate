@@ -9,6 +9,7 @@ from .. import audio_core as ac
 from ..clean import CleanError
 from ..core import analysis, chain as chain_mod
 from ..core import render
+from ..core.edits import words_key
 
 Normalized = namedtuple('Normalized', 'gain_db wanted_db capped')
 GAIN_STEP_LIMITS = chain_mod.LIMITS[('level', 'gain_db')]
@@ -102,7 +103,8 @@ class Editor:
 
     def _edited(self, message, keep_selection=False):
         take = self.take
-        take.needs_transcript_review = take.history.words_changed
+        # Only a change to the cuts and silences can change the words, and going back to what was checked needs no new check.
+        take.needs_transcript_review = take.history.words_changed and words_key(take.history) != take.confirmed_words
         if not keep_selection:
             self.sel = None
             self.in_point = self.out_point = None

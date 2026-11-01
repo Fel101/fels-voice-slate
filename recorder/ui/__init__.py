@@ -20,7 +20,7 @@ def run(argv=None):
 
     from PySide6.QtWidgets import QApplication
 
-    from .. import __version__, settings
+    from .. import __version__, launch, settings
     from ..hotkey import GlobalKey
     from . import theme
     from .main_window import MainWindow
@@ -33,6 +33,8 @@ def run(argv=None):
     theme.install(app)
     hotkey = GlobalKey()
     window = MainWindow(hotkey=hotkey)
+    launch.report_errors_to(lambda error: window.unexpected.emit(str(error) or type(error).__name__))
+    window.closed.connect(lambda: launch.report_errors_to(None))
     app.aboutToQuit.connect(lambda: hotkey.set_enabled(False))
     log = logging.getLogger('recorder')            # what the log says about the two optional things people ask about
     log.info('Draft transcripts: %s', 'ready' if window.session.drafts.available() else 'not set up')
