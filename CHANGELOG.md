@@ -5,6 +5,83 @@ the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.5.0] - Unreleased
+
+### Added
+
+- **Purposes.** A take is a *Reference* (6 to 40 s, 24 kHz, as before), a *Sentence* (1 to 15 s, for a dataset or voice
+  banking, one sentence at a time) or an *Audition* (3 s to 10 minutes, kept at up to 48 kHz and 24-bit). Each has its own
+  length rules, and the checklist, the Check tab, Auto fix and Keep all follow them. Choose what new takes are for under the
+  speaker, and change it for one take on the Clip tab. The sidecar and the manifest say which it is.
+- **A session mode for long scripts.** The script and your place in it come back when the program starts again. A new
+  **Script** tab lists every line and whether it has a kept clip, for the speaker in front, and clicking a line goes to it.
+  *Next line to record* (`Ctrl+Shift+Down`) skips what is done, and Keep does too. `Alt+Down` and `Alt+Up` walk the list of
+  takes.
+- **Several takes at once.** Hold `Ctrl` or `Shift` to select takes, or `Ctrl+A` in the list, then keep, discard or move them
+  together, from the right-click menu or the gear menu. Keeping several still needs the statement of permission: a dialog
+  shows what the takes say about their origin and allowed use, and Keep stays off until its box is ticked, every time. Each
+  clip's sidecar records the statement with how many takes it covered (`consent_batch`). A take that fails a Keep rule is left
+  out and named. A long job runs a little at a time, with a Stop button in the status bar.
+- **A reading check.** A take read from a script line is compared with what the speech recognizer heard. The Clip tab shows
+  the places that differ, *Ready to keep?* mentions them, and one link makes what was heard the transcript. It never stops
+  Keep: the recognizer can be wrong too.
+- **Editing by clicking words.** A take with a draft transcript shows its words under the waveform. Click a word to select it
+  (the edges go to the quiet just outside it), Shift+click to run on to another, and press `Delete` to cut. A word that was cut
+  stands struck through, and clicking it brings it back. The words and their times are saved with the take and in the sidecar
+  (`words`).
+- **Split at pauses...** makes a new take of each part of a long take, cut in the middle of its pauses, with its share of the
+  draft transcript. The long take stays. A part's sidecar says where it came from (`split_from`).
+- **Consent records for each speaker.** *Speaker details...* keeps the signed release in a `release` folder in the speaker's
+  folder, with when it was signed and when it runs out. Once it has run out, no clip of that speaker can be kept until it is
+  renewed, and a manifest or dataset leaves their clips out and says why. A release about to run out is mentioned. Each clip's
+  sidecar names the release it rests on.
+- **Delete speaker...** moves a speaker, their clips and their release to the Recycle Bin, after saying how much that is.
+- **Export dataset...** gathers kept clips in one new folder: each clip with its sidecar, or the LJSpeech layout (`wavs` and
+  `metadata.csv`), at 16 to 48 kHz, with a `manifest.jsonl` that carries the origin and allowed use. Clips can be made again
+  from their original recordings, which keeps detail a 24 kHz clip has lost.
+- **A Windows installer that needs no Python.** It brings its own private Python, installs for one person with no
+  administrator rights, and adds a Start menu icon. `tools/build_installer.py` builds it, and a new workflow attaches it to a
+  GitHub Release.
+- **Choosing the hardware.** On a device with several inputs, a picker beside the device chooses which one to record, as a
+  mono take; the status line says so when only one of two mixed inputs has sound, which lowers a voice by 6 dB. Settings chooses
+  the playback device. The input device chosen is remembered, by name.
+- **The record key can be changed** in Settings, to a function key or a letter or number held with Ctrl or Alt.
+- **Set from this clip** on the Noise reduction card measures the clip's own noise and sets the noise floor about 5 dB above
+  it, which is what Auto fix does.
+- **A light theme and a high-contrast theme**, or whatever Windows is set to, and a **size** setting from 100% to 200% for the
+  whole window. Without it the program follows Windows' own *Text size* setting.
+- **German, Spanish and French.** The window follows the language of Windows, or the one chosen in Settings. Buttons, labels,
+  tooltips and dialogs are translated, and so are most messages. Messages built from numbers, and the explanations on the Check
+  tab, are still in English, and so are the documents. These translations are new and were not checked by native speakers.
+
+### Changed
+
+- **Recordings now go in your own folder**, `C:\Users\<you>\Recordings\voice-clips`, so that updating or removing the
+  program cannot touch them. A copy that already has recordings in its `voice-clips` folder goes on using it, and Settings can
+  move them: choose a new output folder, and each file is copied and checked before the old ones go.
+- **A recording no longer stops at 40 s.** It runs on to 2 minutes for a Reference, and the take can then be trimmed or split.
+  What can be kept has not changed.
+- **`F9` in other programs is off until you turn it on** in Settings, because while it is on no other program gets the key,
+  and a stray press opens the microphone. If you had it on, turn it on again.
+- **While a recording runs with the window out of sight, a small sign stays on top of everything**, with the time and the key
+  that stops it. A click on it stops the take.
+- **The permission box is now in *Ready to keep?*, beside the Keep button**, so it is always in view, at any window size.
+- **The window can be smaller:** 1100 by 600, which fits a 1080p screen at 150%. In a short window the notes fold away with the
+  passed checks.
+- **The list of takes is a real list.** It can be reached with `Tab` and walked with the arrow keys, a screen reader can read
+  its rows, and it draws only the rows on screen.
+- **Big libraries open quickly.** A take reads its audio when it is opened, and the takes not used lately let go of it. With
+  1,000 kept clips of 13 s, the window opens in about 2.5 s, where it froze for 16, and the program stays between 200 and 450 MB,
+  where 500 takes held 1.3 GB.
+- **Every control has a name for a screen reader**, focus shows on every control, and the waveform can be reached with `Tab`.
+  What the status line says is read out as it changes, so *Kept* or *Take saved* is heard, and the marks in the checklist and
+  the script are read as words.
+- Draft transcripts run with word times, and a line read from a script is drafted again after a cut, for the reading check.
+- The manifest has three more columns at the end: `purpose`, `release_signed` and `release_expires`.
+- The dimmest text of the dark theme is a little lighter: it fell just short of the 4.5 to 1 contrast the theme aims for.
+- CI now tests Python 3.15 as well.
+- The version is 0.5.0.
+
 ## [0.4.0] - 2026-11-01
 
 ### Added
@@ -225,7 +302,8 @@ The first public release.
 - The limiter's ceiling also holds for the saved 24 kHz file: resampling can push a peak over it, so the limiter runs
   once more after resampling.
 
-[Unreleased]: ../../compare/v0.4.0...HEAD
+[Unreleased]: ../../compare/v0.5.0...HEAD
+[0.5.0]: ../../compare/v0.4.0...v0.5.0
 [0.4.0]: ../../compare/v0.3.0...v0.4.0
 [0.3.0]: ../../compare/v0.2.0...v0.3.0
 [0.2.0]: ../../compare/v0.1.0...v0.2.0

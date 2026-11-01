@@ -3,8 +3,8 @@
 A Qt shortcut only fires while this program's own window is the active one. Windows' RegisterHotKey asks the system to
 tell this program whenever one particular key is pressed, wherever the focus is. That is not a keyboard hook: the
 program is told about that one key and sees nothing else that is typed. While the key is registered no other program
-gets it, so the setting `global_hotkey` can turn it off, and a key that another program already holds is reported, not
-taken.
+gets it, so it is off unless the setting `global_hotkey` turns it on, and a key that another program already holds is
+reported, not taken.
 """
 import ctypes
 import sys
@@ -15,9 +15,28 @@ from PySide6.QtCore import QAbstractNativeEventFilter, QCoreApplication, QObject
 WM_HOTKEY = 0x0312
 MOD_NOREPEAT = 0x4000                   # holding the key down gives one press, not a stream of them
 VK_F9 = 0x78
+VK_F1 = 0x70
+MODIFIERS = {'alt': 0x1, 'ctrl': 0x2, 'shift': 0x4}
 KEY_ID = 0x5653                         # names this registration to Windows; any number from 0 to 0xBFFF will do
 ERROR_HOTKEY_ALREADY_REGISTERED = 1409
 MESSAGE_TYPES = (b'windows_generic_MSG', b'windows_dispatcher_MSG')
+
+
+def parse_key(text):
+    """(virtual key, modifiers) of a key written as Qt writes it, such as F9 or Ctrl+Shift+R, or None when it cannot be the
+    record key: a function key, or a letter or digit held with Ctrl or Alt, so that it can never be typed by accident."""
+    *held, key = [part.strip() for part in str(text).split('+')] if text else ['']
+    modifiers = 0
+    for name in held:
+        if name.lower() not in MODIFIERS:
+            return None
+        modifiers |= MODIFIERS[name.lower()]
+    key = key.upper()
+    if key.startswith('F') and key[1:].isdigit() and 1 <= int(key[1:]) <= 24:
+        return VK_F1 + int(key[1:]) - 1, modifiers
+    if len(key) == 1 and key.isascii() and key.isalnum() and modifiers & (MODIFIERS['ctrl'] | MODIFIERS['alt']):
+        return ord(key), modifiers
+    return None
 
 
 class Win32:
@@ -69,15 +88,24 @@ class GlobalKey(QObject):
 
     pressed = Signal()
 
-    def __init__(self, name='F9', vk=VK_F9, modifiers=0, api=None, parent=None):
+    def __init__(self, name='F9', api=None, parent=None):
         super().__init__(parent)
-        self.name = name
-        self.vk = vk
-        self.modifiers = modifiers | MOD_NOREPEAT
+        self.name = 'F9'
+        self.vk, self.modifiers = VK_F9, MOD_NOREPEAT
+        self.set_key(name)
         self.api = api or Win32()
         self.active = False             # True while Windows is telling us about the key
         self.problem = ''               # why it is not active, when it was asked for
         self._filter = None
+
+    def set_key(self, name):
+        """Use another key. Returns False, with nothing changed, for one that cannot be a record key. Give the key back
+        first: this only says which key the next `set_enabled(True)` asks for."""
+        parsed = parse_key(name)
+        if parsed is None:
+            return False
+        self.name, self.vk, self.modifiers = name, parsed[0], parsed[1] | MOD_NOREPEAT
+        return True
 
     def set_enabled(self, enabled):
         """Register the key, or give it back. Returns True when the key is registered afterwards."""

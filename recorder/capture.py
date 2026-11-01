@@ -16,6 +16,7 @@ import numpy as np
 # because a cold start can take a moment.
 STALL_SECONDS = 2.0
 FIRST_BLOCK_SECONDS = 10.0
+HEARD_LEVEL, SILENT_LEVEL = 0.01, 0.0005        # -40 and -66 dBFS: an input above the first has sound, below the second none
 
 
 def _mono_levels(x):
@@ -52,6 +53,12 @@ def default_microphone():
     return index if isinstance(index, int) and index >= 0 else None
 
 
+def input_channels(device):
+    """How many inputs a device has."""
+    import sounddevice as sd
+    return int(sd.query_devices(device, 'input')['max_input_channels'])
+
+
 def list_loopbacks():
     """[(index, label)] for WASAPI loopback devices: one per output endpoint."""
     import pyaudiowpatch as pa
@@ -74,24 +81,34 @@ def default_loopback():
 # ---- backends -------------------------------------------------------------------------------------------------------
 
 class _MicBackend:
+    """One microphone. With `channel`, one input of the device (from 0) is recorded as a mono take: mixing a voice on input 1
+    with a silent input 2 halves it, which is 6 dB. The device is opened with all its inputs for that, because not every
+    Windows audio interface can open a part of them."""
+
     kind = 'mic'
 
-    def __init__(self, device):
+    def __init__(self, device, channel=None):
         import sounddevice as sd
         self._sd = sd
         info = sd.query_devices(device, 'input')
+        inputs = int(info['max_input_channels'])
         self.device = int(device)
         self.name = info['name']
         self.rate = int(info['default_samplerate'])
-        self.channels = max(1, min(2, int(info['max_input_channels'])))
+        self.channel = channel if channel is not None and 0 <= channel < inputs else None
+        self.channels = 1 if self.channel is not None else max(1, min(2, inputs))
+        self._opened = inputs if self.channel is not None else self.channels
         self.hostapi = sd.query_hostapis(info['hostapi'])['name']
         self._stream = None
 
     def open(self, on_block):
-        def callback(indata, frames, time_info, status):
-            on_block(np.array(indata, dtype=np.float32), bool(status.input_overflow or status.input_underflow))
+        picked = self.channel
 
-        self._stream = self._sd.InputStream(device=self.device, samplerate=self.rate, channels=self.channels,
+        def callback(indata, frames, time_info, status):
+            block = indata if picked is None else indata[:, [picked]]
+            on_block(np.array(block, dtype=np.float32), bool(status.input_overflow or status.input_underflow))
+
+        self._stream = self._sd.InputStream(device=self.device, samplerate=self.rate, channels=self._opened,
                                             dtype='float32', callback=callback)
         self._stream.start()
 
@@ -213,6 +230,8 @@ class Capture:
         self._columns = []                     # (frames so far, lowest, highest) per recorded block: the live waveform
         self._spooled = 0                      # how many of the blocks new_blocks has handed out
         self.dropouts = 0                      # how many times the device said it lost audio during this take
+        self._loudest = np.zeros(2)            # the highest peak so far on each of two inputs
+        self._heard_frames = 0
         self.level = (-120.0, -120.0)
         self.armed = False
         self.close_error = None
@@ -249,8 +268,12 @@ class Capture:
         """A block from the device. `lost` says the device lost audio just before it. The first block of a stream can say
         that about nothing but the stream starting, so it is not counted."""
         levels = _mono_levels(x)
+        peaks = np.abs(x).max(axis=0) if x.ndim == 2 and x.shape[1] == 2 and len(x) else None
         with self._lock:
             self.level = levels
+            if peaks is not None:
+                self._loudest = np.maximum(self._loudest, peaks)
+                self._heard_frames += len(x)
             first = self._last_block is None
             self._last_block = time.monotonic()
             if self._recording:
@@ -296,6 +319,14 @@ class Capture:
             blocks = self._blocks[self._spooled:]
             self._spooled = len(self._blocks)
         return blocks
+
+    def only_input(self):
+        """1 or 2 when a second of two inputs has passed with sound on that input and none on the other, else None."""
+        with self._lock:
+            quiet, loud = sorted(self._loudest.tolist())
+            if self._heard_frames < self.rate or loud < HEARD_LEVEL or quiet > SILENT_LEVEL:
+                return None
+            return int(np.argmax(self._loudest)) + 1
 
     def alive(self):
         return self.backend.alive()
@@ -345,10 +376,11 @@ class Capture:
             self.backend.terminate()
 
 
-def open_capture(source, device, pre_roll_seconds=0.0):
-    """Build a Capture for 'mic' (sounddevice input index) or 'system' (PyAudioWPatch loopback index)."""
+def open_capture(source, device, pre_roll_seconds=0.0, channel=None):
+    """Build a Capture for 'mic' (sounddevice input index) or 'system' (PyAudioWPatch loopback index). `channel` picks one
+    input of a microphone, counted from 0; None mixes the first two."""
     if source == 'mic':
-        backend = _MicBackend(device)
+        backend = _MicBackend(device, channel)
     elif source == 'system':
         backend = _LoopbackBackend(device)
     else:

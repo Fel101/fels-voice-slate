@@ -7,9 +7,9 @@ from collections import namedtuple
 
 from .. import audio_core as ac
 from ..clean import CleanError
-from ..core import analysis, chain as chain_mod
+from ..core import analysis, autofix, chain as chain_mod
 from ..core import render
-from ..core.edits import words_key
+from ..core.edits import WORD_OPS, words_key
 
 Normalized = namedtuple('Normalized', 'gain_db wanted_db capped')
 GAIN_STEP_LIMITS = chain_mod.LIMITS[('level', 'gain_db')]
@@ -79,6 +79,31 @@ class Editor:
             a, b = sorted((self.in_point, self.out_point))
             self.sel = (a, b) if b - a >= ac.MIN_SELECTION_SECONDS else None
         self.bus.notify('selection')
+
+    # ---- the words of the take --------------------------------------------------------------------------------------------
+
+    def select_words(self, first, last):
+        """Select from the word at position `first` to the one at `last`, and move the playhead to the start of them. The
+        edges go to the quiet just outside the words, so that a cut takes all of them."""
+        take = self.take
+        words = (take.meta.get('draft_words') or []) if take is not None else []
+        if 0 <= first <= last < len(words):
+            start = analysis.quietest_near(take.mono, take.rate, words[first][1])
+            end = analysis.quietest_near(take.mono, take.rate, words[last][2])
+            self.set_selection(start, end)
+            self.set_playhead(start)
+
+    def restore_word(self, position):
+        """Bring back a word that was cut or silenced, by removing the edit that covers it. Returns True if one did."""
+        take = self.take
+        words = (take.meta.get('draft_words') or []) if take is not None else []
+        if not 0 <= position < len(words):
+            return False
+        middle = (words[position][1] + words[position][2]) / 2
+        for index, edit in reversed(list(enumerate(take.history.edits))):
+            if edit.get('op', 'cut') in WORD_OPS and edit['start_seconds'] <= middle <= edit['end_seconds']:
+                return self.remove_edit(index)
+        return False
 
     # ---- running an edit ----------------------------------------------------------------------------------------------
 
@@ -285,6 +310,25 @@ class Editor:
         if changed and enabled:
             self.bus.status('Cleaning background noise. This runs FFmpeg on the clip.')
         return changed
+
+    def fit_denoise(self):
+        """Set noise reduction from the noise this clip has: about 5 dB above its noise floor, which did best in testing.
+        The floor is measured on the clip as it would be without noise reduction. Returns the setting, or None."""
+        take = self.take
+        if take is None:
+            return None
+        plain = take.history.copy()
+        plain.set_chain('denoise', 'measuring', enabled=False)
+        try:
+            floor = analysis.noise_floor_db(self.workspace.lib.before_level(take, plain), take.rate)
+        except CleanError as e:
+            self.bus.status(str(e))
+            return None
+        nf = autofix.noise_setting(floor)
+        self.set_chain('denoise', f'Noise floor {nf:.0f} dB, from this clip', enabled=True, nf=nf)
+        self.bus.status(f'Noise floor of this clip: {floor:.0f} dB. Noise reduction is set {nf - floor:.0f} dB above it. '
+                        'Listen to the result.')
+        return nf
 
     def normalize_level(self, limit=None):
         """Set the gain so the voiced part sits at the target. With the limiter on (or `limit=True`), one loud peak no

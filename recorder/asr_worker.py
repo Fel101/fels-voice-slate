@@ -19,10 +19,14 @@ VOICE_ACTIVITY = {'min_silence_duration_ms': 500, 'speech_pad_ms': 250}
 
 
 def transcribe(model, audio, language, filtered):
-    """The text and the information of one pass. `filtered` cuts out the silence first."""
+    """The text, the words with their times, and the information of one pass. `filtered` cuts out the silence first."""
     segments, info = model.transcribe(audio, language=language, beam_size=5, condition_on_previous_text=False,
-                                      vad_filter=filtered, vad_parameters=VOICE_ACTIVITY if filtered else None)
-    return ' '.join(segment.text.strip() for segment in segments).strip(), info
+                                      word_timestamps=True, vad_filter=filtered,
+                                      vad_parameters=VOICE_ACTIVITY if filtered else None)
+    segments = list(segments)
+    words = [[word.word.strip(), round(float(word.start), 3), round(float(word.end), 3)]
+             for segment in segments for word in getattr(segment, 'words', None) or ()]
+    return ' '.join(segment.text.strip() for segment in segments).strip(), words, info
 
 
 def language_code(text):
@@ -54,15 +58,16 @@ def main(argv=None):
 
     model = WhisperModel(args.model_dir, device='cpu', compute_type='int8', local_files_only=True)
     try:
-        text, info = transcribe(model, args.audio, language, filtered=True)
+        text, words, info = transcribe(model, args.audio, language, filtered=True)
         filtered = True
     except Exception as e:                  # the voice-activity model (onnxruntime) is missing or broken
         sys.stderr.write(f'The silence filter is unavailable ({e}); transcribing without it.\n')
-        text, info = transcribe(model, args.audio, language, filtered=False)
+        text, words, info = transcribe(model, args.audio, language, filtered=False)
         filtered = False
     # Plain ASCII, with every other letter as an escape: a pipe on Windows uses the code page, which most languages do not fit.
     json.dump({
         'text': text,
+        'words': words,
         'language': info.language,
         'language_probability': round(float(info.language_probability), 3),
         'duration_seconds': round(float(info.duration), 3),

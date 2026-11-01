@@ -8,33 +8,37 @@ import base64
 from pathlib import Path
 
 from PySide6.QtCore import QByteArray, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QGuiApplication
+from PySide6.QtGui import QAccessible, QAccessibleAnnouncementEvent, QGuiApplication
 from PySide6.QtWidgets import QApplication, QLabel, QMainWindow, QMenu, QWidget
 
-from .. import asr_setup, launch, manifest, share, transcript
-from .. import audio_core as ac
+from .. import asr_setup, dataset, launch, manifest, share, transcript
 from .. import clean, settings
+from ..audio_io import list_outputs
 from ..clean import CleanError
 from ..core import render
 from ..core.edits import describe
+from ..i18n import tr
 from ..session import Session
-from ..session.measure import recipe_key
-from ..store import KeepBlocked, TrashUnavailable, clean_label
-from .actions import SPEC, Actions, shortcut_text
+from ..session.measure import take_key
+from ..store import KeepBlocked, Relocation, TrashUnavailable, clean_label
+from .actions import SPEC, Actions
+from .badge import RecordingBadge
 from .dialogs import Dialogs
 from .editor_panel import EditorPanel
 from .inspector import Inspector
 from .library import LibraryPanel
 from .palette import PALETTE
 from .topbar import TopBar
-from .widgets import ElidedLabel, format_clock, hbox, label, vbox
+from .translate import translate_tree
+from .widgets import ElidedLabel, button, format_clock, hbox, label, vbox
 
-MIN_SIZE = QSize(1100, 700)
+MIN_SIZE = QSize(1100, 600)        # 700 did not fit a 1080p screen at 150%, once the title bar and the taskbar were counted
 PREFERRED_SIZE = QSize(1440, 900)
 AUDIO_SUFFIXES = {'.wav', '.flac', '.ogg', '.opus', '.mp3', '.aif', '.aiff'}
 TICK_MS = 50
 ANALYSIS_DELAY_MS = 200            # how long the measurements wait after the last edit, so a dragged slider measures once
-ALERT_MS = 2000                    # how long the taskbar button flashes when F9 was pressed in another program
+ALERT_MS = 2000                    # how long the taskbar button flashes when the record key was pressed in another program
+ANNOUNCE_AFTER_MS = 400            # a burst of status messages is read out as its last one, not stammered through
 
 
 class MainWindow(QMainWindow):
@@ -42,8 +46,9 @@ class MainWindow(QMainWindow):
     unexpected = Signal(str)                # an error nothing caught, from any thread (recorder/ui/__init__.py sends these)
 
     def __init__(self, session=None, dialogs=None, settings_file=None, hotkey=None):
-        """`hotkey` is the key that reaches this window from other programs (recorder/hotkey.py); without one, F9 only
-        works while the window is in front. `run()` supplies it, so no test or tool takes F9 from the machine it runs on."""
+        """`hotkey` is the key that reaches this window from other programs (recorder/hotkey.py); without one, the record
+        key only works while the window is in front. `run()` supplies it, so no test or tool takes a key from the machine it
+        runs on."""
         super().__init__()
         self.session = session or Session(settings_file=settings_file)
         self.dialogs = dialogs or Dialogs(self)
@@ -79,6 +84,10 @@ class MainWindow(QMainWindow):
         self._build_menu()
         self._connect()
         self._restore_geometry()
+        self.badge = RecordingBadge(self)
+        self.badge.stopRequested.connect(self.session.capturing.stop)
+        self._apply_record_key()
+        translate_tree(self)
 
         self._analysis_timer = QTimer(self)
         self._analysis_timer.setSingleShot(True)
@@ -111,13 +120,23 @@ class MainWindow(QMainWindow):
     def _build_status_bar(self):
         bar = self.statusBar()
         bar.setSizeGripEnabled(False)
+        bar.setAccessibleName('Status')
         self.status_dot = QLabel('●')
+        self.status_dot.setAccessibleName('Ready')
         self.status_dot.setContentsMargins(12, 0, 0, 0)
         bar.addWidget(self.status_dot)
         self.status_text = ElidedLabel()
         self.status_text.setProperty('role', 'muted')
         bar.addWidget(self.status_text, 1)
-        self.status_export = label('Export 24 kHz · 16-bit · mono', 'dim')
+        self._announcer = QTimer(self)
+        self._announcer.setSingleShot(True)
+        self._announcer.setInterval(ANNOUNCE_AFTER_MS)
+        self._announcer.timeout.connect(self._announce)
+        self.status_stop = button('Stop', 'link', None, 'Stop after the take being worked on. What is done stays done')
+        self.status_stop.clicked.connect(self.session.batch.cancel)
+        self.status_stop.hide()
+        bar.addPermanentWidget(self.status_stop)
+        self.status_export = label('', 'dim')
         self.status_clean = label('', 'dim')
         self.status_drafts = label('', 'dim')
         for item in (self.status_export, self.status_clean, self.status_drafts):
@@ -126,8 +145,9 @@ class MainWindow(QMainWindow):
 
     def _build_menu(self):
         a, menu = self.actions, self.topbar.menu
-        for group in (('settings', 'import_recording', 'new_speaker', 'rename_speaker'),
-                      ('move_take', 'save_copy', 'export_manifest'),
+        for group in (('settings', 'import_recording', 'new_speaker', 'rename_speaker', 'speaker_details', 'delete_speaker'),
+                      ('move_take', 'save_copy', 'export_manifest', 'export_dataset', 'split_take'),
+                      ('keep_selected', 'discard_selected', 'move_selected'),
                       ('load_script', 'clear_script', 'open_folder')):
             for name in group:
                 menu.addAction(a[name])
@@ -179,6 +199,9 @@ class MainWindow(QMainWindow):
         a.import_recording.triggered.connect(self.import_recording)
         a.new_speaker.triggered.connect(self.new_speaker)
         a.rename_speaker.triggered.connect(self.rename_speaker)
+        a.speaker_details.triggered.connect(self.speaker_details)
+        a.delete_speaker.triggered.connect(self.delete_speaker)
+        a.export_dataset.triggered.connect(self.export_dataset)
         a.move_take.triggered.connect(self.move_take)
         a.save_copy.triggered.connect(self.save_copy)
         a.export_manifest.triggered.connect(self.export_manifest)
@@ -188,6 +211,13 @@ class MainWindow(QMainWindow):
         a.clear_script.triggered.connect(s.script.clear)
         a.prev_line.triggered.connect(lambda: s.script.step(-1))
         a.next_line.triggered.connect(lambda: s.script.step(1))
+        a.next_open.triggered.connect(self.inspector.script._next)
+        a.next_take.triggered.connect(lambda: self.step_take(1))
+        a.prev_take.triggered.connect(lambda: self.step_take(-1))
+        a.split_take.triggered.connect(self.split_take)
+        a.keep_selected.triggered.connect(lambda: self.keep_selected())
+        a.discard_selected.triggered.connect(lambda: self.discard_selected())
+        a.move_selected.triggered.connect(lambda: self.move_selected())
         a.settings.triggered.connect(self.open_settings)
         a.shortcuts.triggered.connect(self.dialogs.shortcuts)
         a.about.triggered.connect(self.dialogs.about)
@@ -195,11 +225,16 @@ class MainWindow(QMainWindow):
 
         self.topbar.sourceChanged.connect(capturing.set_source)
         self.topbar.deviceChanged.connect(capturing.select_device)
+        self.topbar.channelChanged.connect(capturing.select_channel)
         self.library.speakerPicked.connect(workspace.select_speaker)
         self.library.newSpeakerRequested.connect(self.new_speaker)
         self.library.speakerContext.connect(self._speaker_menu)
+        self.library.purposePicked.connect(workspace.set_purpose)
         self.library.takePicked.connect(self._take_picked)
         self.library.takeContext.connect(self._take_menu)
+        self.library.selectionContext.connect(self._selection_menu)
+        self.library.selectionChanged.connect(self._update_actions)
+        self.library.discardRequested.connect(lambda: self.discard_selected())
         self.library.importRequested.connect(self.import_recording)
         self.library.folderRequested.connect(self.open_folder)
         panel = self.editor_panel
@@ -208,6 +243,8 @@ class MainWindow(QMainWindow):
         panel.listen.currentChanged.connect(lambda i: transport.set_listen(('original', 'edited')[i]))
         panel.script.previousRequested.connect(lambda: s.script.step(-1))
         panel.script.nextRequested.connect(lambda: s.script.step(1))
+        panel.words.wordsPicked.connect(editor.select_words)
+        panel.words.wordRestored.connect(editor.restore_word)
         for timeline in (panel.waveform, panel.spectrogram):
             timeline.selectRequested.connect(editor.set_selection)
             timeline.seekRequested.connect(transport.seek)
@@ -223,6 +260,7 @@ class MainWindow(QMainWindow):
         inspector.confirmRequested.connect(workspace.confirm_transcript)
         inspector.autoAnalyzeRequested.connect(self.auto_analyze)
         inspector.autoFixRequested.connect(self.auto_fix)
+        inspector.loadScriptRequested.connect(self.load_script)
 
     # ---- hearing the session -----------------------------------------------------------------------------------------
 
@@ -231,6 +269,9 @@ class MainWindow(QMainWindow):
             return                                      # the window is gone; a late message has nothing to draw on
         if topic == 'status':
             self._show_status(payload)
+            return
+        if topic == 'thumb':
+            self.library.take_changed(payload)
             return
         if topic == 'notice':
             self._notices.append(payload)             # shown after the session call that raised it has returned
@@ -253,7 +294,15 @@ class MainWindow(QMainWindow):
             self.dialogs.notice(notice.level, notice.title, notice.text)
 
     def _show_status(self, text):
+        text = tr(text)
         self.status_text.set_full_text(text)
+        self.status_text.setAccessibleName(text)            # what a screen reader says when asked about the status line
+        self._announcer.start()
+
+    def _announce(self):
+        """Have a screen reader say the status line. It says nothing when a label changes by itself, and after Keep or Record
+        this line is all the answer there is."""
+        QAccessible.updateAccessibility(QAccessibleAnnouncementEvent(self.status_text, self.status_text.accessibleName()))
 
     def _show_unexpected(self, text):
         """Something failed that nothing here was ready for. Say so instead of leaving the person to wonder why nothing
@@ -271,7 +320,7 @@ class MainWindow(QMainWindow):
         if take is None:
             return None
         have = take.cache.get('derived')
-        return have if have is not None and have.key == recipe_key(take.history) else None
+        return have if have is not None and have.key == take_key(take) else None
 
     def _request_analysis(self):
         """Start measuring the current recipe if nobody has, and show what is known so far."""
@@ -329,13 +378,25 @@ class MainWindow(QMainWindow):
                 self.topbar.meter.reset()
             self.status_dot.setStyleSheet(f'color: {PALETTE["red"] if s.capturing.recording else PALETTE["green"]};'
                                           ' padding-left: 12px;')
+            self.status_dot.setAccessibleName(tr('Recording' if s.capturing.recording else 'Ready'))
         if 'transport' in topics:
             self.topbar.refresh_transport()
             panel.listen.set_current(0 if s.transport.listen == 'original' else 1)
-        if topics & {'script', 'current', 'recording'}:
+        if topics & {'script', 'current', 'recording', 'takes'}:
             panel.script.refresh()
+        if topics & {'script', 'takes'}:
+            self.inspector.refresh_script()
+        if topics & {'current', 'edits', 'selection', 'meta', 'recording'}:
+            panel.words.refresh()
+        if 'batch' in topics:
+            self.status_stop.setVisible(s.batch.running)
         if 'settings' in topics:
             self._refresh_status_items()
+        if topics & {'settings', 'current', 'meta'}:
+            self._refresh_export_item()
+            self.library.refresh_purpose()
+        if topics & {'settings', 'speakers', 'current'}:
+            self.library.refresh_release()
         self._update_mode()
         self._update_actions()
         self._update_clock()
@@ -354,12 +415,19 @@ class MainWindow(QMainWindow):
         panel.spectrogram.update()
         panel.minimap.update()
 
+    def _refresh_export_item(self):
+        """What Keep writes for the open take, or for a new one when none is open."""
+        take = self.session.current
+        rules = take.purpose if take is not None else self.session.workspace.purpose
+        rate = take.export_rate if take is not None else rules.export_rate
+        self.status_export.setText(f'{tr(rules.name)}: {rate / 1000:g} kHz · {rules.bit_depth}-bit · mono')
+
     def _refresh_status_items(self):
         ready = self.session.drafts.available()
-        self.status_clean.setText('Cleaning: FFmpeg ready' if clean.available() else 'Cleaning: FFmpeg not found')
-        self.status_drafts.setText('Draft transcripts: ready' if ready else 'Draft transcripts: not set up')
-        self.status_drafts.setToolTip('The speech recognizer chosen in Settings is ready.' if ready else
-                                      f'Choose a speech recognizer in Settings (Ctrl+,). Settings file: '
+        self.status_clean.setText(tr('Cleaning: FFmpeg ready' if clean.available() else 'Cleaning: FFmpeg not found'))
+        self.status_drafts.setText(tr('Draft transcripts: ready' if ready else 'Draft transcripts: not set up'))
+        self.status_drafts.setToolTip(tr('The speech recognizer chosen in Settings is ready.') if ready else
+                                      f'{tr("Choose a speech recognizer in Settings (Ctrl+,). Settings file:")} '
                                       f'{self.session.settings_file}')
 
     def _update_mode(self):
@@ -376,8 +444,9 @@ class MainWindow(QMainWindow):
     def _update_actions(self):
         s, a = self.session, self.actions
         take, editor = s.current, s.editor
-        idle = not s.capturing.recording
+        idle = not s.capturing.recording and not s.batch.running
         has_take = take is not None and idle
+        chosen = self.library.selected_takes()
         has_sel = has_take and editor.sel is not None
         history = take.history if take is not None else None
         enabled = {
@@ -390,13 +459,20 @@ class MainWindow(QMainWindow):
             'play': has_take, 'stop': has_take and s.transport.active, 'loop': has_take, 'ab': has_take,
             'zoom_in': has_take, 'zoom_out': has_take, 'fit': has_take,
             'keep': has_take, 'discard': has_take, 'rerecord': has_take, 'rename': has_take,
-            'import_recording': idle, 'new_speaker': idle, 'settings': idle, 'arm': idle,
+            'import_recording': idle, 'new_speaker': idle, 'settings': idle, 'arm': idle, 'record': not s.batch.running,
+            'split_take': has_take, 'next_take': idle and bool(s.workspace.takes), 'prev_take': idle and bool(s.workspace.takes),
+            'keep_selected': idle and len(chosen) > 1, 'discard_selected': idle and len(chosen) > 1,
+            'move_selected': idle and len(chosen) > 1 and len(s.workspace.speakers) > 1,
             'rename_speaker': idle and s.workspace.speaker is not None,
+            'speaker_details': idle and s.workspace.speaker is not None,
+            'delete_speaker': idle and s.workspace.speaker is not None,
+            'export_dataset': idle and s.workspace.speaker is not None,
             'move_take': has_take and not take.unsaved and len(s.workspace.speakers) > 1,
             'save_copy': has_take and take.kept,
             'export_manifest': idle and s.workspace.speaker is not None,
             'prev_line': bool(s.script.lines) and s.script.index > 0,
             'next_line': bool(s.script.lines) and s.script.index < len(s.script.lines) - 1,
+            'next_open': bool(s.script.lines),
             'clear_script': bool(s.script.lines),
         }
         for name, value in enabled.items():
@@ -411,12 +487,13 @@ class MainWindow(QMainWindow):
         if s.capturing.recording:
             return
         if take is None:
-            self.topbar.set_time(0.0, 'no take')
+            self.topbar.set_time(0.0, tr('no take'))
             return
         head = s.transport.head
         head = s.editor.playhead if head is None else head
         cuts = bool(take.history.cuts)
-        sub = f'of {format_clock(self._edited_seconds)} after cuts' if cuts else f'of {format_clock(take.seconds)}'
+        sub = tr('of {time} after cuts').format(time=format_clock(self._edited_seconds)) if cuts else \
+            tr('of {time}').format(time=format_clock(take.seconds))
         self.topbar.set_time(head, sub)
 
     # ---- the timer ---------------------------------------------------------------------------------------------------
@@ -426,13 +503,17 @@ class MainWindow(QMainWindow):
         s.tick()
         capturing = s.capturing
         if capturing.recording:
-            rows, elapsed = capturing.envelope(), capturing.elapsed
-            self.editor_panel.live.set_state(rows, elapsed)
+            rows, elapsed, rules = capturing.envelope(), capturing.elapsed, s.workspace.purpose
+            self.editor_panel.live.set_state(rows, elapsed, rules)
             self.library.set_live(rows, elapsed)
-            sub = 'stopping...' if capturing.finishing else f'recording  ·  max {format_clock(ac.MAX_SECONDS)[:5]}'
+            sub = tr('stopping...') if capturing.finishing else \
+                tr('recording  ·  max {time}').format(time=format_clock(rules.record_limit)[:5])
             self.topbar.set_time(elapsed, sub)
             self.topbar.meter.set_levels(*capturing.level)
+            self._refresh_badge()
             return
+        if self.badge.isVisible():
+            self.badge.hide()
         if capturing.armed:
             self.topbar.meter.set_levels(*capturing.level)
         head = s.transport.head
@@ -444,24 +525,47 @@ class MainWindow(QMainWindow):
             self.editor_panel.info.refresh()
             self._update_clock()
 
-    # ---- the record key in other programs ------------------------------------------------------------------------------
+    # ---- the record key ----------------------------------------------------------------------------------------------------
+
+    def _record_key(self):
+        return settings.record_key(settings.load(self.session.settings_file))
+
+    def _refresh_badge(self):
+        """A recording that runs while this window is not the one in front has a sign of its own on top of everything."""
+        if self.isActiveWindow():
+            self.badge.hide()
+        else:
+            self.badge.show_for(self.session.capturing.elapsed, self._record_key())
+
+    def _apply_record_key(self):
+        """Put the record key from the settings on the Record command and everything that names it."""
+        key = self._record_key()
+        self.actions.set_record_key(key)
+        self.topbar.record_key = key
+        self.topbar.record.setToolTip(self.actions.record.toolTip())
+        self.topbar.refresh_recording()
+        self.editor_panel.empty.record.setText(f'{tr("Record")}  ({key})')
 
     def _apply_hotkey(self):
-        """Take F9 for every program, or give it back, as the settings say. When it cannot be had, say why."""
+        """Take the record key for every program, or give it back, as the settings say. When it cannot be had, say why."""
         key = self.hotkey
         wanted = settings.global_hotkey(settings.load(self.session.settings_file))
+        if key.name != self._record_key():
+            key.set_enabled(False)
+            key.set_key(self._record_key())
         active = key.set_enabled(wanted)
-        _, _, keys, tip, _ = SPEC['record']
+        _, _, _, tip, _ = SPEC['record']
         also = ', also while another program is in front' if active else ''
-        text = f'{tip} ({shortcut_text(keys)}{also})'
+        text = f'{tip} ({key.name}{also})'
         self.actions.record.setToolTip(text)
         self.topbar.record.setToolTip(text)
         if wanted and not active:
             self.session.bus.status(f'{key.name} only works while this window is in front: {key.problem}.')
 
     def _hotkey_pressed(self):
-        """F9 was pressed, perhaps in another program. A dialog that is open is not interrupted by a recording starting, but
-        a recording can always be stopped. The taskbar button flashes, so there is a sign when this window is out of sight."""
+        """The record key was pressed, perhaps in another program. A dialog that is open is not interrupted by a recording
+        starting, but a recording can always be stopped. The taskbar button flashes, and the sign on top shows the recording
+        while this window is out of sight."""
         if self._shut or (QApplication.activeModalWidget() is not None and not self.session.capturing.recording):
             return
         self.actions.record.trigger()
@@ -480,8 +584,11 @@ class MainWindow(QMainWindow):
         self.session.transport.seek(t)
 
     def _select_all(self):
+        """Ctrl+A: every take when the list has the focus, otherwise the whole clip."""
         take = self.session.current
-        if take is not None:
+        if self.library.list.hasFocus():
+            self.library.list.selectAll()
+        elif take is not None:
             self.session.editor.set_selection(0.0, take.seconds)
 
     def _zoom_anchor(self):
@@ -513,7 +620,20 @@ class MainWindow(QMainWindow):
         if self.session.capturing.recording:
             self.session.bus.status('Stop the recording before opening another take.')
             return
+        if self.session.batch.running:
+            self.session.bus.status('Wait for this to finish, or press Stop, before opening another take.')
+            return
         self.session.workspace.open_take(take)
+
+    def step_take(self, delta):
+        """Open the take `delta` rows down the list, as it is filtered now."""
+        takes = [item for item in self.library.model.items if item is not None]
+        current = self.session.current
+        if not takes:
+            return
+        place = takes.index(current) + delta if current in takes else 0
+        if 0 <= place < len(takes):
+            self._take_picked(takes[place])
 
     def keep(self):
         s = self.session
@@ -553,6 +673,76 @@ class MainWindow(QMainWindow):
         if self.session.current is not None:
             self._discard_current('Discard this take?', 'The take moves to the Recycle Bin with its original recording, '
                                                         'its export and its sidecar. You can restore it from there.')
+
+    def keep_selected(self, takes=None):
+        """Keep the selected takes, once the person has made the statement for all of them in the dialog."""
+        s = self.session
+        takes = self.library.selected_takes() if takes is None else takes
+        wanted = [take for take in takes if not take.kept or take.changed]
+        if not wanted:
+            self.dialogs.notice('info', 'Keep several takes', 'Every take selected is kept already, with nothing to update.')
+            return
+        answer = self.dialogs.keep_many(s.workspace.name_of(s.workspace.speaker), wanted,
+                                        s.lib.speaker_defaults(s.workspace.speaker))
+        if answer is not None:
+            s.batch.keep(wanted, *answer)
+
+    def discard_selected(self, takes=None):
+        """Delete pressed in the list, or the command: one take as Discard does, several after one question."""
+        s = self.session
+        takes = self.library.selected_takes() if takes is None else takes
+        if s.capturing.recording or s.batch.running or not takes:
+            return
+        if len(takes) == 1:
+            s.workspace.open_take(takes[0])
+            self.discard()
+            return
+        kept = sum(1 for take in takes if take.kept)
+        also = f' {kept} of them are kept clips, and their WAV files and sidecars go too.' if kept else ''
+        if self.dialogs.confirm(f'Discard {len(takes)} takes?', f'They move to the Recycle Bin, with their original '
+                                f'recordings.{also} You can restore them from there.', yes='Move to Recycle Bin'):
+            s.batch.discard(takes)
+
+    def move_selected(self, takes=None, slug=None):
+        """File the selected takes under another speaker, asking which unless `slug` says."""
+        s = self.session
+        takes = self.library.selected_takes() if takes is None else takes
+        if not takes or s.capturing.recording or s.batch.running:
+            return
+        if slug is None:
+            others = self._other_speakers(takes[0])
+            index = self.dialogs.choose_item('Move takes', f'File these {len(takes)} takes under:',
+                                             [name for _, name in others]) if others else None
+            if index is None:
+                return
+            slug = others[index][0]
+        kept = sum(1 for take in takes if take.kept)
+        if kept and not self.dialogs.confirm(
+                'Move these kept clips?', f'{kept} kept clip{"s" if kept != 1 else ""} will be filed under '
+                f'{s.workspace.name_of(slug)}. Permission, origin and allowed use go with each one, and its saved '
+                'description will say where it was moved from.', yes='Move'):
+            return
+        s.batch.move(takes, slug)
+
+    def split_take(self):
+        """Make a new take of each part of the open take, after saying how many there would be."""
+        s = self.session
+        take = s.current
+        if take is None or s.capturing.recording:
+            return
+        ranges = s.workspace.split_ranges(take)
+        if len(ranges) < 2:
+            self.dialogs.notice('info', 'Split at pauses', f'There is nowhere to split this take: it has no pause of at least '
+                                f'a third of a second after its first {take.purpose.best_from:g} seconds.')
+            return
+        lengths = ', '.join(f'{(end - first) / take.rate:.0f}' for first, end in ranges[:8])
+        if self.dialogs.confirm('Split this take?', f'It will become {len(ranges)} new takes, cut in the middle of its pauses '
+                                f'({lengths}{", ..." if len(ranges) > 8 else ""} seconds). This take stays as it is, and the '
+                                'new takes start from the original recording, without its edits.', yes=f'Make {len(ranges)} takes'):
+            try:
+                s.workspace.split_take(take)
+            except OSError as e:
+                self.dialogs.notice('error', 'Could not split the take', str(e))
 
     def rerecord(self):
         if self.session.current is not None and self._discard_current(
@@ -599,6 +789,48 @@ class MainWindow(QMainWindow):
                 workspace.rename_speaker(slug, name)
             except ValueError as e:
                 self.dialogs.notice('warning', 'Rename speaker', str(e))
+
+    def speaker_details(self):
+        """The signed release of the speaker in front."""
+        s = self.session
+        slug = s.workspace.speaker
+        if not slug:
+            return
+        record = s.lib.release(slug)
+        answer = self.dialogs.speaker_details(s.workspace.name_of(slug), record, s.lib.release_path(slug) is not None)
+        if answer is None:
+            return
+        try:
+            s.lib.set_release(slug, **answer)
+        except ValueError as e:
+            self.dialogs.notice('warning', 'Speaker details', str(e))
+        except OSError as e:
+            self.dialogs.notice('error', 'Could not save the release', str(e))
+        s.bus.notify('settings')
+        s.bus.notify('meta')
+
+    def delete_speaker(self):
+        """Delete the speaker in front, with everything in their folder, after saying how much that is."""
+        s = self.session
+        workspace = s.workspace
+        slug = workspace.speaker
+        if not slug:
+            return
+        kept, unkept = s.lib.speaker_contents(slug)
+        name = workspace.name_of(slug)
+        if not self.dialogs.confirm(f'Delete {name}?', f'Their folder moves to the Recycle Bin: {kept} kept '
+                                    f'clip{"" if kept == 1 else "s"}, {unkept} other take{"" if unkept == 1 else "s"}, the '
+                                    'original recordings, and their release. You can restore it from there, but '
+                                    f'{name} leaves the list of speakers.', yes='Move to Recycle Bin', danger=True):
+            return
+        try:
+            workspace.delete_speaker(slug)
+        except TrashUnavailable as e:
+            if self.dialogs.confirm('The Recycle Bin is not available', f'{e}\n\nDelete the folder for good instead? This '
+                                    'cannot be undone.', yes='Delete permanently', danger=True):
+                workspace.delete_speaker(slug, permanent=True)
+        except ValueError as e:
+            self.dialogs.notice('warning', 'Delete speaker', str(e))
 
     def _other_speakers(self, take):
         return [(slug, name) for slug, name in self.session.workspace.speakers if slug != take.speaker]
@@ -657,7 +889,7 @@ class MainWindow(QMainWindow):
             return
         name = clean_label(take.meta.get('label')) or ' '.join(str(take.meta.get('transcript') or '').split())[:60] \
             or Path(take.export_path).stem
-        choice = self.dialogs.copy_options(name)
+        choice = self.dialogs.copy_options(name, take.export_rate)
         if choice is None:
             return
         kind, rate = choice
@@ -727,6 +959,36 @@ class MainWindow(QMainWindow):
                                 f'{len(rows)} clip{"s are" if len(rows) != 1 else " is"} in the manifest. These are not:'
                                 f'\n\n{detail}')
 
+    def export_dataset(self):
+        """Gather the kept clips in a new folder, a few at a time, so the window stays alive and it can be stopped."""
+        s = self.session
+        workspace = s.workspace
+        slug = workspace.speaker
+        if slug is None or s.capturing.recording or s.batch.running:
+            return
+        choice = self.dialogs.dataset_options(workspace.name_of(slug))
+        if choice is None:
+            return
+        scope, layout, rate, originals = choice
+        folder = self.dialogs.choose_folder('Choose an empty folder for the dataset', '')
+        if not folder:
+            return
+        try:
+            export = dataset.Export(s.lib, folder, layout, rate, originals)
+        except (ValueError, OSError) as e:
+            self.dialogs.notice('warning', 'Export dataset', str(e))
+            return
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            rows, left_out = manifest.collect(s.lib, [slug] if scope == 'speaker' else None)
+        finally:
+            QApplication.restoreOverrideCursor()
+        if not rows:
+            self.dialogs.notice('info', 'Export dataset', 'There are no kept clips to export yet.')
+            return
+        s.batch.export_dataset(export, rows)
+        s.batch.left_out.extend(left_out)
+
     def open_folder(self):
         s = self.session
         folder = s.lib.folder(s.workspace.speaker) if s.workspace.speaker else s.lib.root
@@ -778,20 +1040,49 @@ class MainWindow(QMainWindow):
         current = settings.load(s.settings_file)
         current.setdefault('root', str(s.lib.root))
         current['tail_seconds'] = s.capturing.tail_seconds
+        try:
+            current['outputs'] = list_outputs()
+        except Exception:                           # no sound library, no devices: only Windows' default is offered
+            current['outputs'] = []
         answer = self.dialogs.settings(current)
         if answer is None:
             return
         changes = {key: answer[key] for key in ('tail_seconds', 'ffmpeg', 'asr_python', 'asr_model')}
         changes['asr_language'] = answer.get('asr_language')
-        changes['global_hotkey'] = None if answer.get('global_hotkey', True) else False      # on is the default: no entry
+        changes['global_hotkey'] = True if answer.get('global_hotkey') else None             # off is the default: no entry
+        changes['record_key'] = answer.get('record_key')
+        changes['output_device'] = answer.get('output_device')
+        changes['theme'] = None if answer.get('theme') in (None, settings.THEMES[0]) else answer['theme']
+        changes['text_scale'] = answer.get('text_scale')
+        changes['language'] = answer.get('language')
         settings.update(changes, s.settings_file)
         clean.set_ffmpeg_path(answer['ffmpeg'])
+        s.transport.set_output(answer.get('output_device'))
+        self._apply_record_key()
         s.capturing.set_tail(answer['tail_seconds'])
         if answer['root'] and Path(answer['root']) != s.lib.root:
-            s.workspace.set_root(answer['root'])
+            self._change_root(answer['root'])
         s.bus.notify('settings')
         if self.hotkey is not None:
             self._apply_hotkey()
+
+    def _change_root(self, folder):
+        """Use another output folder. With recordings in the old one and an empty new one, ask whether they should go too."""
+        s = self.session
+        workspace = s.workspace
+        if settings.holds_recordings(s.lib.root) and not settings.holds_recordings(folder) and not workspace.has_unsaved_takes() \
+                and self.dialogs.confirm('Move your recordings?', f'Your recordings are in {s.lib.root}. Move them to {folder}?'
+                                         '\n\nEach file is copied and checked, and the old ones are removed once all of them '
+                                         'have arrived. Choose Leave them to start with an empty folder.', yes='Move them',
+                                         no='Leave them'):
+            try:
+                relocation = Relocation(s.lib.root, folder)
+            except (ValueError, OSError) as e:
+                self.dialogs.notice('warning', 'Move your recordings', str(e))
+                return
+            s.batch.relocate(relocation, lambda: workspace.set_root(folder, moved=True))
+            return
+        workspace.set_root(folder)
 
     # ---- menus -------------------------------------------------------------------------------------------------------
 
@@ -842,13 +1133,34 @@ class MainWindow(QMainWindow):
         return menu
 
     def _take_menu(self, take, pos):
-        if not self.session.capturing.recording:
+        if not self.session.capturing.recording and not self.session.batch.running:
             self.dialogs.popup(self.build_take_menu(take), pos)
+
+    def build_selection_menu(self, takes):
+        """The right-click menu of several selected takes."""
+        menu = QMenu(self)
+        count = len(takes)
+        menu.addAction(f'Keep {count} takes...', lambda: self.keep_selected(takes))
+        others = self._other_speakers(takes[0])
+        if others:
+            move = menu.addMenu(f'Move {count} takes to speaker')
+            for slug, name in others:
+                move.addAction(name, lambda checked=False, slug=slug: self.move_selected(takes, slug))
+        menu.addSeparator()
+        menu.addAction(f'Discard {count} takes...', lambda: self.discard_selected(takes))
+        return menu
+
+    def _selection_menu(self, takes, pos):
+        if not self.session.capturing.recording and not self.session.batch.running:
+            self.dialogs.popup(self.build_selection_menu(takes), pos)
 
     def build_speaker_menu(self):
         menu = QMenu(self)
         menu.addAction(self.actions.rename_speaker)
+        menu.addAction(self.actions.speaker_details)
         menu.addAction(self.actions.new_speaker)
+        menu.addSeparator()
+        menu.addAction(self.actions.delete_speaker)
         return menu
 
     def _speaker_menu(self, pos):
@@ -898,6 +1210,7 @@ class MainWindow(QMainWindow):
         self.timer.stop()
         if self.hotkey is not None:
             self.hotkey.set_enabled(False)
+        self.badge.close()
         self._save_geometry()
         self._shut = True
         event.accept()

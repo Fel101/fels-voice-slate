@@ -4,11 +4,13 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QDoubleSpinBox, QFrame, QLayout, QStackedWidget, QWidget
 
+from ..i18n import tr
 from . import theme
 from .record_panel import RecordPanel, ScriptStrip
 from .timeline import Minimap, SpectrogramView, ViewRange, WaveformView
 from .toolbar import ToolBar
 from .widgets import ElidedLabel, Segmented, button, hbox, label, vbox
+from .words import WordStrip
 
 
 class InfoRow(QWidget):
@@ -59,6 +61,8 @@ class InfoRow(QWidget):
         spin.setProperty('flat', True)
         spin.setFixedWidth(80)
         spin.setToolTip(tip)
+        spin.setAccessibleName(name)
+        spin.setAccessibleDescription(tip)
         spin.editingFinished.connect(done)
         cell.addWidget(spin)
         layout.addLayout(cell)
@@ -159,7 +163,7 @@ class EmptyState(QFrame):
         layout.addSpacing(10)
         row = hbox(spacing=10)
         row.addStretch(1)
-        record = button('Record  (F9)', 'primary', 'record')
+        self.record = record = button(f'{tr("Record")}  (F9)', 'primary', 'record')
         record.clicked.connect(self.recordRequested)
         imported = button('Import a recording...', None, 'import')
         imported.clicked.connect(self.importRequested)
@@ -206,7 +210,7 @@ class EditorPanel(QWidget):
         for item, overflow in ((a.cut, 0), (a.trim, 1), (a.silence, 3), (a.fade_in, 4), (a.fade_out, 4), (a.gain, 5)):
             self.toolbar.add_action(item, overflow)
         self.toolbar.add_separator()
-        for item, overflow in ((a.auto_analyze, 1), (a.auto_fix, 1), (a.auto_trim, 8), (a.shorten, 7)):
+        for item, overflow in ((a.auto_analyze, 1), (a.auto_fix, 1), (a.auto_trim, 8), (a.shorten, 7), (a.split_take, 8)):
             self.toolbar.add_action(item, overflow)
         self.toolbar.add_stretch()
         self.toolbar.add_widget(self.listen, 2, a.ab)
@@ -222,6 +226,8 @@ class EditorPanel(QWidget):
         column.addWidget(self.waveform, 5)
         column.addWidget(self.spectrogram, 3)
         column.addWidget(self.minimap)
+        self.words = WordStrip(session)
+        column.addWidget(self.words)
         self.info = InfoRow(session, self.view)
         column.addWidget(self.info)
         self.stack.addWidget(edit)

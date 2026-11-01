@@ -60,8 +60,8 @@ def test_the_stop_tail_is_read_safely(raw, expected):
     assert settings.tail_seconds(data) == pytest.approx(expected)
 
 
-@pytest.mark.parametrize('raw, expected', [(None, True), (True, True), (False, False), ('false', True), (0, True), ([], True)])
-def test_the_record_key_in_other_programs_is_on_unless_the_settings_say_false(raw, expected):
+@pytest.mark.parametrize('raw, expected', [(None, False), (True, True), (False, False), ('true', False), (1, False), ([], False)])
+def test_the_record_key_in_other_programs_is_off_unless_the_settings_say_true(raw, expected):
     data = {} if raw is None else {'global_hotkey': raw}
     assert settings.global_hotkey(data) is expected
 
@@ -73,15 +73,17 @@ def program(tmp_path, monkeypatch):
         monkeypatch.delenv(name, raising=False)
     folder = tmp_path / 'app'
     monkeypatch.setattr(settings, 'program_dir', lambda: folder)
+    monkeypatch.setattr(settings, 'USER_ROOT', tmp_path / 'home' / 'voice-clips')     # never a real person's recordings
     return folder
 
 
-def test_the_default_output_folder_is_voice_clips_inside_the_program_folder(program):
-    assert settings.default_root() == program / 'voice-clips'
-    assert (program / 'voice-clips').is_dir()
+def test_the_default_output_folder_is_in_the_persons_own_folder(program):
+    assert settings.default_root() == settings.USER_ROOT
+    assert not (program / 'voice-clips').exists()
 
 
-def test_the_default_folder_ignores_everything_in_it_in_git(program):
+def test_recordings_in_the_program_folder_ignore_everything_in_git(program):
+    (program / 'voice-clips' / 'me' / 'masters').mkdir(parents=True)
     folder = settings.default_root()
     assert (folder / '.gitignore').read_text(encoding='utf-8').splitlines()[-1] == '*'
     (folder / '.gitignore').write_text('mine\n', encoding='utf-8')
@@ -93,8 +95,9 @@ def test_the_default_folder_ignores_everything_in_it_in_git(program):
 def test_a_program_folder_that_a_cloud_service_syncs_falls_back_to_the_profile(tmp_path, monkeypatch, name):
     app = tmp_path / name / 'tools' / 'recorder'
     monkeypatch.setattr(settings, 'program_dir', lambda: app)
-    assert settings.default_root() == settings.FALLBACK_ROOT
-    assert not (app / 'voice-clips').exists()
+    monkeypatch.setattr(settings, 'USER_ROOT', tmp_path / 'home' / 'voice-clips')
+    (app / 'voice-clips' / 'me' / 'masters').mkdir(parents=True)
+    assert settings.default_root() == settings.USER_ROOT
 
 
 def test_onedrive_is_also_recognised_from_its_environment_variable(tmp_path, monkeypatch):
@@ -105,19 +108,20 @@ def test_onedrive_is_also_recognised_from_its_environment_variable(tmp_path, mon
 
 
 def test_a_program_folder_that_cannot_be_written_falls_back_to_the_profile(program, monkeypatch):
+    (program / 'voice-clips' / 'me' / 'masters').mkdir(parents=True)
     monkeypatch.setattr(settings, '_writable', lambda folder: False)
-    assert settings.default_root() == settings.FALLBACK_ROOT
+    assert settings.default_root() == settings.USER_ROOT
 
 
-def test_the_fallback_folder_is_under_the_users_profile_not_documents():
-    assert settings.FALLBACK_ROOT.parts[-2:] == ('Recordings', 'voice-clips')
-    assert 'Documents' not in settings.FALLBACK_ROOT.parts
-    assert json.dumps(str(settings.FALLBACK_ROOT))
+def test_the_default_folder_is_under_the_users_profile_not_documents():
+    assert settings.USER_ROOT.parts[-2:] == ('Recordings', 'voice-clips')
+    assert 'Documents' not in settings.USER_ROOT.parts
+    assert json.dumps(str(settings.USER_ROOT))
 
 
 def test_a_library_without_a_folder_uses_the_default(program):
     from recorder.store import Library
-    assert Library().root == program / 'voice-clips'
+    assert Library().root == settings.USER_ROOT
 
 
 def test_a_session_without_a_saved_folder_records_into_the_default(program, tmp_path, isolated, clock, player):
@@ -125,6 +129,6 @@ def test_a_session_without_a_saved_folder_records_into_the_default(program, tmp_
     from recorder.session import Session
     session = Session(settings_file=tmp_path / 'settings.json', jobs=Jobs(inline=True), player=player, clock=clock)
     try:
-        assert session.lib.root == program / 'voice-clips'
+        assert session.lib.root == settings.USER_ROOT
     finally:
         session.jobs.close()

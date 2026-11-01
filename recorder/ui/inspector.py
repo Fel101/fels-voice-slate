@@ -1,12 +1,17 @@
-"""The right panel: the clip's text fields, the processing chain, the measurements, and the Keep checklist."""
+"""The right panel: the clip's text fields, the processing chain, the measurements, the script, and the Keep checklist."""
+import html
+
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont
-from PySide6.QtWidgets import (QCheckBox, QFrame, QLabel, QLineEdit, QListWidget, QListWidgetItem, QPlainTextEdit,
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QFrame, QLabel, QLineEdit, QListWidget, QListWidgetItem, QPlainTextEdit,
                                QScrollArea, QSizePolicy, QSlider, QStackedWidget, QWidget)
 
 from .. import audio_core as ac
 from .. import clean
 from ..core import chain as chain_mod
+from ..core import reading
+from ..i18n import tr
+from ..session.workspace import reading_of
 from ..store import LABEL_MAX
 from . import theme
 from .palette import PALETTE, color
@@ -26,9 +31,35 @@ def transcript_state(take):
     if draft and text == draft:
         return 'Draft: check it', 'amber'
     line = take.meta.get('script_line')
+    check = reading_of(take)
+    if check is not None and text == line.strip():
+        return ('Read as written', 'green') if not reading.differences(check) else ('From script: check it', 'amber')
     if line and text == line.strip():
         return 'From script', 'violet'
     return '', None
+
+
+READING_COLOURS = {'changed': 'amber', 'missed': 'red', 'added': 'accent'}
+
+
+def reading_html(check):
+    """The script line with the places that differ marked: another word was heard, a word was missed, a word was added."""
+    parts = []
+    for word in check.words:
+        text = html.escape(word.text)
+        if word.state == 'same':
+            parts.append(text)
+            continue
+        colour = PALETTE[READING_COLOURS[word.state]]
+        if word.state == 'changed':
+            heard = tr('heard: {word}').format(word=html.escape(word.heard))
+            text = f'{text} <span style="color:{PALETTE["muted"]}">({heard})</span>'
+        elif word.state == 'missed':
+            text = f'<s>{text}</s>'
+        else:
+            text = f'[{text}]'
+        parts.append(f'<span style="color:{colour}">{text}</span>')
+    return ' '.join(parts)
 
 
 class ClipPage(QWidget):
@@ -49,7 +80,16 @@ class ClipPage(QWidget):
                                   'searches it (F2)')
         self.name_edit.setMaxLength(LABEL_MAX)
         self.name_edit.textEdited.connect(lambda text: self._write(label=text))
-        layout.addWidget(self.name_edit)
+        top = hbox(spacing=8)
+        top.addWidget(self.name_edit, 1)
+        self.purpose = QComboBox()
+        self.purpose.setAccessibleName('What this take is for')
+        self.purpose.setToolTip('What this take is for. It sets how long the clip can be and how it is kept')
+        for rules in ac.PURPOSES.values():
+            self.purpose.addItem(rules.name, rules.key)
+        self.purpose.activated.connect(lambda i: self._write(purpose=self.purpose.itemData(i)))
+        top.addWidget(self.purpose)
+        layout.addLayout(top)
         head = hbox(spacing=8)
         head.addWidget(caption('Transcript'))
         head.addStretch(1)
@@ -58,8 +98,9 @@ class ClipPage(QWidget):
         head.addWidget(self.state, 0, Qt.AlignmentFlag.AlignVCenter)
         layout.addLayout(head)
         self.transcript = QPlainTextEdit()
+        self.transcript.setAccessibleName('Transcript')
         self.transcript.setPlaceholderText('What is said in the clip, word for word.')
-        self.transcript.setFixedHeight(96)
+        self.transcript.setFixedHeight(84)
         self.transcript.setTabChangesFocus(True)
         self.transcript.textChanged.connect(self._transcript_edited)
         layout.addWidget(self.transcript)
@@ -72,21 +113,27 @@ class ClipPage(QWidget):
         self.counter = label('0 / 600', 'dim')
         row.addWidget(self.counter)
         layout.addLayout(row)
+        self.reading = QFrame()
+        self.reading.setObjectName('card')
+        box = vbox(self.reading, (10, 8, 10, 8), 4)
+        self.reading_title = label('', size=12, weight=QFont.Weight.DemiBold)
+        box.addWidget(self.reading_title)
+        self.reading_text = label('', wrap=True)
+        self.reading_text.setTextFormat(Qt.TextFormat.RichText)
+        self.reading_text.setToolTip('Amber: another word was heard. Red: a word was not heard. Violet: a word was heard that '
+                                     'is not in the script. The recognizer can be wrong too, so listen')
+        box.addWidget(self.reading_text)
+        self.use_heard = button('Use what was heard as the transcript', 'link', None,
+                                'For when the words spoken are the ones to keep, not the ones in the script')
+        self.use_heard.clicked.connect(self.session.workspace.use_what_was_heard)
+        box.addWidget(self.use_heard, 0, Qt.AlignmentFlag.AlignLeft)
+        self.reading.hide()
+        layout.addWidget(self.reading)
         layout.addSpacing(4)
         self.origin = self._field(layout, 'Origin', 'Where the recording came from', 'origin')
         self.allowed = self._field(layout, 'Allowed use', 'What the voice may be used for', 'allowed_use')
         self.source_url = self._field(layout, 'Source URL (optional)', 'A link to the original, if there is one',
                                       'source_url')
-        layout.addSpacing(4)
-        row = hbox(spacing=10)
-        self.consent = QCheckBox()
-        self.consent.setToolTip('Required before a clip can be kept')
-        self.consent.toggled.connect(lambda on: self._write(consent_confirmed=on))
-        row.addWidget(self.consent, 0, Qt.AlignmentFlag.AlignTop)
-        text = label('I have the right to use this voice for the purpose stated above: it is my own voice, or the '
-                     'speaker has given permission.', 'muted', wrap=True)
-        row.addWidget(text, 1)
-        layout.addLayout(row)
         layout.addSpacing(4)
         row = hbox(spacing=4)
         self.copy_text = button('Copy transcript', 'ghost', 'copy')
@@ -102,6 +149,7 @@ class ClipPage(QWidget):
     def _field(self, layout, name, placeholder, key):
         layout.addWidget(caption(name))
         edit = QLineEdit()
+        edit.setAccessibleName(name)
         edit.setPlaceholderText(placeholder)
         edit.textEdited.connect(lambda text: self._write(**{key: text}))
         layout.addWidget(edit)
@@ -126,6 +174,7 @@ class ClipPage(QWidget):
         self.setEnabled(take is not None)
         self._loading = True
         meta = take.meta if take is not None else {}
+        self.purpose.setCurrentIndex(self.purpose.findData(ac.purpose_of(meta.get('purpose')).key))
         for edit, key in ((self.origin, 'origin'), (self.allowed, 'allowed_use'), (self.source_url, 'source_url')):
             value = str(meta.get(key) or '')
             if edit.text() != value:
@@ -136,8 +185,6 @@ class ClipPage(QWidget):
         value = str(meta.get('transcript') or '')
         if self.transcript.toPlainText() != value:
             self.transcript.setPlainText(value)
-        if self.consent.isChecked() != bool(meta.get('consent_confirmed')):
-            self.consent.setChecked(bool(meta.get('consent_confirmed')))
         self._loading = False
         self._count()
         text, kind = transcript_state(take) if take is not None else ('', None)
@@ -145,6 +192,20 @@ class ClipPage(QWidget):
         self.copy_path.setEnabled(take is not None and take.export_path is not None)
         self.copy_text.setEnabled(take is not None and bool(value.strip()))
         self.suggest.setEnabled(take is not None and take.draft_request is None)
+        self._refresh_reading(take)
+
+    def _refresh_reading(self, take):
+        check = reading_of(take) if take is not None else None
+        self.reading.setVisible(check is not None)
+        if check is not None:
+            count = reading.differences(check)
+            self.reading_title.setText(tr('Reading check: read as written') if not count else
+                                       tr('Reading check: {count} place differs' if count == 1 else
+                                          'Reading check: {count} places differ').format(count=count))
+            self.reading_text.setText(reading_html(check))
+            self.reading_text.setVisible(bool(count))
+            heard = str(take.meta.get('draft_text') or '').strip()
+            self.use_heard.setVisible(bool(count) and take.meta['transcript'].strip() != heard)
 
 
 # ---- the Process page -------------------------------------------------------------------------------------------------
@@ -155,6 +216,7 @@ class StepCard(QFrame):
     def __init__(self, title, blurb, switch=True, parent=None):
         super().__init__(parent)
         self.setObjectName('card')
+        self.title = title
         layout = vbox(self, (14, 11, 14, 11), 6)
         head = hbox(spacing=8)
         head.addWidget(label(title, size=13, weight=QFont.Weight.DemiBold))
@@ -164,6 +226,7 @@ class StepCard(QFrame):
         self.value.setProperty('role', 'muted')
         head.addWidget(self.value)
         self.switch = Switch()
+        self.switch.setAccessibleName(title)
         self.switch.setVisible(switch)
         head.addWidget(self.switch)
         layout.addLayout(head)
@@ -174,6 +237,7 @@ class StepCard(QFrame):
 
     def add_slider(self, low, high, scale=1):
         slider = QSlider(Qt.Orientation.Horizontal)
+        slider.setAccessibleName(self.title)
         slider.setRange(round(low * scale), round(high * scale))
         self.body.addWidget(slider)
         return slider
@@ -210,6 +274,7 @@ class ProcessPage(QWidget):
 
         self.hum = StepCard('Hum filter', 'Notches mains hum and its harmonics. The Check tab says if hum was found.')
         self.hum_region = Segmented(['50 Hz', '60 Hz'], 1)
+        self.hum_region.setAccessibleName('Mains frequency')
         self.hum.body.addWidget(self.hum_region)
         self.hum.switch.toggled.connect(lambda on: self._set('hum', f'Hum filter {"on" if on else "off"}', enabled=on))
         self.hum_region.currentChanged.connect(
@@ -220,6 +285,10 @@ class ProcessPage(QWidget):
         self.denoise = StepCard('Noise reduction', 'Reduces steady background noise with FFmpeg (afftdn). Best about 5 dB '
                                                    'above the noise floor; higher values change the voice.')
         self.denoise_slider = self.denoise.add_slider(lo, hi)
+        self.denoise_fit = button('Set from this clip', None, None, 'Measure the noise of this clip and set the noise floor '
+                                                                    'about 5 dB above it')
+        self.denoise_fit.clicked.connect(lambda: self.session.editor.fit_denoise())
+        self.denoise.body.addWidget(self.denoise_fit, 0, Qt.AlignmentFlag.AlignLeft)
         self.denoise_note = self.denoise.add_note('Voice identity is not checked. Listen first.')
         self.denoise.switch.toggled.connect(self.session.editor.set_denoise)
         self.denoise_slider.valueChanged.connect(
@@ -263,6 +332,7 @@ class ProcessPage(QWidget):
         layout.addSpacing(2)
         layout.addWidget(caption('History'))
         self.history = QListWidget()
+        self.history.setAccessibleName('History of changes')
         self.history.setFixedHeight(150)
         self.history.itemClicked.connect(lambda item: self.session.editor.jump_to(self.history.row(item)))
         layout.addWidget(self.history)
@@ -293,6 +363,7 @@ class ProcessPage(QWidget):
         quiet(self.denoise_slider, self.denoise_slider.setValue, round(nr['nf']))
         self.denoise_slider.setEnabled(nr['enabled'])
         self.denoise.switch.setEnabled(have_ffmpeg or nr['enabled'])
+        self.denoise_fit.setEnabled(have_ffmpeg)
         self.denoise.value.setText(f"{nr['nf']:.0f} dB")
         set_chip(self.denoise_note, 'Voice identity is not checked. Listen first.' if have_ffmpeg else
                  'FFmpeg was not found. Install it or set its path in Settings.', 'amber')
@@ -323,6 +394,7 @@ class ProcessPage(QWidget):
 # ---- the Check page ---------------------------------------------------------------------------------------------------
 
 STATUS_COLOURS = {'ok': 'green', 'warn': 'amber', 'bad': 'red', 'info': 'muted'}
+STATUS_WORDS = {'ok': 'Good', 'warn': 'Worth a look', 'bad': 'Problem', 'info': 'Note'}       # what a coloured dot means, read out
 
 
 class AutoCard(QFrame):
@@ -366,6 +438,7 @@ class AutoCard(QFrame):
         box = vbox(spacing=2)
         head = hbox(spacing=8)
         dot = QLabel('●')
+        dot.setAccessibleName(tr(STATUS_WORDS[finding.status]))
         dot.setStyleSheet(f'color: {PALETTE[STATUS_COLOURS[finding.status]]}; font-size: 12px;')
         head.addWidget(dot, 0, Qt.AlignmentFlag.AlignTop)
         head.addWidget(label(finding.title, size=13, weight=QFont.Weight.DemiBold), 1)
@@ -450,8 +523,8 @@ class AutoCard(QFrame):
         self.setEnabled(take is not None)
         repairable = diagnosis is None or diagnosis.has_fixes
         self.fix.setEnabled(take is not None and repairable)
-        self.fix.setToolTip('Repair what Auto analyze finds, as one undo step' if repairable
-                            else 'There is nothing Auto fix can change')
+        self.fix.setToolTip(tr('Repair what Auto analyze finds, as one undo step' if repairable
+                               else 'There is nothing Auto fix can change'))
 
 
 class CheckPage(QWidget):
@@ -495,6 +568,7 @@ class CheckPage(QWidget):
         layout = vbox(box, (12, 9, 12, 9), 3)
         head = hbox(spacing=8)
         dot = QLabel('●')
+        dot.setAccessibleName(tr(STATUS_WORDS[row.status]))
         dot.setStyleSheet(f'color: {PALETTE[STATUS_COLOURS[row.status]]}; font-size: 12px;')
         head.addWidget(dot)
         head.addWidget(label(row.label, size=13, weight=QFont.Weight.DemiBold))
@@ -507,9 +581,83 @@ class CheckPage(QWidget):
         return box
 
 
+# ---- the Script page --------------------------------------------------------------------------------------------------
+
+class ScriptPage(QWidget):
+    """Every line of the script and how far it has got: click a line to go to it."""
+
+    loadRequested = Signal()
+
+    MARKS = (('kept', '✓'), ('recorded', '●'), ('open', '○'))
+
+    def __init__(self, session, parent=None):
+        super().__init__(parent)
+        self.session = session
+        layout = vbox(self, spacing=8)
+        self.summary = label('', 'muted', wrap=True)
+        layout.addWidget(self.summary)
+        self.lines = QListWidget()
+        self.lines.setAccessibleName('The lines of the script')
+        self.lines.setAccessibleDescription('Each line, with whether it has a kept clip. Choose a line to go to it')
+        self.lines.setTextElideMode(Qt.TextElideMode.ElideRight)
+        self.lines.itemClicked.connect(lambda item: self.session.script.go_to(self.lines.row(item)))
+        self.lines.itemActivated.connect(lambda item: self.session.script.go_to(self.lines.row(item)))
+        layout.addWidget(self.lines, 1)
+        row = hbox(spacing=8)
+        self.next = button('Next line to record', None, None, 'Go to the next line that has no kept clip (Ctrl+Shift+Down)')
+        self.next.clicked.connect(self._next)
+        row.addWidget(self.next)
+        self.load = button('Load script...', 'ghost', None, 'Read prompts from a text file, one line per take')
+        self.load.clicked.connect(self.loadRequested)
+        row.addWidget(self.load)
+        row.addStretch(1)
+        layout.addLayout(row)
+
+    def _next(self):
+        session = self.session
+        if not session.script.go_to_next(session.workspace.takes):
+            session.bus.status('Every line of the script has a kept clip.')
+
+    @staticmethod
+    def _row(line):
+        mark = '✓' if line.kept else '●' if line.takes else '○'
+        return f'{mark}  {line.number}.  {line.text}'
+
+    @staticmethod
+    def _spoken(line):
+        """The line as a screen reader says it, where the eye has the mark."""
+        state = tr('Kept') if line.kept else tr('Recorded') if line.takes else tr('Not recorded yet')
+        return f'{state}. {line.number}. {line.text}'
+
+    def refresh(self):
+        session = self.session
+        script = session.script
+        progress = script.progress(session.workspace.takes)
+        done = sum(1 for line in progress if line.kept)
+        self.lines.blockSignals(True)
+        self.lines.clear()
+        for line in progress:
+            item = QListWidgetItem(self._row(line))
+            item.setToolTip(line.text)
+            item.setData(Qt.ItemDataRole.AccessibleTextRole, self._spoken(line))
+            self.lines.addItem(item)
+        if progress:
+            self.lines.setCurrentRow(script.index)
+            self.lines.scrollToItem(self.lines.currentItem())
+        self.lines.blockSignals(False)
+        self.summary.setText(tr('{done} of {total} lines have a kept clip, for this speaker. ✓ kept, ● recorded, ○ not yet.')
+                             .format(done=done, total=len(progress)) if progress else
+                             tr('A script is a text file with one prompt on each line. Each take then gets a line as its '
+                                'transcript, and this list shows how far you have got. Your place is remembered when you '
+                                'close the program.'))
+        self.lines.setVisible(bool(progress))
+        self.next.setVisible(bool(progress))
+
+
 # ---- the Keep checklist -----------------------------------------------------------------------------------------------
 
 GLYPHS = {'ok': ('✓', 'green'), 'todo': ('○', 'dim'), 'bad': ('✕', 'red'), 'advice': ('!', 'amber')}
+GLYPH_WORDS = {'ok': 'Done', 'todo': 'Still to do', 'bad': 'Problem', 'advice': 'Advice'}
 
 
 def step_text(step):
@@ -517,27 +665,37 @@ def step_text(step):
     key, detail = step.key, step.detail
     if key == 'length':
         if detail == 'measuring...':
-            return 'Measuring the clip...'
-        return f'Length {detail}  (6 to 40 s)' if step.done else f'Length {detail}: a reference must be 6 to 40 s'
+            return tr('Measuring the clip...')
+        allowed = step.label.removeprefix('Length ')
+        text = 'Length {detail}  ({allowed})' if step.done else 'Length {detail}: this purpose needs {allowed}'
+        return tr(text).format(detail=detail, allowed=allowed)
     if key == 'audible':
-        return 'Not silent' if step.done else ('Measuring the clip...' if detail == 'measuring...'
-                                               else f'Silent ({detail}): there is nothing to keep')
+        if step.done:
+            return tr('Not silent')
+        return tr('Measuring the clip...') if detail == 'measuring...' else \
+            tr('Silent ({detail}): there is nothing to keep').format(detail=detail)
     if key == 'transcript':
-        return f'Transcript, {detail}' if step.done else \
-            f'Transcript must be {ac.TRANSCRIPT_MIN} to {ac.TRANSCRIPT_MAX} characters ({detail})'
+        text = 'Transcript, {detail}' if step.done else 'Transcript must be {low} to {high} characters ({detail})'
+        return tr(text).format(low=ac.TRANSCRIPT_MIN, high=ac.TRANSCRIPT_MAX, detail=detail)
     if key == 'checked':
-        return 'Transcript matches the kept words' if step.done else 'Check that the transcript still matches the words kept'
+        return tr('Transcript matches the kept words' if step.done else 'Check that the transcript still matches the words kept')
     if key == 'origin':
-        return 'Origin entered' if step.done else 'Enter the origin: where the recording came from'
+        return tr('Origin entered' if step.done else 'Enter the origin: where the recording came from')
     if key == 'allowed_use':
-        return 'Allowed use entered' if step.done else 'Enter the allowed use'
-    return 'Permission confirmed' if step.done else 'Tick the permission box'
+        return tr('Allowed use entered' if step.done else 'Enter the allowed use')
+    if key == 'release':
+        return detail
+    return tr('Permission confirmed' if step.done else 'Tick the box below to confirm the permission')
 
 
 class ReadyCard(QFrame):
-    """"Ready to keep?": what is still to do, advice that does not block, and the Keep, Re-record and Discard buttons.
-    Always visible, so nothing is learned from a dialog after pressing Keep. The checks that already pass are folded
-    into one line that opens the full list."""
+    """"Ready to keep?": what is still to do, advice that does not block, the permission box, and the Keep, Re-record and
+    Discard buttons. Always visible, so nothing is learned from a dialog after pressing Keep, and the permission is given
+    right beside the button it is for, however small the window is. The checks that already pass are folded into one line
+    that opens the full list."""
+
+    STATEMENT = ('I have the right to use this voice for the allowed use stated: it is my own voice, or the speaker has '
+                 'given permission.')
 
     keepRequested = Signal()
     rerecordRequested = Signal()
@@ -550,8 +708,10 @@ class ReadyCard(QFrame):
         self.session = session
         self.setObjectName('card')
         self.expanded = False
+        self.short = False                  # a short window: the notes fold away with the passed checks
         self._signature = None
         self._derived = None
+        self._loading = False
         layout = vbox(self, (16, 13, 16, 12), 7)
         head = hbox(spacing=8)
         head.addWidget(label('Ready to keep?', size=14, weight=QFont.Weight.DemiBold))
@@ -562,6 +722,14 @@ class ReadyCard(QFrame):
         self.rows = vbox(spacing=6)
         layout.addLayout(self.rows)
         layout.addSpacing(4)
+        statement = hbox(spacing=10)
+        self.consent = QCheckBox()
+        self.consent.setAccessibleName(self.STATEMENT)
+        self.consent.setToolTip('Required before a clip can be kept. It is never remembered')
+        self.consent.toggled.connect(self._consent_toggled)
+        statement.addWidget(self.consent, 0, Qt.AlignmentFlag.AlignTop)
+        statement.addWidget(label(self.STATEMENT, 'muted', size=12, wrap=True), 1)
+        layout.addLayout(statement)
         self.keep = button('Keep clip     Ctrl+S', 'primary')
         self.keep.clicked.connect(self.keepRequested)
         layout.addWidget(self.keep)
@@ -573,13 +741,19 @@ class ReadyCard(QFrame):
         self.discard.clicked.connect(self.discardRequested)
         self.open_folder.clicked.connect(self.folderRequested)
         for b in (self.rerecord, self.discard, self.open_folder):
+            b.setStyleSheet('padding: 6px 3px;')            # longer words than English must fit the width of the card
             more.addWidget(b)
         layout.addLayout(more)
+
+    @staticmethod
+    def _keep_tip(take):
+        return tr('Writes the {rate} kHz WAV and its sidecar').format(rate=f'{take.export_rate / 1000:g}')
 
     def _line(self, state, text, action=None):
         row = hbox(spacing=9)
         glyph, name = GLYPHS[state]
         mark = QLabel(glyph)
+        mark.setAccessibleName(tr(GLYPH_WORDS[state]))
         mark.setFont(theme.ui_font(13, QFont.Weight.Bold))
         mark.setFixedWidth(16)
         mark.setStyleSheet(f'color: {PALETTE[name]};')
@@ -590,20 +764,35 @@ class ReadyCard(QFrame):
             row.addWidget(action, 0, Qt.AlignmentFlag.AlignTop)
         return row
 
+    def _consent_toggled(self, on):
+        if not self._loading:
+            self.session.workspace.set_meta(consent_confirmed=on)
+
     def _toggle(self):
         self.expanded = not self.expanded
         self._signature = None
         self.refresh(self._derived)
 
-    def _passed_line(self, count):
-        """One line standing in for the checks that pass, with a link that shows or hides them."""
+    def set_short(self, short):
+        if short != self.short:
+            self.short = short
+            self._signature = None
+            self.refresh(self._derived)
+
+    def _passed_line(self, count, notes=0):
+        """One line standing in for the checks that pass and any notes folded with them, with a link that shows or hides
+        them."""
         row = hbox(spacing=9)
         mark = QLabel(GLYPHS['ok'][0])
+        mark.setAccessibleName(tr(GLYPH_WORDS['ok']))
         mark.setFont(theme.ui_font(13, QFont.Weight.Bold))
         mark.setFixedWidth(16)
         mark.setStyleSheet(f'color: {PALETTE["green"]};')
         row.addWidget(mark)
-        row.addWidget(label(f'{count} check{"s" if count != 1 else ""} passed', 'muted'))
+        words = tr('{count} check passed' if count == 1 else '{count} checks passed').format(count=count)
+        if notes:
+            words += ', ' + tr('{count} note' if notes == 1 else '{count} notes').format(count=notes)
+        row.addWidget(label(words, 'muted'))
         toggle = button('Hide' if self.expanded else 'Show', 'link')
         toggle.clicked.connect(self._toggle)
         row.addWidget(toggle)
@@ -614,8 +803,11 @@ class ReadyCard(QFrame):
         take = self.session.current
         self.setEnabled(take is not None)
         self._derived = derived
+        self._loading = True
+        self.consent.setChecked(take is not None and take.meta.get('consent_confirmed') is True)
+        self._loading = False
         readiness = self.session.workspace.readiness(derived)
-        signature = (take.id if take else None, take.kept if take else None, self.expanded,
+        signature = (take.id if take else None, take.kept if take else None, self.expanded, self.short,
                      tuple(readiness.steps), tuple(readiness.advice), readiness.ready)
         if signature == self._signature:
             return
@@ -624,8 +816,8 @@ class ReadyCard(QFrame):
         passed = [step for step in readiness.steps if step.done]
         shown, said = (readiness.steps if self.expanded else [s for s in readiness.steps if not s.done]), set()
         for step in shown:
-            state = 'ok' if step.done else 'bad' if step.key in ('length', 'audible') and step.detail != 'measuring...' \
-                else 'todo'
+            state = 'ok' if step.done else 'bad' if step.key in ('length', 'audible', 'release') \
+                and step.detail != 'measuring...' else 'todo'
             text = step_text(step)
             if text in said:                                    # two checks waiting on the same measurement say it once
                 continue
@@ -635,15 +827,17 @@ class ReadyCard(QFrame):
                 action = button('It matches', 'link')
                 action.clicked.connect(self.confirmRequested)
             self.rows.addLayout(self._line(state, text, action))
-        if passed:
-            self.rows.addLayout(self._passed_line(len(passed)))
-        for advice in readiness.advice:
+        folded = self.short and not self.expanded
+        if passed or (folded and readiness.advice):
+            self.rows.addLayout(self._passed_line(len(passed), len(readiness.advice) if folded else 0))
+        for advice in () if folded else readiness.advice:
             self.rows.addLayout(self._line('advice', advice.text))
         blockers = sum(1 for step in readiness.steps if not step.done)
-        set_chip(self.verdict, 'Ready' if readiness.ready else f'{blockers} to fix', 'green' if readiness.ready else 'red')
-        self.keep.setText('Update kept clip     Ctrl+S' if take is not None and take.kept else 'Keep clip     Ctrl+S')
+        set_chip(self.verdict, 'Ready' if readiness.ready else tr('{count} to fix').format(count=blockers),
+                 'green' if readiness.ready else 'red')
+        self.keep.setText(tr('Update kept clip     Ctrl+S' if take is not None and take.kept else 'Keep clip     Ctrl+S'))
         self.keep.setEnabled(readiness.ready)
-        self.keep.setToolTip('Writes the 24 kHz WAV and its sidecar' if readiness.ready else 'Fix the items above first')
+        self.keep.setToolTip(self._keep_tip(take) if readiness.ready else tr('Fix the items above first'))
         self.discard.setEnabled(take is not None)
         self.rerecord.setEnabled(take is not None)
 
@@ -677,13 +871,13 @@ class RecordCard(QFrame):
     def refresh(self):
         info = self.session.capturing.info()
         workspace = self.session.workspace
-        rate = f"{info['rate'] / 1000:g} kHz" if info['rate'] else 'opens when recording starts'
+        rate = f"{info['rate'] / 1000:g} kHz" if info['rate'] else tr('opens when recording starts')
         channels = f"  ·  {info['channels']} ch" if info['channels'] else ''
-        self.values['device'].setText(info['device'] or 'No device')
+        self.values['device'].setText(info['device'] or tr('No device'))
         self.values['capture'].setText(rate + channels)
-        self.values['pre_roll'].setText(f"{info['pre_roll']:g} s kept before Record" if info['pre_roll']
-                                        else 'none for system audio')
-        self.values['tail'].setText(f"{info['tail']:g} s after Stop")
+        self.values['pre_roll'].setText(tr('{seconds} s kept before Record').format(seconds=f"{info['pre_roll']:g}")
+                                        if info['pre_roll'] else tr('none for system audio'))
+        self.values['tail'].setText(tr('{seconds} s after Stop').format(seconds=f"{info['tail']:g}"))
         self.values['saved'].setText(f"{workspace.name_of(workspace.speaker) or 'My voice'}\\masters\\ at Stop")
 
 
@@ -703,6 +897,9 @@ def scrolling(page):
     return scroll
 
 
+SHORT_HEIGHT = 700                  # below this, the notes in the Keep card are folded to leave room for the fields
+
+
 class Inspector(QWidget):
     """Clip, Process and Check tabs over the Keep checklist; a plain "This take" card while recording; a short note when
     no take is open."""
@@ -716,9 +913,11 @@ class Inspector(QWidget):
     confirmRequested = Signal()
     autoAnalyzeRequested = Signal()
     autoFixRequested = Signal()
+    loadScriptRequested = Signal()
 
     REVIEW, RECORDING, IDLE = 0, 1, 2
-    CLIP_TAB, PROCESS_TAB, CHECK_TAB = 0, 1, 2
+    CLIP_TAB, PROCESS_TAB, CHECK_TAB, SCRIPT_TAB = 0, 1, 2, 3
+    TABS = ['Clip', 'Process', 'Check', 'Script']
 
     def __init__(self, session, parent=None):
         super().__init__(parent)
@@ -732,14 +931,17 @@ class Inspector(QWidget):
 
         review = QWidget()
         layout = vbox(review, (16, 14, 16, 14), 12)
-        self.tabs = Segmented(['Clip', 'Process', 'Check'])
+        self.tabs = Segmented(self.TABS)
         layout.addWidget(self.tabs)
         self.clip = ClipPage(session)
         self.process = ProcessPage(session)
         self.check = CheckPage(session)
+        self.script = ScriptPage(session)
+        self.script.loadRequested.connect(self.loadScriptRequested)
         self.pages = QStackedWidget()
         for page in (self.clip, self.process, self.check):
             self.pages.addWidget(scrolling(page))
+        self.pages.addWidget(self.script)           # its list scrolls by itself
         self.tabs.currentChanged.connect(self.pages.setCurrentIndex)
         layout.addWidget(self.pages, 1)
         self.ready = ReadyCard(session)
@@ -779,9 +981,13 @@ class Inspector(QWidget):
             signal.connect(forward)
 
     def _disabled_tabs(self):
-        tabs = Segmented(['Clip', 'Process', 'Check'])
+        tabs = Segmented(self.TABS)
         tabs.setEnabled(False)
         return tabs
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.ready.set_short(self.height() < SHORT_HEIGHT)
 
     def set_mode(self, mode):
         """REVIEW while a take is open, RECORDING while one is being made, IDLE when there is nothing to show."""
@@ -815,3 +1021,6 @@ class Inspector(QWidget):
 
     def refresh_advice(self):
         self.check.auto.refresh()
+
+    def refresh_script(self):
+        self.script.refresh()

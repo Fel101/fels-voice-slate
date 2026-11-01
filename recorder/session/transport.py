@@ -8,7 +8,7 @@ import time
 
 import numpy as np
 
-from ..audio_io import Player
+from ..audio_io import Player, find_output
 from ..clean import CleanError
 from ..core import render
 
@@ -36,6 +36,10 @@ class Transport:
             self.stop()
         elif topic == 'edits' and self.mode == 'edited' and self.player.active and self._stale_since is None:
             self._stale_since = self.clock()
+
+    def set_output(self, name):
+        """Play through the output device called `name` from the next Play on. An empty name is Windows' default."""
+        self.player.device = find_output(name)
 
     # ---- state --------------------------------------------------------------------------------------------------------
 

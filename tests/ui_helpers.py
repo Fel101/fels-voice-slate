@@ -61,6 +61,9 @@ class StubDialogs:
         self.copy_answer = None                  # (format, sample rate) for a copy of a clip
         self.manifest_answer = None              # ('speaker' or 'all', 'jsonl' or 'csv')
         self.asked = []                          # (what, details) of each question about files, in order
+        self.keep_many_answer = None             # (origin, allowed use), or None to back out
+        self.speaker_answer = None               # what the Speaker details dialog returns
+        self.dataset_answer = None               # (scope, layout, rate, from originals)
         self.settings_answer = None
         self.settings_seen = None
 
@@ -94,13 +97,25 @@ class StubDialogs:
         self.asked.append(('item', SimpleNamespace(title=title, prompt=prompt, items=list(items))))
         return self.item_answer
 
-    def copy_options(self, name):
-        self.asked.append(('copy', SimpleNamespace(name=name)))
+    def copy_options(self, name, kept_rate=None):
+        self.asked.append(('copy', SimpleNamespace(name=name, kept_rate=kept_rate)))
         return self.copy_answer
 
     def manifest_options(self, speaker_name):
         self.asked.append(('manifest', SimpleNamespace(speaker=speaker_name)))
         return self.manifest_answer
+
+    def keep_many(self, speaker_name, takes, defaults):
+        self.asked.append(('keep_many', SimpleNamespace(speaker=speaker_name, takes=list(takes), defaults=dict(defaults))))
+        return self.keep_many_answer
+
+    def speaker_details(self, name, record, has_file):
+        self.asked.append(('speaker', SimpleNamespace(name=name, record=record, has_file=has_file)))
+        return self.speaker_answer
+
+    def dataset_options(self, speaker_name):
+        self.asked.append(('dataset', SimpleNamespace(speaker=speaker_name)))
+        return self.dataset_answer
 
     def settings(self, values):
         self.settings_seen = dict(values)
@@ -144,6 +159,17 @@ def hover(widget, x, y):
     where = QPointF(x, y)
     QApplication.sendEvent(widget, QMouseEvent(QEvent.Type.MouseMove, where, widget.mapToGlobal(where), Qt.MouseButton.NoButton,
                                                Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier))
+
+
+def row_point(window, place):
+    """The middle of a row of the list of takes, in the coordinates of the list's viewport."""
+    library = window.library
+    library.list.scrollTo(library.model.index(place))
+    return library.list.visualRect(library.model.index(place)).center()
+
+
+def click_row(window, place, button=Qt.MouseButton.LeftButton, modifiers=Qt.KeyboardModifier.NoModifier):
+    QTest.mouseClick(window.library.list.viewport(), button, modifiers, row_point(window, place))
 
 
 def wheel(widget, x, y, dy=120, dx=0, modifiers=Qt.KeyboardModifier.NoModifier):

@@ -1,4 +1,5 @@
 """Shared synthetic audio and stand-ins for the tests. Nothing here needs a microphone, a speaker or a display."""
+import shutil
 from types import SimpleNamespace
 
 import numpy as np
@@ -61,6 +62,7 @@ class FakeCapture:
         self.backend = SimpleNamespace(name='fake device', hostapi='test', kind=kind)
         self.stall = False
         self.wall = 1.0
+        self.lone_input = None
 
     @property
     def level(self):
@@ -86,6 +88,9 @@ class FakeCapture:
 
     def stalled(self):
         return self.stall
+
+    def only_input(self):
+        return self.lone_input
 
     @property
     def wall_elapsed(self):
@@ -118,7 +123,10 @@ class Bin:
             raise TrashUnavailable(self.fail)
         self.sent.append([p.name for p in paths])
         for path in paths:
-            path.unlink()
+            if path.is_dir():
+                shutil.rmtree(path)
+            else:
+                path.unlink()
 
 
 class FakePlayer:

@@ -13,7 +13,16 @@ Keys, all optional:
 - `asr_python` and `asr_model`: the optional speech recognizer used for draft transcripts (see the README).
 - `asr_language`: a language code such as `en` for the recognizer. Without it the language is detected for each clip.
 - `tail_seconds`: how long recording continues after Stop, 0 to 1.
-- `global_hotkey`: `false` keeps F9 from starting and stopping a recording while another program is in front (on by default).
+- `purpose`: what new takes are for: `reference`, `sentence` or `audition`.
+- `global_hotkey`: `true` lets the record key start and stop a recording while another program is in front (off by default).
+- `record_key`: the record key, such as `F9` or `Ctrl+Shift+R`.
+- `input_device`: the device last chosen for each source, by the name shown in the list.
+- `input_channels`: which input of a device to record, by the device's name in the list, counted from 0. Without an entry
+  the first two inputs are mixed.
+- `output_device`: the device to play through, by the name shown in Settings. Without it, Windows' default.
+- `theme`: `dark`, `light`, `contrast` or `system` (the mode Windows is in).
+- `text_scale`: the size of the whole window, from 1 to 2. Without it, Windows' own Text size setting.
+- `language`: the language of the window, such as `de`. Without it, the one Windows is in, if there is a translation.
 """
 import datetime as dt
 import json
@@ -27,11 +36,13 @@ APP_DIR = 'Fels Voice Slate'            # the settings folder under %APPDATA%: n
 APP_ID = 'FelsVoiceSlate.App'           # what Windows groups the taskbar button and a shortcut to the program by
 ENV_VAR = 'VOICE_SLATE_SETTINGS'
 CLIPS_FOLDER = 'voice-clips'
-# Used when the program's own folder is a poor place for recordings. Under the user's profile rather than Documents,
-# which OneDrive often syncs: these are voice recordings.
-FALLBACK_ROOT = Path.home() / 'Recordings' / CLIPS_FOLDER
+# Under the user's profile rather than Documents, which OneDrive often syncs: these are voice recordings.
+USER_ROOT = Path.home() / 'Recordings' / CLIPS_FOLDER
 SYNCED_PREFIXES = ('onedrive', 'dropbox', 'google drive', 'googledrive', 'icloud')
 DEFAULT_TAIL_SECONDS = 0.5
+DEFAULT_RECORD_KEY = 'F9'
+THEMES = ('dark', 'light', 'contrast', 'system')
+TEXT_SCALES = (1.0, 1.25, 1.5, 1.75, 2.0)
 
 
 def program_dir():
@@ -80,18 +91,29 @@ def _keep_out_of_git(folder):
             pass
 
 
+def holds_recordings(folder):
+    """True when `folder` is an output folder with speakers in it."""
+    folder = Path(folder)
+    if any(folder.glob('*/masters')):
+        return True
+    try:
+        return bool(json.loads((folder / 'speakers.json').read_text(encoding='utf-8')))
+    except (OSError, ValueError):
+        return False
+
+
 def default_root():
     """The output folder when the settings do not name one.
 
-    That is `voice-clips` inside the program folder, so the recordings stay beside the program that made them. A folder
-    that OneDrive, Dropbox or the like syncs is not used, because these are recordings of voices, and neither is one
-    that cannot be written to: both fall back to FALLBACK_ROOT in the user's profile.
+    That is USER_ROOT in the person's own folder, where updating or removing the program cannot touch it. Copies of the
+    program before 0.5 kept the recordings in `voice-clips` inside the program folder, so one with recordings in it stays in
+    use, unless OneDrive, Dropbox or the like syncs it or it cannot be written to. Settings can move it.
     """
     folder = program_dir() / CLIPS_FOLDER
-    if in_synced_folder(folder) or not _writable(folder):
-        return FALLBACK_ROOT
-    _keep_out_of_git(folder)
-    return folder
+    if holds_recordings(folder) and not in_synced_folder(folder) and _writable(folder):
+        _keep_out_of_git(folder)
+        return folder
+    return USER_ROOT
 
 
 def settings_path():
@@ -153,6 +175,30 @@ def tail_seconds(data=None):
 
 
 def global_hotkey(data=None):
-    """Whether F9 also works while another program is in front. On, unless the settings say `false`."""
-    value = (data if data is not None else load()).get('global_hotkey', True)
-    return value if isinstance(value, bool) else True
+    """Whether the record key also works while another program is in front. Off, unless the settings say `true`: while it is
+    on no other program gets the key, and a stray press would open the microphone."""
+    return (data if data is not None else load()).get('global_hotkey') is True
+
+
+def theme(data=None):
+    """The look of the window."""
+    value = (data if data is not None else load()).get('theme')
+    return value if value in THEMES else THEMES[0]
+
+
+def text_scale(data=None):
+    """The size chosen for the window, or None to follow Windows."""
+    value = (data if data is not None else load()).get('text_scale')
+    return value if value in TEXT_SCALES else None
+
+
+def language(data=None):
+    """The language chosen for the window, or None to follow Windows."""
+    value = (data if data is not None else load()).get('language')
+    return value if isinstance(value, str) and value else None
+
+
+def record_key(data=None):
+    """The key that starts and stops a recording, as text such as F9 or Ctrl+Shift+R."""
+    value = (data if data is not None else load()).get('record_key')
+    return value.strip() if isinstance(value, str) and value.strip() else DEFAULT_RECORD_KEY

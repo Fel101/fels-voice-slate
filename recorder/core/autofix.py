@@ -98,9 +98,9 @@ def _snapshot(history):
     return SimpleNamespace(**history.state_copy())
 
 
-def _export(x, rate, chain):
+def _export(x, rate, chain, out_rate):
     """What the export would hold for audio that has every step but gain and the limiter."""
-    return render.finish(chain_mod.apply_level(x, rate, chain), rate, chain)
+    return render.finish(chain_mod.apply_level(x, rate, chain), rate, chain, out_rate)
 
 
 def rumble_db(x, rate):
@@ -136,10 +136,10 @@ def _look(x, rate):
                            hum=analysis.detect_hum(e, r), rumble=rumble_db(e, r), pauses=_inner_pauses(e, PAUSE_LIMIT))
 
 
-def _output(export):
+def _output(export, out_rate):
     """The clip as it would be kept: its statistics, speech level and bandwidth."""
-    return SimpleNamespace(stats=ac.measure(export, ac.EXPORT_RATE), speech=ac.voiced_rms_db(export, ac.EXPORT_RATE),
-                           band=analysis.bandwidth_hz(export, ac.EXPORT_RATE))
+    return SimpleNamespace(stats=ac.measure(export, out_rate), speech=ac.voiced_rms_db(export, out_rate),
+                           band=analysis.bandwidth_hz(export, out_rate))
 
 
 # ---- the plan ---------------------------------------------------------------------------------------------------------
@@ -151,15 +151,17 @@ def _cut_ops(master, rate, history, ranges):
             for a, b in ranges]
 
 
-def _fits(seconds, ranges):
+def _fits(seconds, ranges, rules):
     """False when cutting these ranges would take a clip that is long enough to keep below the minimum."""
-    return seconds < ac.MIN_SECONDS or seconds - sum(b - a for a, b in ranges) >= ac.MIN_SECONDS
+    return seconds < rules.min_seconds or seconds - sum(b - a for a, b in ranges) >= rules.min_seconds
 
 
 class _Plan:
     """The repairs chosen so far, each tried on a copy of the take's recipe."""
 
-    def __init__(self, history):
+    def __init__(self, history, rules, out_rate):
+        self.rules = rules          # the purpose of the clip: how long it may be
+        self.out_rate = out_rate    # the rate it is kept at
         self.start = history.chain  # the chain the take had before any repair
         self.history = history.copy()
         self.ops, self.chain, self.steps = [], {}, []
@@ -250,8 +252,8 @@ def _trim(plan, master, rate, x, before_level):
             ranges.append((look.seconds - look.tail + TRIM_MARGIN, look.seconds))
         if not ranges:
             break
-        if not _fits(look.seconds, ranges):
-            plan.skipped['ends'] = 'the clip would be left shorter than 6 s'
+        if not _fits(look.seconds, ranges, plan.rules):
+            plan.skipped['ends'] = f'the clip would be left shorter than {plan.rules.min_seconds:g} s'
             break
         if not plan.add(['ends'], 'Trim the silence at the ends', ops=_cut_ops(master, rate, plan.history, ranges)):
             break
@@ -266,8 +268,8 @@ def _shorten(plan, master, rate, x, before_level):
     ranges = [(a + PAUSE_KEEP / 2.0, b - PAUSE_KEEP / 2.0) for a, b in pauses]
     if not ranges:
         return x
-    if not _fits(len(x) / rate, ranges):
-        plan.skipped['pauses'] = 'the clip would be left shorter than 6 s'
+    if not _fits(len(x) / rate, ranges, plan.rules):
+        plan.skipped['pauses'] = f'the clip would be left shorter than {plan.rules.min_seconds:g} s'
     elif plan.add(['pauses'], 'Shorten the long pauses', ops=_cut_ops(master, rate, plan.history, ranges)):
         return before_level(_snapshot(plan.history))
     return x
@@ -275,8 +277,8 @@ def _shorten(plan, master, rate, x, before_level):
 
 def _level(plan, x, rate):
     """Step 5: the gain that puts the speech at the target, with the limiter catching what is left."""
-    now = _export(x, rate, plan.history.chain)
-    speech, peak = ac.voiced_rms_db(now, ac.EXPORT_RATE), ac.measure(now, ac.EXPORT_RATE)['peak_dbfs']
+    now = _export(x, rate, plan.history.chain, plan.out_rate)
+    speech, peak = ac.voiced_rms_db(now, plan.out_rate), ac.measure(now, plan.out_rate)['peak_dbfs']
     if abs(speech - ac.TARGET_VOICED_DB) > LEVEL_TOLERANCE:
         low, high = chain_mod.LIMITS[('level', 'gain_db')]
         gain = min(max(ac.normalize_gain_db(x, rate, cap_peak=False), low), high)
@@ -289,9 +291,9 @@ def _level(plan, x, rate):
         plan.add(['peak'], 'Peak limiter', chain={'limiter': {'enabled': True}})
 
 
-def _repair(master, rate, history, before_level, denoise_ok, look):
+def _repair(master, rate, history, before_level, denoise_ok, look, rules, out_rate):
     """Choose the repairs for a take. Returns the plan, with what it will do and why it will not do the rest."""
-    plan = _Plan(history)
+    plan = _Plan(history, rules, out_rate)
     x = _filters(plan, look, before_level(_snapshot(plan.history)), before_level)
     plan.snr = _snr(x, rate)
     x = _denoise(plan, x, rate, before_level, denoise_ok)
@@ -316,16 +318,16 @@ def _findings(look, plan, out, final, recorded):
             detail += f' Not fixed: {plan.skipped[key]}.'
         found.append(Finding(key, status, title, detail, fix))
 
-    seconds = out.stats['seconds']
-    if seconds < ac.MIN_SECONDS:
-        add('length', 'bad', 'Too short', f'{seconds:.1f} s long. A kept clip needs {ac.MIN_SECONDS:.0f} to '
-            f'{ac.MAX_SECONDS:.0f} s, and Auto fix cannot add speech. Record more.')
-    elif seconds > ac.MAX_SECONDS:
-        add('length', 'bad', 'Too long', f'{seconds:.1f} s long. A kept clip can be at most {ac.MAX_SECONDS:.0f} s. '
-            'Select the part you want and use Trim to selection.')
-    elif seconds > ac.TARGET_MAX_SECONDS:
-        add('length', 'warn', 'Long clip', f'{seconds:.1f} s long. That is fine up to {ac.MAX_SECONDS:.0f} s, but '
-            f'{ac.TARGET_MIN_SECONDS:.0f} to {ac.TARGET_MAX_SECONDS:.0f} s works best.')
+    seconds, rules = out.stats['seconds'], plan.rules
+    if seconds < rules.min_seconds:
+        add('length', 'bad', 'Too short', f'{seconds:.1f} s long. A kept clip needs {rules.min_seconds:g} to '
+            f'{rules.max_seconds:g} s, and Auto fix cannot add speech. Record more.')
+    elif seconds > rules.max_seconds:
+        add('length', 'bad', 'Too long', f'{seconds:.1f} s long. A kept clip can be at most {rules.max_seconds:g} s. '
+            'Select the part you want and use Trim to selection, or split the take at its pauses.')
+    elif seconds > rules.best_to:
+        add('length', 'warn', 'Long clip', f'{seconds:.1f} s long. That is fine up to {rules.max_seconds:g} s, but '
+            f'{rules.best_from:g} to {rules.best_to:g} s works best.')
     clipped = max(out.stats['clipped_fraction'], recorded)
     if clipped > 0.001:
         add('clipping', 'bad', 'Clipping', f'{clipped * 100:.2f}% of the samples reach full scale. Clipping cannot be '
@@ -373,28 +375,36 @@ def _findings(look, plan, out, final, recorded):
     return sorted(found, key=lambda f: {'bad': 0, 'warn': 1, 'ok': 2}[f.status])
 
 
-def diagnose(master, rate, history, before_level, denoise_ok=True):
+def diagnose(master, rate, history, before_level, denoise_ok=True, purpose=None):
     """Measure a take and plan its repairs.
 
     `master` and `rate` are the take's samples and rate, `history` its recipe, and `before_level(recipe)` renders a
     recipe (anything with .edits, .chain and .fade_ms) to the clip at `rate` with every step but gain and the limiter,
-    as Library.before_level does. `denoise_ok` says whether noise cleaning can run. Returns a Diagnosis.
+    as Library.before_level does. `denoise_ok` says whether noise cleaning can run, and `purpose` what the clip is for (a
+    Reference if not given). Returns a Diagnosis.
     """
+    rules = purpose or ac.PURPOSES[ac.DEFAULT_PURPOSE]
+    out_rate = rules.rate_for(rate)
+
+    def report(clip, clipped):
+        return analysis.quality_report(clip, out_rate, recorded_clipped=clipped, purpose=rules)
+
     x = before_level(_snapshot(history))
     look = _look(x, rate)
-    here = _export(x, rate, history.chain)
+    here = _export(x, rate, history.chain, out_rate)
     recorded = render.recorded_clipping(master, rate, history)['recording_clipped_fraction']
-    before = analysis.quality_report(here, recorded_clipped=recorded)
+    before = report(here, recorded)
     if look.speech < NO_SPEECH_DB:
         finding = Finding('speech', 'bad', 'No speech found', 'The clip is silent, or too quiet to measure. There is '
                           'nothing to fix.', '')
         return Diagnosis([finding], [], {}, [], before, before)
 
-    plan = _repair(master, rate, history, before_level, denoise_ok, look)
+    plan = _repair(master, rate, history, before_level, denoise_ok, look, rules, out_rate)
+    now = _output(here, out_rate)
     if not plan.steps:
-        return Diagnosis(_findings(look, plan, _output(here), _output(here), recorded), [], {}, [], before, before)
-    final = _export(before_level(_snapshot(plan.history)), rate, plan.history.chain)
+        return Diagnosis(_findings(look, plan, now, now, recorded), [], {}, [], before, before)
+    final = _export(before_level(_snapshot(plan.history)), rate, plan.history.chain, out_rate)
     left = render.recorded_clipping(master, rate, plan.history)['recording_clipped_fraction']
-    return Diagnosis(_findings(look, plan, _output(here), _output(final), recorded), plan.ops, plan.chain, plan.steps,
-                     before, analysis.quality_report(final, recorded_clipped=left), plan.done,
-                     (analysis.snr_db(here, ac.EXPORT_RATE), analysis.snr_db(final, ac.EXPORT_RATE)))
+    return Diagnosis(_findings(look, plan, now, _output(final, out_rate), recorded), plan.ops, plan.chain, plan.steps,
+                     before, report(final, left), plan.done,
+                     (analysis.snr_db(here, out_rate), analysis.snr_db(final, out_rate)))

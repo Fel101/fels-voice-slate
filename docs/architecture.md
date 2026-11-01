@@ -9,12 +9,15 @@ a change, and [Clip format](clip-format.md) for what the program writes.
 recorder/
   ui/            the PySide6 window: draws what the session says changed, and forwards what the person does
   session/       the controller. No toolkit. Session.tick() drives it, and a Bus tells the window what changed
-  core/          pure functions on arrays and recipes: edits, chain, render, analysis, autofix
-  store.py       the files: speakers, originals, kept clips and their sidecars, the spool files of takes being recorded,
-                 the autosave files of takes not kept yet, and moving a take to another speaker
+  core/          pure functions on arrays, recipes and text: edits, chain, render, analysis, autofix, reading
+  store.py       the files: speakers and their releases, originals, kept clips and their sidecars, the spool files of takes
+                 being recorded, the autosave files of takes not kept yet, moving a take to another speaker, and moving a
+                 whole output folder (Relocation). A take reads its audio only when it is asked for (_Resident)
   share.py       a copy of a kept clip as WAV, FLAC, MP3 or Ogg at another sample rate (SoundFile's libsndfile, no FFmpeg)
   manifest.py    a list of the kept clips, as JSON Lines or CSV, for programs that read a whole set
-  audio_core.py  small pure helpers, and the rules for what can be kept
+  dataset.py     the kept clips gathered in one new folder, as clips with sidecars or in the LJSpeech layout
+  audio_core.py  small pure helpers, the purposes, and the rules for what can be kept
+  i18n.py        the window in other languages: tr() and the tables in resources/lang
   capture.py     microphone (sounddevice) and system audio (PyAudioWPatch), behind one interface
   audio_io.py    playback through a sounddevice output stream
   clean.py       noise reduction by running the user's own FFmpeg
@@ -30,8 +33,10 @@ recorder/
   launch.py      what a windowless start needs: a log file, one copy at a time, and an error window instead of a console
   shortcut.py    the icon in the program folder, on the desktop or in the Start menu (a Windows .lnk file made through the shell's own COM interfaces)
   hotkey.py      F9 while another program is in front: Windows' RegisterHotKey, heard in Qt's event loop
-  resources/     the program's icon, drawn by tools/make_icon.py
-tools/           shoot.py draws the screenshots; synthetic.py makes test audio and a fake capture; make_icon.py draws the icon
+  resources/     the program's icon, drawn by tools/make_icon.py, and the language files
+installer/       the Inno Setup script of the Windows installer
+tools/           shoot.py draws the screenshots; synthetic.py makes test audio and a fake capture; make_icon.py draws the icon;
+                 build_installer.py builds the installer; strings.py lists the text there is to translate
 tests/           the test suite
 ```
 
@@ -53,8 +58,8 @@ opened again and its edits are still editable.
 
 `core/render.py` turns an original and a recipe into a clip, in a fixed order: mix to mono; silence, fades and region
 gain; cuts and joins; high-pass and hum notch (`core/chain.py`); noise reduction (`clean.py`); gain and limiter; then
-resampling to 24 kHz for export, and the limiter once more at that rate, because resampling can push a peak over the
-ceiling (`render.finish`). Each stage is cached by what decides its output, so moving the level slider does not run
+resampling to the rate of the take's purpose for export, and the limiter once more at that rate, because resampling can push a
+peak over the ceiling (`render.finish`). Each stage is cached by what decides its output, so moving the level slider does not run
 FFmpeg again.
 
 `clean.denoise` keeps the clip in step: afftdn holds the audio back and its output is only as long as its input, so the
@@ -78,7 +83,27 @@ function, so it is tested on generated audio with known faults. The rules are co
 can change a voice, so it is only used on a clearly noisy clip, set from that clip's own noise floor, and is kept only if
 it measurably lowers the noise and `analysis.voice_loss_db` finds the voice still there (the speech above the noise goes up
 even when the voice is taken along with the noise, so that measure cannot judge it alone); a clip is never shortened below
-the 6 s the Keep rules need; and a second look at a fixed clip finds nothing more to do.
+the shortest length its purpose can keep; and a second look at a fixed clip finds nothing more to do.
+
+## Purposes
+
+`audio_core.PURPOSES` holds a `Purpose` for each of Reference, Sentence and Audition: its length rules, the longest recording, and
+the format it is kept in. A take's purpose is `take.meta['purpose']`, stamped from `Workspace.purpose` when the take is made, and
+`take.purpose` and `take.export_rate` read it. Everything that judges a length or writes an export asks the take: `take_warnings`,
+`Workspace.readiness`, `quality_report`, `autofix.diagnose`, `Library.keep`, and the drawing of the length guide. A recording stops at
+`record_limit`, which is well past `max_seconds` on purpose, so that it never stops in the middle of a sentence. A sidecar with no
+`purpose` is a Reference. A measurement depends on the purpose as well as the recipe, so caches are keyed by `measure.take_key`.
+
+## A big library
+
+`Take.samples` is a property, set after the class is defined, because a dataclass cannot have a field and a property of one name.
+A take loaded from disk knows its length from `sf.info` and has no audio until something asks. `store._Resident` counts what is held,
+in order of use, by weak reference so that a discarded take does not stay in it, and past 256 MB the oldest takes let go of their
+audio and of what was worked out from it. The take in front (`in_use`) and a take whose original is not on disk (`unsaved`) never let
+go. Another thread can let a take go at any moment, so code that reads `take.cache` for something made from the audio reads it once.
+
+The list of takes (`ui/library.py`) is a `QListView` over a model, drawn by a delegate, so only the rows on screen cost anything.
+`Measurements.thumbnail` works out the outline of a row in the background the first time it is drawn.
 
 `session/advisor.py` runs it. It works out the advice on a worker thread, caches it per take under the recipe it was
 made for (a result for an older recipe is dropped), follows the clip as it is edited, and applies a fix through
@@ -108,12 +133,23 @@ the first window forward and exits. `shortcut.py` makes the `.lnk` through Windo
 application id as the running program, so the taskbar groups the window with the icon it was started from. Neither module
 imports Qt, and `python -m recorder --check` reports what is installed without opening a window.
 
-`hotkey.py` is what lets `F9` work while another program has the focus, which a Qt shortcut cannot do. It asks Windows
+`hotkey.py` is what lets the record key work while another program has the focus, which a Qt shortcut cannot do. It asks Windows
 (`RegisterHotKey`, through `ctypes`) to tell the program when that one key is pressed, so it never sees any other key, and
 it hears the answer in Qt's event loop through a native event filter. `ui.run()` gives the window a `GlobalKey`; the window
-runs the same Record command a click does, and gives the key back when it closes or when Settings turns it off. A window
-built without one (every test and `tools/shoot.py`) keeps `F9` as an ordinary shortcut, so nothing but the real program ever
-takes the key from the machine it runs on.
+runs the same Record command a click does, and gives the key back when it closes or when Settings turns it off. It is off unless
+the settings turn it on. `parse_key` says which keys can be the record key: a function key, or a letter or digit held with Ctrl or
+Alt, so that it cannot be typed by accident. While a recording runs and the window is not the active one, `ui/badge.py` shows a small
+sign on top of everything, which takes no focus. A window built without a `GlobalKey` (every test and `tools/shoot.py`) keeps the
+key as an ordinary shortcut, so nothing but the real program ever takes a key from the machine it runs on.
+
+`ui.run()` sets the look before the window is built: the language (`i18n.use`), the theme (`palette.use`) and the size, which is
+Qt's `QT_SCALE_FACTOR`, read as the application starts. That is why Settings says they apply at the next start.
+
+The installed program is not frozen into an `.exe`. `tools/build_installer.py` puts a relocatable CPython (fetched by `uv`) and the
+pinned packages in a folder, removes what the window does not use from Qt and Python, and opens the real window from that folder as
+a test, before Inno Setup packs it (`installer/voice-slate.iss`). A real Python is what lets `setup-transcripts.bat` make its
+environment there too, Qt stays a plain library that can be replaced, and virus scanners flag it less often than a frozen program.
+It installs per user, so the program folder is writable.
 
 ## Keeping the person's audio safe
 
@@ -171,9 +207,29 @@ None of these changes a kept clip, and none goes online.
 - **Export manifest** is `manifest.collect` and `manifest.write`. A row is built from each sidecar, read by the rules of
   the library (a name that leaves the sidecar's folder is refused), and the WAV is hashed again; a clip that does not
   check out is left out and named. The escaping is described in [Clip format](clip-format.md#manifest-files).
+- **Export dataset** is `dataset.Export`, fed the rows of `manifest.collect` one at a time by `session/batch.py`. Made from the
+  original, a clip goes through `render.export_samples` again at the rate asked for, with the recipe in its sidecar.
+- **Moving an output folder** is `store.Relocation`: every file is copied and compared, and the old files go only when all of them
+  have arrived. Stopped or failed on the way, the copies are removed and the old folder stays in use.
 - **Drag out** is in `ui/library.py`. A kept card pulled past `startDragDistance` emits `dragRequested`, and the panel
   starts a `QDrag` carrying the file URL of the WAV, offered `CopyAction` only. `run_drag` is the seam the tests use,
   because `QDrag.exec` waits for a real mouse; the drop itself is the system's, and is not tested.
+
+## Long sessions
+
+- **The script** (`session/script.py`) is remembered in `script.json` beside the settings. What has been done of it is never stored:
+  `Script.progress` counts `take.meta['script_line']` over the takes of the speaker in front, so it cannot go stale.
+- **Many takes at once** (`session/batch.py`) run in `Session.tick`, a slice of 40 ms at a time, on the main thread, because each
+  step changes files and lists the window shows. `Batch.keep` takes a statement the window collected. It goes on each take for its
+  own Keep with `consent_batch`, and comes off again if that Keep fails: the permission is still never remembered.
+- **The reading check** (`core/reading.py`) compares words with `difflib`, without capitals or punctuation, and letter by letter in
+  languages written without spaces. `workspace.reading_of` gives the check for a take, or None when the draft was made before the
+  latest cuts, and `Drafts` asks for a new draft when that happens.
+- **The words** come from the recognizer in seconds of the edited clip, and `Drafts` stores them in seconds of the master, as the
+  edits are. `analysis.quietest_near` moves the edges of a word to the quiet beside it, because the recognizer's times are rough.
+  `ui/words.py` shows them as links in a text view, which gives the keyboard and a screen reader what they need.
+- **Splitting** (`analysis.split_ranges`, `Workspace.split_take`) makes ordinary takes with their own originals, cut in the middle of
+  pauses, and leaves the long take alone.
 
 ## The window
 
@@ -186,10 +242,15 @@ None of these changes a kept clip, and none goes online.
   tests replace with canned answers, so no test can block on a dialog.
 - **`ui/timeline.py`** draws the waveform into a cached pixmap and only redraws the cursor, selection and edits when
   they change. The waveform, spectrogram and overview share one `ViewRange`.
-- **`ui/theme.py`, `palette.py`, `icons.py`** hold the dark theme (one palette, one stylesheet, pixel-sized fonts so the
-  window scales as a whole) and the icons, which are SVG geometry drawn in code.
+- **`ui/theme.py`, `palette.py`, `icons.py`** hold the themes (a palette for each, one stylesheet, pixel-sized fonts so the
+  window scales as a whole) and the icons, which are SVG geometry drawn in code. No colour is written anywhere else, and
+  `tests/test_ui_access.py` measures the contrast of each theme.
+- **`i18n.py`, `ui/translate.py`** translate the window. The English text is the key. The helpers in `ui/widgets.py` translate what
+  they are given, and `translate_tree` goes over a finished window or dialog, so most code simply writes English. A text built from
+  values stays in English until it is written with `{}` fields and `tr(...).format(...)`. `tools/strings.py` lists what a language
+  lacks, and the tests refuse an entry whose fields differ from the English.
 - **`ui/toolbar.py`** collapses labels, then icons, then buttons into a "more" menu as the window narrows, so nothing is
-  clipped at the minimum size of 1100 by 700.
+  clipped at the minimum size of 1100 by 600.
 
 ## Tests
 
@@ -221,5 +282,10 @@ its key to `SHOWN_AFTER`, so the card says what changes, and test it on generate
 **A new keep rule.** Change `audio_core.keep_problems` and the checklist in `session/workspace.readiness`; they must agree,
 because the checklist is what the person sees and `keep_problems` is what enforces it. The permission, origin and
 allowed-use rules are not to be loosened: see [Responsible use](responsible-use.md).
+
+**A new purpose.** Add it to `audio_core.PURPOSES`. Everything else reads the rules from there.
+
+**A new language.** Add it to `i18n.LANGUAGES` and `WINDOWS_LANGUAGES`, and put a file in `resources/lang`. See
+[CONTRIBUTING.md](../CONTRIBUTING.md#making-a-change).
 
 Each of these needs tests alongside it.

@@ -10,10 +10,11 @@ from helpers import record  # noqa: E402
 from recorder import store  # noqa: E402
 from recorder.ui import theme  # noqa: E402
 from recorder.ui.actions import SPEC  # noqa: E402
+from recorder.ui.library import TakeDelegate  # noqa: E402
 
 
 def cards(window):
-    return [card for card in window.library._cards if not card.isHidden()]
+    return window.library.rows()
 
 
 def three_takes(window, session):
@@ -39,7 +40,7 @@ def test_a_label_replaces_the_take_number_on_its_card(window, session):
     card = cards(window)[0]
     assert card.title == 'Welcome back' and card.named
     assert '12.0 s' in card.sub and 'Mic' not in card.sub
-    assert 'Welcome back' in card.toolTip() and 'Take 1' in card.toolTip() and 'Mic' in card.toolTip()
+    assert 'Welcome back' in card.tip and 'Take 1' in card.tip and 'Mic' in card.tip
 
 
 def test_typing_in_the_label_field_names_the_take_on_its_card(window, session):
@@ -68,11 +69,11 @@ def test_a_long_label_is_cut_with_an_ellipsis_to_fit_the_card(window, session):
     session.workspace.set_meta(label='x' * 80)
     window.flush()
     card = cards(window)[0]
-    room = card.width() - 134
+    room = window.library.list.viewport().width() - 134
     font = theme.ui_font(13, QFont.Weight.DemiBold)
-    shown = card._fit(card.title, font, room)
+    shown = TakeDelegate.fit(card.title, font, room, card.named)
     assert shown.endswith('…') and QFontMetrics(font).horizontalAdvance(shown) <= room + 4
-    assert not card.grab().isNull()                                   # and the card still paints
+    assert not window.library.list.grab().isNull()                    # and the row still paints
 
 
 # ---- the filter box ------------------------------------------------------------------------------------------------------
@@ -181,7 +182,8 @@ def test_a_speaker_name_that_is_taken_is_refused_with_a_message(window, session,
 def test_right_clicking_the_speaker_list_offers_rename_and_new(window, session, dialogs):
     window.library.speakers.customContextMenuRequested.emit(QPoint(5, 5))
     [menu] = dialogs.menus
-    assert [a.text() for a in menu.actions()] == ['Rename speaker...', 'New speaker...']
+    assert [a.text() for a in menu.actions() if a.text()] == ['Rename speaker...', 'Speaker details...', 'New speaker...',
+                                                              'Delete speaker...']
     dialogs.text_answer = 'Sam Rivera'
     menu.actions()[0].trigger()
     window.flush()

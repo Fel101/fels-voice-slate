@@ -4,6 +4,7 @@ Takes are kept by output folder and speaker for the whole session, so switching 
 take that could not be written to disk. The take being edited holds its own text fields (`take.meta`): the window
 writes them as they are typed, so nothing arriving later (a draft transcript, say) can overwrite what was entered.
 """
+import datetime as dt
 from collections import namedtuple
 from pathlib import Path
 
@@ -11,14 +12,26 @@ import numpy as np
 
 from .. import audio_core as ac
 from .. import settings
+from ..core import analysis, reading
+from ..core.edits import words_key
 from ..store import Library, Take, now_iso
 
 Step = namedtuple('Step', 'key label done detail')           # a rule that must be met before Keep
 Advice = namedtuple('Advice', 'key text')                     # something worth knowing that does not block Keep
 Readiness = namedtuple('Readiness', 'steps ready advice')
 
-META_FIELDS = ('transcript', 'origin', 'allowed_use', 'source_url', 'consent_confirmed', 'notes', 'label')
+META_FIELDS = ('transcript', 'origin', 'allowed_use', 'source_url', 'consent_confirmed', 'notes', 'label', 'purpose')
 STATED_FIELDS = ('origin', 'allowed_use')                     # what the permission tick is a statement about
+KEPT_THROUGH_A_SPLIT = ('interrupted', 'dropouts')            # facts about the recording, which each part shares
+
+
+def reading_of(take):
+    """How the take compares with the script line it was read from, or None when there is nothing to compare: no script
+    line, no draft yet, or a draft of the clip as it was before the latest cuts."""
+    line, heard = take.meta.get('script_line'), str(take.meta.get('draft_text') or '')
+    if not line or not heard.strip() or take.meta.get('draft_heard') != words_key(take.history):
+        return None
+    return reading.compare(line, heard)
 
 
 class Workspace:
@@ -30,11 +43,25 @@ class Workspace:
         self.speakers = []              # [(slug, name)], sorted by name
         self.speaker = None             # slug of the selected speaker
         self.takes = []                 # the selected speaker's takes in this folder, newest first
-        self.current = None
+        self._current = None
+        self.purpose = ac.purpose_of(settings.load(settings_file).get('purpose'))     # what new takes are for
         self.closing = False
         self.on_take_added = None       # called with each new take, once it is listed (the session asks for a draft)
         self._session_takes = {}        # (resolved folder, slug) -> that scope's takes
         self._scope = None
+
+    @property
+    def current(self):
+        """The take in front. Its audio stays in memory while it is."""
+        return self._current
+
+    @current.setter
+    def current(self, take):
+        if self._current is not None:
+            self._current.in_use = False
+        self._current = take
+        if take is not None:
+            take.in_use = True
 
     # ---- speakers -----------------------------------------------------------------------------------------------------
 
@@ -76,19 +103,48 @@ class Workspace:
     def ensure_speaker(self):
         return self.add_speaker('My voice')
 
+    def delete_speaker(self, slug, permanent=False):
+        """Remove a speaker, their clips and their release: to the Recycle Bin, or for good when `permanent`. Raises
+        TrashUnavailable, with nothing removed, or ValueError when audio of theirs is only in memory."""
+        if self.is_recording():
+            raise ValueError('Stop the recording before deleting a speaker.')
+        scope = (self.lib.root.resolve(), slug)
+        takes = self.takes if self._scope == scope else self._session_takes.get(scope, [])
+        if any(take.unsaved for take in takes):
+            raise ValueError('A take of this speaker is only in memory. Keep or discard it first.')
+        self.lib.delete_speaker(slug, permanent)
+        self._session_takes.pop(scope, None)
+        if self.speaker == slug:
+            self.takes, self._scope, self.speaker, self.current = [], None, None, None
+        self.refresh_speakers()
+        self._speaker_changed()
+
+    def set_purpose(self, key):
+        """Choose what new takes are for. The takes that exist keep theirs."""
+        self.purpose = ac.purpose_of(key)
+        settings.update({'purpose': self.purpose.key}, self.settings_file)
+        self.bus.notify('settings')
+
     def _speaker_changed(self):
         self.load_speaker_takes()
         self.bus.notify('takes')
-        if self.takes:
-            self.open_take(self.takes[0])
-        else:
+        if not any(self.open_take(take) for take in self.takes):
             self.bus.notify('current')
 
-    def set_root(self, path):
-        """Use another output folder. Refused while recording."""
+    def has_unsaved_takes(self):
+        return any(take.unsaved for takes in [self.takes, *self._session_takes.values()] for take in takes)
+
+    def set_root(self, path, moved=False):
+        """Use another output folder. Refused while recording. `moved` says the recordings went there from the one in use, so
+        no take held here points at a file that is still there."""
         if self.is_recording():
             self.bus.status('Stop the recording before changing the output folder.')
             return False
+        if moved:
+            self._session_takes.pop((self.lib.root.resolve(), self.speaker), None)
+            self._session_takes = {scope: takes for scope, takes in self._session_takes.items()
+                                   if scope[0] != self.lib.root.resolve()}
+            self.takes, self._scope, self.current = [], None, None
         self.lib = Library(path, trash=self.lib.trash)
         settings.update({'root': str(path)}, self.settings_file)
         self.refresh_speakers()
@@ -146,13 +202,13 @@ class Workspace:
             self.bus.notice('warning', 'Nothing captured',
                             'No audio arrived. For system audio, check the device and that something is playing.')
             return None
-        limit = int(ac.MAX_SECONDS * rate)
+        limit = int(self.purpose.record_limit * rate)
         if len(samples) > limit:
             samples = samples[:limit]
         slug = self.speaker
         take = Take(source=source, samples=samples, rate=int(rate), device=device, flags=list(flags),
                     speaker=slug, unsaved=True,
-                    meta={'transcript': script_line or '',
+                    meta={'transcript': script_line or '', 'purpose': self.purpose.key,
                           'transcript_status': 'read_from_script' if script_line else 'typed',
                           'origin': '', 'allowed_use': '', 'consent_confirmed': False, 'source_url': '',
                           'notes': '', 'script_line': script_line})
@@ -174,7 +230,7 @@ class Workspace:
         """Copy a recording from anywhere into the speaker's folder as a take. Returns None, with a notice, on failure."""
         slug = self.speaker or self.ensure_speaker()
         try:
-            take = self.lib.import_file(slug, path)
+            take = self.lib.import_file(slug, path, self.purpose.key)
         except Exception as e:                  # unreadable or unsupported file: say so, keep running
             self.bus.notice('error', 'Could not import', f'{Path(path).name}: {e}')
             return None
@@ -187,8 +243,16 @@ class Workspace:
         return take
 
     def open_take(self, take):
+        """Put a take in front. Returns False, with a notice, when its audio cannot be read: the file may have gone since the
+        list was made."""
+        try:
+            take.samples
+        except OSError as e:
+            self.bus.notice('error', 'Could not open the take', str(e))
+            return False
         self.current = take
         self.bus.notify('current')
+        return True
 
     @staticmethod
     def state_of(take):
@@ -211,12 +275,21 @@ class Workspace:
                 changed = True
                 if key == 'consent_confirmed':
                     take.meta['consent_confirmed_at'] = now_iso() if value else ''
+                    take.meta.pop('consent_batch', None)        # this take's own statement, from here on
         if reworded and take.meta.get('consent_confirmed') and 'consent_confirmed' not in fields:
             # The permission is given for what is written there, so new words need it given again.
             take.meta.update(consent_confirmed=False, consent_confirmed_at='')
+            take.meta.pop('consent_batch', None)
             self.bus.status('The permission applies to what is written there, so tick the box again for the new wording.')
         if changed:
             self.bus.notify('meta', take)
+
+    def use_what_was_heard(self):
+        """Replace the transcript of the open take with what the recognizer heard, when the speaker said something else."""
+        take = self.current
+        heard = str(take.meta.get('draft_text') or '').strip() if take is not None else ''
+        if heard:
+            self.set_meta(transcript=heard)
 
     def confirm_transcript(self):
         take = self.current
@@ -232,14 +305,15 @@ class Workspace:
         meta = take.meta
         text = str(meta.get('transcript') or '').strip()
         steps = []
+        rules = take.purpose
+        length = f'Length {rules.min_seconds:g} to {rules.max_seconds:g} s'
         if derived is None or derived.stats is None:
             detail = 'measuring...' if derived is None else derived.error
-            steps.append(Step('length', 'Length 6 to 40 s', False, detail))
+            steps.append(Step('length', length, False, detail))
             steps.append(Step('audible', 'Not silent', False, detail))
         else:
             seconds, rms = derived.stats['seconds'], derived.stats['rms_dbfs']
-            steps.append(Step('length', 'Length 6 to 40 s', ac.MIN_SECONDS <= seconds <= ac.MAX_SECONDS,
-                              f'{seconds:.1f} s'))
+            steps.append(Step('length', length, rules.min_seconds <= seconds <= rules.max_seconds, f'{seconds:.1f} s'))
             steps.append(Step('audible', 'Not silent', rms >= ac.SILENT_DB, f'{rms:.0f} dB'))
         steps.append(Step('transcript', f'Transcript {ac.TRANSCRIPT_MIN} to {ac.TRANSCRIPT_MAX} characters',
                           ac.TRANSCRIPT_MIN <= len(text) <= ac.TRANSCRIPT_MAX, f'{len(text)} characters'))
@@ -249,7 +323,15 @@ class Workspace:
         steps.append(Step('origin', 'Origin entered', bool(str(meta.get('origin') or '').strip()), ''))
         steps.append(Step('allowed_use', 'Allowed use entered', bool(str(meta.get('allowed_use') or '').strip()), ''))
         steps.append(Step('permission', 'Permission confirmed', meta.get('consent_confirmed') is True, ''))
-        return Readiness(steps, all(s.done for s in steps), self._advice(take, derived, text))
+        slug = take.speaker or self.speaker
+        problem = self.lib.release_problem(slug) if slug else ''
+        if problem:
+            steps.append(Step('release', 'Release in date', False, problem))
+        advice = self._advice(take, derived, text)
+        state, date = self.lib.release_ends(slug) if slug else ('none', '')
+        if state == 'soon':
+            advice.append(Advice('release', f'The release for this voice runs out on {date}.'))
+        return Readiness(steps, all(s.done for s in steps), advice)
 
     @staticmethod
     def _advice(take, derived, text):
@@ -260,8 +342,8 @@ class Workspace:
             advice.append(Advice('changed', 'Changed since it was kept. Your changes are saved, but the kept clip does not '
                                             'have them until you update it.'))
         if derived is not None and derived.stats is not None:
-            advice.extend(Advice(issue.code, issue.text) for issue in ac.take_warnings(derived.stats, take.flags)
-                          if not issue.blocks)
+            advice.extend(Advice(issue.code, issue.text)
+                          for issue in ac.take_warnings(derived.stats, take.flags, take.purpose) if not issue.blocks)
             speech = next((row for row in derived.report or [] if row.key == 'speech'), None)
             if speech is not None and speech.status != 'ok':
                 advice.append(Advice('level', f'Speech is at {speech.value}; the target is '
@@ -270,6 +352,12 @@ class Workspace:
         if draft and text == draft:
             advice.append(Advice('draft', 'The transcript is an automatic draft. Listen to the clip and correct any '
                                           'wrong words.'))
+        check = reading_of(take)
+        if check is not None and reading.differences(check):
+            count = reading.differences(check)
+            advice.append(Advice('reading', f'{count} place{"s" if count != 1 else ""} in the reading '
+                                            f'{"differ" if count != 1 else "differs"} from the script. Listen before you '
+                                            'keep this take.'))
         if take.history.chain['denoise']['enabled']:
             advice.append(Advice('denoise', 'Noise cleaning is on. Listen to the result: the voice identity is not '
                                             'checked.'))
@@ -297,13 +385,16 @@ class Workspace:
         take = self.current
         if take is None:
             return None
-        slug = take.speaker or self.speaker
-        take.meta['transcript_status'] = self._transcript_status(take)
-        paths = self.lib.keep(slug, take)
+        paths = self.keep_take(take)
         self.bus.notify('takes')
         self.bus.notify('meta')
         self.bus.status(f"Kept. Saved to {paths['export']}")
         return paths
+
+    def keep_take(self, take):
+        """Write a take's export and sidecar. Raises KeepBlocked, CleanError or OSError with the reason."""
+        take.meta['transcript_status'] = self._transcript_status(take)
+        return self.lib.keep(take.speaker or self.speaker, take)
 
     def revert(self, take=None):
         """Put a kept take (the open one unless another is given) back as it was kept, dropping the changes made since.
@@ -316,6 +407,56 @@ class Workspace:
         self.open_take(take)
         self.bus.status('Back to the clip as it was kept.')
         return True
+
+    # ---- splitting -----------------------------------------------------------------------------------------------------
+
+    @staticmethod
+    def split_ranges(take):
+        """Where a take would be split: (first, end) sample ranges of the original, cut in the middle of its pauses."""
+        rules = take.purpose
+        return analysis.split_ranges(take.mono, take.rate, rules.best_from, rules.min_seconds, rules.max_seconds)
+
+    def split_take(self, take=None):
+        """Make a new take of each part of a long take, cut in the middle of its pauses. Returns the new takes, the first
+        part first. The long take stays as it is, and its edits stay on it: each part starts from the original recording.
+        Raises OSError when a part cannot be written, with the parts already made left in the list.
+        """
+        take = take or self.current
+        ranges = self.split_ranges(take) if take is not None else []
+        if len(ranges) < 2:
+            return []
+        started = dt.datetime.fromisoformat(take.created)
+        words = take.meta.get('draft_words') or []
+        parts = []
+        for first, end in ranges:
+            begin, stop = first / take.rate, end / take.rate
+            created = (started + dt.timedelta(seconds=begin)).isoformat(timespec='seconds')
+            part = Take(source=take.source, samples=np.array(take.samples[first:end]), rate=take.rate, created=created,
+                        device=dict(take.device), speaker=take.speaker, unsaved=True,
+                        flags=[flag for flag in take.flags if flag in KEPT_THROUGH_A_SPLIT] + ['split'],
+                        meta={'origin': take.meta.get('origin', ''), 'allowed_use': take.meta.get('allowed_use', ''),
+                              'purpose': take.purpose.key,
+                              'split_from': {'take': take.id, 'start_seconds': round(begin, 3), 'end_seconds': round(stop, 3)}})
+            heard = reading.words_between(words, begin, stop)
+            if heard:
+                part.meta.update(transcript=heard, draft_text=heard, transcript_status='asr_draft',
+                                 draft_heard=words_key(part.history),
+                                 draft_words=[(word, round(a - begin, 3), round(b - begin, 3)) for word, a, b in words
+                                              if begin <= (a + b) / 2 < stop])
+                part.draft_key = words_key(part.history)
+            self.lib.save_master(take.speaker or self.speaker, part)
+            self.lib.autosave(part)
+            parts.append(part)
+            self.takes.append(part)
+        self.takes.sort(key=lambda t: t.created, reverse=True)
+        self._remember_takes()
+        self.bus.notify('takes')
+        self.open_take(parts[0])
+        for part in parts:
+            if not part.meta['transcript'] and self.on_take_added is not None:
+                self.on_take_added(part)
+        self.bus.status(f'Split into {len(parts)} takes. The long take is still there: discard it once you have what you want.')
+        return parts
 
     def move_take(self, slug, take=None):
         """File a take (the open one unless another is given) under another speaker. Returns the old files that could
@@ -356,14 +497,21 @@ class Workspace:
         take = self.current
         if take is None:
             return False
+        self.discard_take(take, permanent)
+        self.bus.status('Take deleted.' if permanent else 'Take moved to the Recycle Bin.')
+        return True
+
+    def discard_take(self, take, permanent=False):
+        """Move a take's files to the Recycle Bin (or delete them) and drop it. Raises TrashUnavailable."""
         self.lib.discard(take, permanent=permanent)
         if take in self.takes:
             self.takes.remove(take)
-        self.current = None
+        was_open = take is self.current
+        if was_open:
+            self.current = None
         self.bus.notify('takes')
-        self.bus.notify('current')
-        self.bus.status('Take deleted.' if permanent else 'Take moved to the Recycle Bin.')
-        return True
+        if was_open:
+            self.bus.notify('current')
 
     def close(self):
         """Write every original that is still only in memory, in every folder and for every speaker.

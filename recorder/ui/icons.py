@@ -40,6 +40,7 @@ SHAPES = {
     'auto_trim': ('<path d="M3.5 5v14M20.5 5v14M7.5 12h4M9.5 9.5 12 12l-2.5 2.5M16.5 12h-4M14.5 9.5 12 12l2.5 2.5" '
                   '{stroke}/>', STROKE),
     'shorten': ('<path d="M12 3.5v5M12 20.5v-5M9 6l3 3 3-3M9 18l3-3 3 3M4 12h4M16 12h4" {stroke}/>', STROKE),
+    'split': ('<path d="M12 3.5v17M8 8l-4 4 4 4M16 8l4 4-4 4" {stroke}/>', STROKE),
     # view
     'zoom_in': ('<circle cx="10.5" cy="10.5" r="6.5" {stroke}/><path d="m15.5 15.5 5 5M10.5 7.8v5.4M7.8 10.5h5.4" '
                 '{stroke}/>', STROKE),
@@ -100,6 +101,7 @@ def icon(name, color='text', size=18):
 
 
 APP_ICON_SIZES = (16, 24, 32, 48, 64, 128, 256)
+APP_BACK, APP_BARS = '#b18cff', '#17121f'           # the program's icon is the same in every theme
 
 
 def app_pixmap(size):
@@ -109,9 +111,9 @@ def app_pixmap(size):
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
     painter.setPen(Qt.PenStyle.NoPen)
-    painter.setBrush(QColor(palette.PALETTE['accent']))
+    painter.setBrush(QColor(APP_BACK))
     painter.drawRoundedRect(QRectF(0, 0, size, size), size * 0.22, size * 0.22)
-    painter.setBrush(QColor(palette.PALETTE['ink']))
+    painter.setBrush(QColor(APP_BARS))
     heights = (0.28, 0.5, 0.74, 0.44, 0.6, 0.32)
     slot = size * 0.64 / len(heights)
     for i, h in enumerate(heights):

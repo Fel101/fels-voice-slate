@@ -177,7 +177,7 @@ def test_palette_names_become_colours(qapp):
     assert palette.color('accent', 100).alpha() == 100 and palette.color('#336699').name() == '#336699'
     assert palette.hex_of('not a name') == 'not a name'
     for name, value in palette.PALETTE.items():
-        assert palette.color(name).isValid(), name
+        assert name.endswith('_rgb') or palette.color(name).isValid(), name       # those two are for the stylesheet's rgba()
 
 
 def test_every_icon_draws_in_both_states(qapp):
@@ -242,5 +242,5 @@ def test_nothing_is_clipped_at_the_smallest_window(window, session, open_fake, q
 
 
 def test_the_window_has_the_documented_minimum_size(window):
-    assert (window.minimumWidth(), window.minimumHeight()) == (1100, 700)
+    assert (window.minimumWidth(), window.minimumHeight()) == (1100, 600)
     assert window.editor_panel.stack.count() == 3 and window.editor_panel.EMPTY == 0 and EditorPanel.LIVE == 2

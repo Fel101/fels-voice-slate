@@ -19,7 +19,7 @@ from recorder.ui.inspector import Inspector  # noqa: E402
 
 
 def cards(window):
-    return [card for card in window.library._cards if not card.isHidden()]
+    return window.library.rows()
 
 
 # ---- what the window shows ----------------------------------------------------------------------------------------------
@@ -204,7 +204,7 @@ def test_keep_reports_a_failed_write(window, session, dialogs):
     window.flush()
     assert not take.kept and dialogs.notices[-1].level == 'error' and dialogs.notices[-1].title == 'Could not write the files'
     assert take.stem in dialogs.notices[-1].text
-    assert window.library._cards[0].status == 'In review'
+    assert cards(window)[0].status == 'In review'
     assert window.inspector.ready.keep.text().startswith('Keep clip')
     obstacle.rmdir()
     window.keep()
@@ -216,16 +216,16 @@ def test_a_card_says_when_a_kept_clip_has_changes_it_does_not_hold(window, sessi
     fill(session)
     window.keep()
     window.flush()
-    assert window.library._cards[0].status == 'Kept'
+    assert cards(window)[0].status == 'Kept'
     session.editor.set_selection(2.0, 3.0)
     session.editor.cut_selection()
     window.flush()
-    card = window.library._cards[0]
-    assert card.status == 'Changed' and 'Changed since it was kept' in card.toolTip()
+    card = cards(window)[0]
+    assert card.status == 'Changed' and 'Changed since it was kept' in card.tip
     assert any(advice.key == 'changed' for advice in session.workspace.readiness().advice)
     session.editor.undo()
     window.flush()
-    assert window.library._cards[0].status == 'Kept' and take.kept
+    assert cards(window)[0].status == 'Kept' and take.kept
 
 
 def test_the_take_menu_offers_a_way_back_to_the_kept_clip_only_when_there_is_one(window, session, dialogs):
@@ -245,7 +245,7 @@ def test_the_take_menu_offers_a_way_back_to_the_kept_clip_only_when_there_is_one
     dialogs.confirm_answer = True
     action.trigger()
     window.flush()
-    assert not take.changed and take.history.edits == [] and window.library._cards[0].status == 'Kept'
+    assert not take.changed and take.history.edits == [] and cards(window)[0].status == 'Kept'
 
 
 def test_going_back_says_so_when_it_cannot(window, session, dialogs):
@@ -417,6 +417,7 @@ def test_settings_are_saved_only_when_the_dialog_is_accepted(window, session, di
     new_root = tmp_path / 'elsewhere'
     dialogs.settings_answer = {'root': str(new_root), 'tail_seconds': 0.25, 'ffmpeg': None, 'asr_python': None,
                                'asr_model': None}
+    dialogs.confirm_answer = False                              # the recordings stay where they are
     window.open_settings()
     assert settings.load(session.settings_file)['tail_seconds'] == 0.25
     assert session.capturing.tail_seconds == pytest.approx(0.25)
@@ -610,12 +611,12 @@ def test_every_field_of_the_clip_page_can_be_scrolled_into_view_in_a_small_windo
     reachable = set()
     for value in [*range(0, bar.maximum(), 5), bar.maximum()]:
         bar.setValue(value)
-        for name in ('transcript', 'origin', 'allowed', 'source_url', 'consent', 'copy_path'):
+        for name in ('transcript', 'origin', 'allowed', 'source_url', 'copy_path'):
             field = getattr(clip, name)
             top = field.mapTo(scroll.viewport(), field.rect().topLeft()).y()
             if 0 <= top and top + field.height() <= scroll.viewport().height():
                 reachable.add(name)
-    assert reachable == {'transcript', 'origin', 'allowed', 'source_url', 'consent', 'copy_path'}
+    assert reachable == {'transcript', 'origin', 'allowed', 'source_url', 'copy_path'}
 
 
 def test_a_first_window_fits_the_screen_but_never_goes_below_the_minimum(qapp, monkeypatch):
@@ -632,5 +633,5 @@ def test_a_first_window_fits_the_screen_but_never_goes_below_the_minimum(qapp, m
         return MainWindow._first_size()
 
     assert on_screen(3840, 2000) == QSize(1440, 900)
-    assert on_screen(1366, 728) == QSize(1306, 700)
-    assert on_screen(800, 480) == QSize(1100, 700)
+    assert on_screen(1366, 728) == QSize(1306, 668)
+    assert on_screen(800, 480) == QSize(1100, 600)

@@ -6,7 +6,7 @@ JSON file, so no special reader is needed.
 ## Folder layout
 
 ```text
-voice-clips\                                    the output folder: beside the program by default (Settings > Output folder)
+voice-clips\                                    the output folder: in your own folder by default (Settings > Output folder)
   speakers.json                                 the list of speakers
   my-voice\                                     one folder per speaker
     masters\
@@ -14,6 +14,9 @@ voice-clips\                                    the output folder: beside the pr
       20261020-161204_mic_3f9a1c2e.autosave.json  work in progress on a take that is not kept yet (temporary)
     20261020-161204_mic_3f9a1c2e.wav            the kept clip
     20261020-161204_mic_3f9a1c2e.json           the sidecar for the kept clip
+    release\
+      release.json                              what is on record about the speaker's signed release
+      signed-release.pdf                        the signed release itself
 ```
 
 A clip's three files share a name: `YYYYMMDD-HHMMSS_<source>_<id>`, the local date and time the take was made, the source
@@ -23,11 +26,12 @@ nothing is overwritten.
 | File | What it is |
 |---|---|
 | `masters\*.raw.wav` | The original recording, written the moment recording stops (or a file is imported). **24-bit PCM at the device's own sample rate**, one or two channels. It is never modified. A master with no sidecar next to it is a take that has not been kept yet. |
-| `*.wav` | The **kept clip**: edited, processed and resampled to **24 kHz, mono, 16-bit PCM**. This is the file to hand to other tools. |
+| `*.wav` | The **kept clip**: edited, processed and resampled, mono PCM. A Reference or a Sentence is **24 kHz, 16-bit**, and an Audition **up to 48 kHz, 24-bit**, never above the rate it was recorded at. `export` in the sidecar says which. This is the file to hand to other tools. |
 | `*.json` | The **sidecar**, described below. |
 | `masters\*.autosave.json` | **Temporary, and not part of the format.** The cuts, processing settings and text of a take that Keep has not written yet, saved so that a crash or a close loses nothing. That includes a kept clip changed since, whose WAV and sidecar stay as they were until Keep. Voice Slate deletes it when the clip is kept, and it never holds the permission tick. It sits in `masters`, not beside the sidecars, and its `schema` is not `voice-recorder-clip-*`, so a program that reads the clips as described [below](#reading-the-clips-from-another-program) never meets it. |
 | `masters\*.spool` | **Temporary, and not part of the format.** A take while it is being recorded: one line of JSON, then the samples as 32-bit floats. It is gone once the original is written. One that is still there when the program starts is a take that was cut short, and becomes a take. |
 | `speakers.json` | `{ "my-voice": { "name": "My voice", "origin": "...", "allowed_use": "..." } }`. The origin and allowed use remembered for each speaker. The key is the folder name. |
+| `release\release.json` | Optional. `{ "schema": "voice-slate-release-v1", "file": "signed-release.pdf", "sha256": "...", "signed": "2026-09-02", "expires": "2027-09-02", "notes": "...", "recorded": "..." }`. Dates are `YYYY-MM-DD`, or empty. An earlier release file stays in the folder when a new one is put on record. |
 
 ## The sidecar
 
@@ -36,11 +40,12 @@ A UTF-8 JSON object. An example, written compactly (the program writes it with o
 ```json
 {
   "schema": "voice-recorder-clip-v2",
-  "software": { "name": "voice-slate", "version": "0.4.0" },
+  "software": { "name": "voice-slate", "version": "0.5.0" },
   "id": "3f9a1c2e",
   "created": "2026-10-20T16:12:04+01:00",
   "speaker": "my-voice",
   "source": "mic",
+  "purpose": "reference",
   "device": { "name": "Studio Microphone", "hostapi": "Windows WASAPI", "native_rate": 48000, "channels": 1 },
   "export": {
     "file": "20261020-161204_mic_3f9a1c2e.wav",
@@ -89,6 +94,7 @@ A UTF-8 JSON object. An example, written compactly (the program writes it with o
 | `id`, `created` | The take's id, and when it was made (ISO 8601 with the local UTC offset). |
 | `speaker` | The speaker's folder name. |
 | `source` | `mic`, `system` (what the computer played), or `import` (a file brought in). |
+| `purpose` | What the clip is for: `reference`, `sentence` or `audition`, which set its length rules and format. Clips kept by earlier versions do not have it, and are references. |
 | `device` | What captured the audio: the device name, the Windows audio interface, the native sample rate and channel count. For an imported file, only its file name. |
 | `export` | The kept WAV: its file name (in the same folder), format, duration, and the **SHA-256** of its bytes, so you can check a file has not changed since it was kept. |
 | `master` | The original recording: its path relative to the sidecar's folder, and its format. |
@@ -98,6 +104,8 @@ A UTF-8 JSON object. An example, written compactly (the program writes it with o
 | `origin`, `allowed_use` | The person's own words: where the recording came from, and what the voice may be used for. |
 | `consent_confirmed` | Always `true` in a kept clip. Voice Slate will not write a sidecar otherwise. It is the person's statement that they have the right to use the voice, **not** a verified or legal consent record. Changing the `origin` or `allowed_use` of a kept clip needs the statement made again. |
 | `consent_confirmed_at` | When the person made that statement (ISO 8601 with the local UTC offset). Clips kept by earlier versions do not have it. |
+| `consent_batch` | Optional. Present when the statement was made once for several takes kept together: how many it covered. Each clip's sidecar still holds the statement, and the time is the same on all of them. |
+| `release` | Optional. The speaker's signed release when the clip was kept: `file` (relative to the sidecar's folder), `sha256`, `signed` and `expires` (`YYYY-MM-DD`), each `null` if there was none. It is a pointer to what the person holds, **not** a verified legal document. |
 | `source_url` | An optional link to the original, or `null`. |
 | `master_seconds` | The length of the original recording. |
 | `edits` | The edit list, below. |
@@ -105,9 +113,13 @@ A UTF-8 JSON object. An example, written compactly (the program writes it with o
 | `chain` | The processing settings, below. |
 | `needs_transcript_review` | Always `false` in a kept clip: Keep requires the transcript to be confirmed after cuts. |
 | `notes` | Free text. |
-| `flags` | Facts about the take, worked out again at each Keep: `edited`, `filtered` (high-pass or hum notch on), `cleaned` (noise reduction on), `level_changed`, `limited` (limiter on), `clipped` (a sample of the kept clip, or of the recording it was made from, reaches full scale), `interrupted` (the device stopped while recording, or the program did), `dropouts` (the device reported losing audio while recording). |
+| `flags` | Facts about the take, worked out again at each Keep: `edited`, `filtered` (high-pass or hum notch on), `cleaned` (noise reduction on), `level_changed`, `limited` (limiter on), `clipped` (a sample of the kept clip, or of the recording it was made from, reaches full scale), `interrupted` (the device stopped while recording, or the program did), `dropouts` (the device reported losing audio while recording), `split` (a part of a longer take). |
 | `label` | Optional. A name the person gave the take to find it by: one line, at most 80 characters. The field is absent when the take has no label. It can change after the clip was kept (renaming a kept take rewrites only this field of the sidecar), and the WAV never changes with it, so the SHA-256 in `export` still holds. |
 | `moves` | Optional. Present only on a clip that was moved to another speaker: a list, oldest first, of `{ "from": "<speaker folder>", "to": "<speaker folder>", "at": "<ISO 8601 time>" }`. `speaker` always names where the clip is now. The WAV is the same bytes, so the SHA-256 in `export` still holds. |
+| `script_line` | Optional. The line of a script the take was read from, exactly as it stood. |
+| `words` | Optional. What the speech recognizer heard, as `[word, start, end]` rows, with times in seconds on the master's timeline. A draft: the words can be wrong, and the times are rough. Present when the take had a draft. |
+| `split_from` | Optional. On a part of a take that was split: `{ "take": "<id of the long take>", "start_seconds": ..., "end_seconds": ... }`, on that take's timeline. |
+| `dataset` | Only on the copy of a sidecar in an exported dataset: `{ "made_from": "original" }` or `"kept clip"`. There, `export` describes the WAV in the dataset, and `master` still names the file in the library, which is not part of the dataset. |
 
 ### Edits
 
@@ -125,8 +137,8 @@ original, whatever order they were made in.
 
 The kept clip is built from the master in a fixed order: the master is mixed down to mono; silence, fades and region
 gain are applied; the cuts are made and joined; then the chain below runs (high-pass, hum notch, noise reduction, gain,
-limiter); and last the clip is resampled to 24 kHz, with the limiter, if it is on, applied once more at that rate so
-that resampling cannot push a peak above its ceiling.
+limiter); and last the clip is resampled to the rate it is kept at, with the limiter, if it is on, applied once more at that
+rate so that resampling cannot push a peak above its ceiling.
 
 | Section | Settings |
 |---|---|
@@ -181,14 +193,17 @@ keep, move or discard clips. Choose JSON Lines (`.jsonl`, one JSON object per li
 | `duration` | The length in seconds to three decimals, read from the WAV. |
 | `speaker`, `speaker_id` | The speaker's name as shown, and the speaker's folder name. |
 | `label` | The take's label, or empty. |
-| `sample_rate` | Of the WAV: 24000. |
+| `sample_rate` | Of the WAV. |
 | `source`, `created`, `id` | As in the sidecar: `mic`, `system` or `import`; when the take was made; the take's id. |
 | `origin`, `allowed_use`, `transcript_status` | As in the sidecar. |
 | `sha256` | The SHA-256 of the WAV, checked against the sidecar's when the manifest was written. |
+| `purpose` | `reference`, `sentence` or `audition`. |
+| `release_signed`, `release_expires` | The dates of the speaker's signed release, or empty. |
 
 `audio_filepath`, `text` and `duration` are the names that speech toolkits such as NeMo read. A clip is only listed when
-its sidecar can be read and records the permission, and its WAV is next to it, readable, and still the file that was
-kept; any other clip is left out and named to the person who exports. The file is UTF-8 with no byte-order mark, so the
+its sidecar can be read and records the permission, its WAV is next to it, readable, and still the file that was
+kept, and the speaker's release, if there is one, has not run out; any other clip is left out and named to the person who
+exports. The file is UTF-8 with no byte-order mark, so the
 first column name is exactly `audio_filepath`.
 
 - **JSON Lines**: one object per line, the keys in the order above. The characters U+2028, U+2029 and U+0085, which some
@@ -198,6 +213,27 @@ first column name is exactly `audio_filepath`.
   and `sha256`; the JSON Lines file never changes a text. Excel opens a CSV that has no byte-order mark as if it were in
   the local code page, so accented letters can come out wrong when you double-click the file; use *Data > From Text/CSV*
   and choose UTF-8.
+
+## Datasets
+
+**Export dataset...** writes a new folder, and nothing in the library changes. The clips in it are the ones a manifest would list.
+
+```text
+my-dataset\                     Clips with their sidecars
+  manifest.jsonl                every clip, as above, with paths relative to this folder
+  my-voice\
+    20261020-161204_mic_3f9a1c2e.wav
+    20261020-161204_mic_3f9a1c2e.json
+
+my-dataset\                     LJSpeech
+  metadata.csv                  one clip per line: name|text|text
+  manifest.jsonl                the same, with the origin and allowed use of each clip
+  wavs\
+    my-voice_20261020-161204_mic_3f9a1c2e.wav
+```
+
+In `metadata.csv` the first column is the file's name without `.wav`, and the second and third are the transcript on one line, with
+any `|` replaced by a space. The LJSpeech layout's WAVs are mono and 16-bit; in the other layout an audition stays 24-bit.
 
 ## Older sidecars
 

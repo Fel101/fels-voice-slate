@@ -11,7 +11,7 @@ from math import gcd
 import numpy as np
 from scipy.signal import resample_poly
 
-EXPORT_RATE = 24000
+EXPORT_RATE = 24000             # the kept clip of a Reference or a Sentence; see PURPOSES
 MIN_SECONDS = 6.0               # below this a clip cannot be kept as a reference
 TARGET_MIN_SECONDS = 10.0       # the range the meter marks green
 TARGET_MAX_SECONDS = 25.0       # above this a warning, still fine up to the hard maximum
@@ -28,6 +28,51 @@ FRAME_SECONDS = 0.02
 SILENCE_FRAME_DB = -45.0        # a 20 ms frame quieter than this counts as silence
 MOSTLY_SILENT = 0.40
 TRANSCRIPT_MIN, TRANSCRIPT_MAX = 3, 600     # characters; a clip needs a transcript of this length to be kept
+
+
+@dataclass(frozen=True)
+class Purpose:
+    """What the clips are for, which decides how long they may be and how they are kept.
+
+    `record_limit` is longer than `max_seconds` on purpose: a take that runs over is trimmed or split afterwards, so a
+    recording never stops in the middle of a sentence just because it passed the length a kept clip can have.
+    """
+    key: str
+    name: str
+    a_name: str                 # the name in a sentence: "kept as a reference"
+    about: str
+    min_seconds: float          # shorter clips cannot be kept
+    best_from: float            # the range the meter marks green
+    best_to: float
+    max_seconds: float          # longer clips cannot be kept
+    record_limit: float         # a recording stops by itself here
+    export_rate: int
+    bit_depth: int
+    own_rate: bool = False      # never above the recording's own rate: resampling up adds no detail
+
+    def rate_for(self, recorded_rate):
+        """The sample rate a clip recorded at `recorded_rate` is kept at."""
+        return min(self.export_rate, int(recorded_rate)) if self.own_rate else self.export_rate
+
+    @property
+    def subtype(self):
+        return f'PCM_{self.bit_depth}'
+
+
+PURPOSES = {
+    'reference': Purpose('reference', 'Reference', 'a reference', 'One good clip of a voice, for a text-to-speech tool',
+                         MIN_SECONDS, TARGET_MIN_SECONDS, TARGET_MAX_SECONDS, MAX_SECONDS, 120.0, EXPORT_RATE, 16),
+    'sentence': Purpose('sentence', 'Sentence', 'a sentence', 'One sentence per take, for a dataset or voice banking',
+                        1.0, 2.0, 10.0, 15.0, 60.0, EXPORT_RATE, 16),
+    'audition': Purpose('audition', 'Audition', 'an audition', 'A full performance, kept at the best quality',
+                        3.0, 30.0, 180.0, 600.0, 900.0, 48000, 24, own_rate=True),
+}
+DEFAULT_PURPOSE = 'reference'
+
+
+def purpose_of(key):
+    """The Purpose named `key`. Anything else, such as a clip kept before purposes existed, is a Reference."""
+    return PURPOSES.get(key, PURPOSES[DEFAULT_PURPOSE]) if isinstance(key, str) else PURPOSES[DEFAULT_PURPOSE]
 
 
 def to_mono(x):
@@ -213,16 +258,20 @@ class Issue:
     code: str = ''
 
 
-def take_warnings(stats, flags=()):
-    """Warnings for a measured take. Items with blocks=True stop Keep."""
+def take_warnings(stats, flags=(), purpose=None):
+    """Warnings for a measured take, by the length rules of its purpose (a Reference's if none is given). Items with
+    blocks=True stop Keep."""
     seconds = stats['seconds']
+    rules = purpose or PURPOSES[DEFAULT_PURPOSE]
     items = []
-    if seconds < MIN_SECONDS:
-        items.append(Issue(f'Too short ({seconds:.1f} s; 6 s minimum): cannot be kept as a reference', True, 'short'))
-    if seconds > MAX_SECONDS:
-        items.append(Issue(f'Too long ({seconds:.1f} s; 40 s maximum): cannot be kept', True, 'long'))
-    elif seconds > TARGET_MAX_SECONDS:
-        items.append(Issue(f'Long ({seconds:.1f} s): fine up to 40 s, 10 to 25 s works best', False, 'target'))
+    if seconds < rules.min_seconds:
+        items.append(Issue(f'Too short ({seconds:.1f} s; {rules.min_seconds:g} s minimum): cannot be kept as {rules.a_name}',
+                           True, 'short'))
+    if seconds > rules.max_seconds:
+        items.append(Issue(f'Too long ({seconds:.1f} s; {rules.max_seconds:g} s maximum): cannot be kept', True, 'long'))
+    elif seconds > rules.best_to:
+        items.append(Issue(f'Long ({seconds:.1f} s): fine up to {rules.max_seconds:g} s, {rules.best_from:g} to '
+                           f'{rules.best_to:g} s works best', False, 'target'))
     if stats['rms_dbfs'] < SILENT_DB:
         items.append(Issue('Silent: cannot be kept', True, 'silent'))
     elif stats['rms_dbfs'] < QUIET_DB:

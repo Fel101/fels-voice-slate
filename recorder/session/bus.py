@@ -1,8 +1,9 @@
 """Messages from the session to whatever shows it: a topic name and an optional payload.
 
 Topics: status, notice, speakers, devices, takes, current, meta, edits, selection, playhead, recording, transport,
-analysis, script, settings. A listener refreshes whatever it draws from the topic it hears; the session never
-calls into a window. `meta` carries the take whose text changed when it was a change worth saving.
+analysis, thumb, script, settings. A listener refreshes whatever it draws from the topic it hears; the session never
+calls into a window. `meta` carries the take whose text changed when it was a change worth saving, and `thumb` the take
+whose outline has been worked out.
 """
 from collections import namedtuple
 

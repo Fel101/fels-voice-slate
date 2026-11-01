@@ -30,9 +30,16 @@ audio:
 The origin and allowed use are remembered for each speaker. The permission box is never remembered, so you are asked
 again for every clip.
 
+When you keep several takes at once, you make that statement once, for the takes listed in front of you. The dialog shows what
+they say about their origin and allowed use, and its box starts empty every time. Each clip records the statement, the time, and
+how many takes it covered, so it stays clear that it was given for a group. It is a convenience for one person reading a long
+script in one voice, not a way around the question: look at the list before you tick the box.
+
 These are **your statements**. The program saves them but cannot check them, and the tick box is not a legal release. It
 is there to make you stop and think, and to leave a record of what you decided and when. For someone else's voice,
-keep a proper written release as well.
+keep a proper written release as well. **Speaker details...** keeps it with their clips, with the date it was signed and the date
+it runs out. Once that date has passed, the program will not keep more clips of that speaker, and leaves theirs out of manifests
+and datasets. It cannot tell whether the file is genuine, and a record of a release is no substitute for reading it.
 
 ## Whose voice you can record
 
@@ -62,9 +69,10 @@ Do not use Voice Slate, or clips made with it, to:
 - make **scam or robocalls**, fake endorsements, or fake statements by real people;
 - **bypass voice authentication** (a bank's or phone's "my voice is my password" check);
 - make **harassing, defamatory or sexual** material about a real person, or any sexual material of a minor;
-- record people **covertly**, or record conversations without the consent the law requires. `F9` can start a recording
-  while another program is in front: the taskbar button flashes and Windows shows its microphone indicator, but that is
-  for your own convenience, not a way to record someone who does not know.
+- record people **covertly**, or record conversations without the consent the law requires. The record key can be set to
+  work while another program is in front. That is off until you turn it on, and then the taskbar button flashes, a sign stays on
+  top of every window while recording, and Windows shows its microphone indicator. It is for your own convenience, not a way
+  to record someone who does not know.
 
 Changes that would make these easier, such as hiding or skipping the consent step, or removing the origin and allowed-use
 fields, will not be accepted into this project.
@@ -74,20 +82,20 @@ fields, will not be accepted into this project.
 A recording of a voice is **personal data**, and a voiceprint can identify a person. Treat it with care:
 
 - **Keep it on your computer.** Voice Slate makes no network connections. Where the files go after that is up to you.
-- **Mind synced folders.** By default the recordings go in a `voice-clips` folder beside the program, which Git ignores.
-  If the program's own folder is one that OneDrive, Dropbox or similar syncs, or cannot be written to, the program uses
-  `C:\Users\<you>\Recordings\voice-clips` instead, outside OneDrive's usual folders on purpose. If you point the output
-  folder at a synced folder yourself, the recordings are copied to that service. Leave `voice-clips` out when you zip or
-  share the program folder.
+- **Mind synced folders.** By default the recordings go in `C:\Users\<you>\Recordings\voice-clips`, outside OneDrive's usual
+  folders on purpose. If you point the output folder at a synced folder yourself, the recordings are copied to that service.
+  A copy from before 0.5 may still have a `voice-clips` folder inside its program folder: leave it out when you zip or share
+  that folder.
 - **Protect the disk.** On a laptop, turn on Windows device encryption or BitLocker, in case it is lost.
 - **Never publish them by accident.** Do not commit recordings to a public repository, post them in an issue, or send them
   in a bug report. This project's `.gitignore` leaves audio out, and bug reports should use synthetic or your own audio.
 - **Share only for the allowed use**, and send the clip's sidecar file with it, so the permission travels with the audio.
-  Dragging a clip out of the window or saving a copy of it sends only the audio, so add the sidecar yourself. A manifest
-  carries each clip's origin and allowed use in its rows, but it is a list of clips, not a release.
+  Dragging a clip out of the window or saving a copy of it sends only the audio, so add the sidecar yourself. A manifest, and the
+  `manifest.jsonl` of a dataset, carry each clip's origin and allowed use in their rows, but they are lists of clips, not
+  releases. Do not train on a dataset for anything its allowed use does not cover.
 - **Delete on request, and when you no longer need them.** **Discard** in the program moves a take's files to the
-  Recycle Bin, which is not a secure erase: empty it. To remove everything for a speaker, delete the speaker's folder.
-  The name stays in the speaker list, empty, until you remove its entry from `speakers.json`.
+  Recycle Bin, which is not a secure erase: empty it. To remove everything for a speaker, use **Delete speaker...**, which moves
+  their whole folder there, with their release. Remember any copies you made: a dataset, a manifest, a saved copy.
 
 ## Rules that may apply to you
 

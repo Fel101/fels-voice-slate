@@ -25,6 +25,7 @@ def test_the_microphone_passes_on_what_the_sound_library_says_it_lost():
 
     backend = cap._MicBackend.__new__(cap._MicBackend)
     backend._sd, backend.device, backend.rate, backend.channels = SimpleNamespace(InputStream=stream), 1, 48000, 1
+    backend.channel, backend._opened = None, 1
     heard = []
     backend.open(lambda block, lost: heard.append(lost))
     silence = np.zeros((480, 1), dtype=np.float32)

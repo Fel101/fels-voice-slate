@@ -1,0 +1,41 @@
+name: Release installer
+
+# Builds the Windows installer when a version tag is pushed and attaches it to the GitHub Release of that tag.
+# It does nothing else: the Release itself, and its notes, are written by hand first.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  installer:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      - name: Install the tools
+        run: |
+          python -m pip install -r requirements-build.txt
+          choco install innosetup --no-progress -y
+
+      - name: Build
+        run: python tools/build_installer.py
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: installer
+          path: build/Fels-Voice-Slate-*-Setup.exe
+
+      - name: Attach it to the Release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$env:GITHUB_REF_NAME" (Get-Item build/Fels-Voice-Slate-*-Setup.exe).FullName --clobber

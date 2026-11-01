@@ -1,8 +1,8 @@
 """The render pipeline: master samples plus a recipe -> the clip, with a stage cache, and the maps between time bases.
 
 Stages, in order: silence, fades and region gain on the master timeline; the cuts and their joins; high-pass and hum
-notch; noise cleaning; gain and the limiter; then, for the export, resampling to 24 kHz. Each stage is cached by
-what decides it, so moving the level slider does not run FFmpeg again.
+notch; noise cleaning; gain and the limiter; then, for the export, resampling to the rate the clip is kept at. Each stage
+is cached by what decides it, so moving the level slider does not run FFmpeg again.
 """
 import json
 import threading
@@ -66,10 +66,12 @@ def apply_regions(x, rate, edits):
 # ---- the pipeline ---------------------------------------------------------------------------------------------------
 
 class RenderCache:
-    """The most recent stage results. Keys say what decided each one, so a stale result is never returned."""
+    """The most recent stage results. Keys say what decided each one, so a stale result is never returned. A long take
+    makes large results, so their size is limited as well as their number."""
 
-    def __init__(self, limit=12):
+    def __init__(self, limit=12, max_bytes=512 << 20):
         self.limit = limit
+        self.max_bytes = max_bytes
         self._items = OrderedDict()
         self._lock = threading.Lock()            # background jobs and the window both use it
 
@@ -84,8 +86,11 @@ class RenderCache:
         with self._lock:
             self._items[key] = value
             self._items.move_to_end(key)
-            while len(self._items) > self.limit:
+            while len(self._items) > self.limit or (len(self._items) > 1 and self._bytes() > self.max_bytes):
                 self._items.popitem(last=False)
+
+    def _bytes(self):
+        return sum(getattr(value, 'nbytes', 0) for value in self._items.values())
 
     def drop(self, ident):
         with self._lock:
@@ -146,19 +151,20 @@ def process(master, rate, recipe, denoise=None, cache=None, ident=None):
     return chain_mod.apply_level(before_level(master, rate, recipe, denoise, cache, ident), rate, recipe.chain)
 
 
-def finish(processed, rate, chain):
-    """A processed clip as the export holds it: 24 kHz, clipped to full scale. Resampling can lift a peak a little above
-    the limiter's ceiling, so with the limiter on the resampled clip gets one more pass (a no-op when it is already under)."""
-    out = ac.resample(processed, rate, ac.EXPORT_RATE)
+def finish(processed, rate, chain, export_rate=ac.EXPORT_RATE):
+    """A processed clip as the export holds it: at `export_rate`, clipped to full scale. Resampling can lift a peak a little
+    above the limiter's ceiling, so with the limiter on the resampled clip gets one more pass (a no-op when it is already
+    under)."""
+    out = ac.resample(processed, rate, export_rate)
     limiter = chain['limiter']
     if limiter['enabled']:
-        out = chain_mod.limit(out, ac.EXPORT_RATE, limiter['ceiling_db'])
+        out = chain_mod.limit(out, export_rate, limiter['ceiling_db'])
     return np.clip(out, -1.0, 1.0).astype(np.float32)
 
 
-def export_samples(master, rate, recipe, denoise=None, cache=None, ident=None):
-    """What the export WAV holds: mono, everything applied, 24 kHz, clipped to full scale."""
-    return finish(process(master, rate, recipe, denoise, cache, ident), rate, recipe.chain)
+def export_samples(master, rate, recipe, denoise=None, cache=None, ident=None, export_rate=ac.EXPORT_RATE):
+    """What the export WAV holds: mono, everything applied, at `export_rate`, clipped to full scale."""
+    return finish(process(master, rate, recipe, denoise, cache, ident), rate, recipe.chain, export_rate)
 
 
 def recorded_clipping(master, rate, recipe):

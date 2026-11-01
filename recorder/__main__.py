@@ -69,7 +69,7 @@ def check():
         drafts = False
     print(f'  {"ok     " if drafts else "absent "}  {"draft transcripts (optional)":40s} '
           f'{"ready" if drafts else "not set up: run setup-transcripts.bat"}')
-    root = data.get('root') or f'{settings.program_dir() / settings.CLIPS_FOLDER}  (the default)'
+    root = data.get('root') or f'{settings.default_root()}  (the default)'
     print(f'\nClips are saved in: {root}\nSettings file: {settings.settings_path()}\nLog file: {launch.log_path()}')
     print('\n' + ('Everything the program needs is installed.' if not missing else 'Something it needs is missing: see above.'))
     return 1 if missing else 0

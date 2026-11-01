@@ -13,20 +13,23 @@ without a display, a microphone or a speaker.
 - `measure`: background measurements, the spectrogram and the peaks for drawing
 - `advisor`: Auto analyze (what could be better, in plain words) and Auto fix (one undo step)
 - `script`: script mode
+- `batch`: keeping, discarding or moving many takes, a slice at a time
 """
 import time
+from pathlib import Path
 
 from .. import clean, settings
 from ..jobs import Jobs
 from ..store import Library
 from .advisor import Advisor
 from .autosave import Autosave
+from .batch import Batch
 from .bus import Bus
 from .capturing import Capturing
 from .drafts import Drafts
 from .editor import Editor
 from .measure import Measurements
-from .script import Script
+from .script import FILE_NAME, Script
 from .transport import Transport
 from .workspace import Workspace
 
@@ -41,14 +44,16 @@ class Session:
         self.jobs.on_unhandled = lambda error: self.bus.status(f'A background task failed: {error}')
         self.workspace = Workspace(self.bus, library or Library(data.get('root') or settings.default_root()),
                                    self.settings_file, is_recording=lambda: self.capturing.recording)
-        self.script = Script(self.bus)
+        self.script = Script(self.bus, Path(self.settings_file).with_name(FILE_NAME))
         self.capturing = Capturing(self.bus, self.workspace, self.script, self.settings_file, clock)
         self.editor = Editor(self.bus, self.workspace)
         self.transport = Transport(self.bus, self.workspace, self.editor, player, clock)
+        self.transport.set_output(data.get('output_device'))
         self.drafts = Drafts(self.bus, self.workspace, self.jobs, self.settings_file, clock)
         self.autosave = Autosave(self.bus, self.workspace, clock)
         self.measure = Measurements(self.bus, self.workspace, self.jobs)
         self.advisor = Advisor(self.bus, self.workspace, self.editor, self.jobs)
+        self.batch = Batch(self.bus, self.workspace, self.script, clock)
         self.workspace.on_take_added = lambda take: self.drafts.request(take, automatic=True)
         self.bus.listen(self._heard)
         self.closed = False
@@ -85,7 +90,8 @@ class Session:
         except Exception as e:                  # a meter or device error must not lose the take; see capture_failed
             self.capturing.capture_failed(e)
         for name, step in (('Playback', self.transport.tick), ('Draft transcript', self.drafts.tick),
-                           ('Autosave', self.autosave.tick), ('Background task', self.jobs.drain)):
+                           ('Autosave', self.autosave.tick), ('Background task', self.jobs.drain),
+                           ('Batch', self.batch.tick)):
             try:
                 step()
             except Exception as e:              # these touch only the display; a failure must not touch the recording
@@ -103,7 +109,8 @@ class Session:
         line = take.meta.get('script_line') if take is not None and not take.kept else None
         paths = self.workspace.keep()
         if paths and line is not None and line == self.script.current:
-            self.script.step(1)
+            if not self.script.go_to_next(self.workspace.takes):
+                self.bus.status('Every line of the script has a kept clip.')
         return paths
 
     def re_record(self):
@@ -124,6 +131,7 @@ class Session:
         self._closing = True
         self.workspace.closing = True
         try:
+            self.batch.cancel()
             self.transport.stop()
             self.capturing.finish_take()
             self.capturing.close_capture()

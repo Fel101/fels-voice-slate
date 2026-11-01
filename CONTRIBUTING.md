@@ -9,8 +9,9 @@ Voice Slate records, tidies and documents clean voice clips on Windows, and keep
 from and whether the person had the right to use the voice. That last part is a requirement, not a feature to trade away.
 
 - **Changes that weaken the consent step will not be merged.** That includes skipping or remembering the permission tick,
-  making the origin, allowed-use or permission fields optional, or filling in the origin or allowed use with anything but
-  the person's own words for that speaker, which are shown for them to check. See [Responsible use](docs/responsible-use.md).
+  making the origin, allowed-use or permission fields optional, filling in the origin or allowed use with anything but
+  the person's own words for that speaker, which are shown for them to check, or letting several takes be kept without the
+  statement being made for what is listed. See [Responsible use](docs/responsible-use.md).
 - **No network access and no telemetry.** The program does not connect to anything. Optional tools (FFmpeg, a speech
   recognizer) run as separate programs. The user installs FFmpeg; the recognizer is installed by
   `setup-transcripts.bat` (`recorder/asr_setup.py`), which downloads only when the user runs it and agrees, and says what
@@ -70,6 +71,17 @@ desktop icon, which starts it with no console, is made by `.venv\Scripts\python 
 
 **Things the tests cannot cover.** A real microphone, system-audio capture and playback depend on the machine. If your
 change touches them, try it by hand and say in the pull request what you tried and on which hardware.
+
+**Translating.** The window's text is in JSON files in `recorder/resources/lang`, with the English as the key. To correct a
+translation, edit the file. To see what a language lacks, run `python tools/strings.py --missing de`. To add a language, add it to
+`LANGUAGES` and `WINDOWS_LANGUAGES` in `recorder/i18n.py` and add its file. A translation must keep the `{fields}` of its English, and
+the tests check that. The first translations (German, Spanish, French) have not been checked by native speakers, so corrections
+are very welcome, above all to the statement of permission, which has to mean exactly what the English means.
+
+**The installer.** `python -m pip install -r requirements-build.txt`, then `python tools/build_installer.py`, with
+[Inno Setup 6](https://jrsoftware.org/isinfo.php) installed. It builds in `build/`, opens the real window from what it built as a
+test, and fails if that does not work. `--no-installer` stops before Inno Setup. A version tag does this on GitHub and attaches the
+installer to the Release (`.github/workflows/release.yml`).
 
 **New dependencies.** Please ask first. A dependency must have a licence compatible with MIT (permissive, or LGPL used as
 an installed library), must be needed by the program, and must be added to `requirements.txt` and

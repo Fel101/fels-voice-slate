@@ -16,9 +16,11 @@ from pathlib import Path
 import soundfile as sf
 
 from . import audio_core as ac
+from .core.reading import clean_words
 
 WORKER = Path(__file__).with_name('asr_worker.py')
 TIMEOUT_SECONDS = 600
+TIMEOUT_PER_SECOND = 3              # and this for each second of the clip: an audition runs for minutes
 SETUP_SCRIPT = 'setup-transcripts.bat'
 NOT_SET_UP = (f'Draft transcripts are not set up: run {SETUP_SCRIPT} in the program folder (it downloads a speech model '
               'once), or see the README. Type the transcript instead.')
@@ -91,20 +93,21 @@ def tidy_draft(text):
 
 # ---- asking the recognizer ---------------------------------------------------------------------------------------------
 
-def suggest(export_samples, python, model, language=None):
-    """Transcribe a 24 kHz mono clip. Returns {'text': ..., 'language': ..., 'duration_seconds': ..., 'tidied': ...}."""
+def suggest(export_samples, python, model, language=None, rate=ac.EXPORT_RATE):
+    """Transcribe a mono clip at `rate`. Returns {'text': ..., 'words': ..., 'language': ..., 'duration_seconds': ...,
+    'tidied': ...}, where `words` is (word, start, end) rows in seconds of this clip."""
     if not available(python, model):
         raise DraftUnavailable(NOT_SET_UP)
     with tempfile.TemporaryDirectory(prefix='recorder-draft-') as tmp:
         clip = Path(tmp) / 'draft.wav'
-        sf.write(str(clip), export_samples, ac.EXPORT_RATE, subtype='PCM_16', format='WAV')
+        sf.write(str(clip), export_samples, int(rate), subtype='PCM_16', format='WAV')
         command = [str(python), '-I', str(WORKER), '--model-dir', str(model), '--audio', str(clip)]
         if language:
             command += ['--language', str(language)]
         try:
             # Windows' own messages arrive in the code page, and one letter of that must not lose the message.
             reply = subprocess.run(command, capture_output=True, text=True, encoding='utf-8', errors='replace',
-                                   timeout=TIMEOUT_SECONDS, check=False,
+                                   timeout=TIMEOUT_SECONDS + TIMEOUT_PER_SECOND * len(export_samples) / rate, check=False,
                                    creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
         except subprocess.TimeoutExpired:
             raise DraftUnavailable('The transcript draft took too long. Type the transcript instead.') from None
@@ -117,5 +120,5 @@ def suggest(export_samples, python, model, language=None):
     except (IndexError, json.JSONDecodeError):
         raise DraftUnavailable('The transcript draft returned nothing readable.') from None
     text, tidied = tidy_draft(str(result.get('text', '')))
-    return {'text': text, 'language': result.get('language'), 'duration_seconds': result.get('duration_seconds'),
-            'tidied': tidied}
+    return {'text': text, 'words': clean_words(result.get('words')), 'language': result.get('language'),
+            'duration_seconds': result.get('duration_seconds'), 'tidied': tidied}

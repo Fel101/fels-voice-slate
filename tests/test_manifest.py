@@ -255,4 +255,4 @@ def test_a_failed_write_leaves_the_earlier_file_and_no_leftover(lib, tmp_path, m
 
 def test_the_fields_of_a_row_match_the_documented_columns():
     assert COLUMNS[:3] == ('audio_filepath', 'text', 'duration')            # the names speech toolkits look for
-    assert len(set(COLUMNS)) == len(COLUMNS) == 14
+    assert len(set(COLUMNS)) == len(COLUMNS) == 17
