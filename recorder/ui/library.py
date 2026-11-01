@@ -1,10 +1,11 @@
 """The left panel: who is speaking, the takes of that speaker, and the import and folder buttons."""
 import datetime as dt
+from pathlib import Path
 
 import numpy as np
-from PySide6.QtCore import QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import QFont, QFontMetrics, QPainter, QPen
-from PySide6.QtWidgets import QLineEdit, QScrollArea, QWidget
+from PySide6.QtCore import QMimeData, QPoint, QPointF, QRectF, Qt, QUrl, Signal
+from PySide6.QtGui import QDrag, QFont, QFontMetrics, QPainter, QPen
+from PySide6.QtWidgets import QApplication, QLineEdit, QScrollArea, QWidget
 
 from ..store import clean_label
 from . import theme
@@ -55,6 +56,7 @@ class TakeCard(QWidget):
 
     clicked = Signal(object)
     contextRequested = Signal(object, object)
+    dragRequested = Signal(object)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -62,6 +64,7 @@ class TakeCard(QWidget):
         self.title = self.sub = self.status = ''
         self.selected = self.live = self.hover = self.named = False
         self.thumb = None
+        self._press = None                  # where the left button went down, until it is let go or a drag starts
         self.setFixedHeight(74)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setMouseTracking(True)
@@ -91,9 +94,21 @@ class TakeCard(QWidget):
 
     def mousePressEvent(self, e):
         if e.button() == Qt.MouseButton.LeftButton and self.take is not None:
+            self._press = e.position().toPoint()
             self.clicked.emit(self.take)
         elif e.button() == Qt.MouseButton.RightButton and self.take is not None:
             self.contextRequested.emit(self.take, e.globalPosition().toPoint())
+
+    def mouseMoveEvent(self, e):
+        """Pulling a kept take's card away from where the button went down offers its clip to whatever it is dropped on."""
+        if self._press is not None and e.buttons() & Qt.MouseButton.LeftButton and self.take is not None \
+                and (e.position().toPoint() - self._press).manhattanLength() >= QApplication.startDragDistance():
+            self._press = None
+            if self.take.kept:
+                self.dragRequested.emit(self.take)
+
+    def mouseReleaseEvent(self, e):
+        self._press = None
 
     def paintEvent(self, event):
         p = QPainter(self)
@@ -161,6 +176,8 @@ class LibraryPanel(QWidget):
         self.setFixedWidth(292)
         self._cards = []
         self._live = None
+        # A real drag waits for the mouse, inside Qt; the tests put something else here.
+        self.run_drag = lambda drag, actions: drag.exec(actions)
         layout = vbox(self, (16, 16, 16, 14), 10)
         layout.addWidget(caption('Speaker'))
         row = hbox(spacing=8)
@@ -241,6 +258,7 @@ class LibraryPanel(QWidget):
             card = TakeCard()
             card.clicked.connect(self.takePicked)
             card.contextRequested.connect(self.takeContext)
+            card.dragRequested.connect(self._drag)
             self._cards.append(card)
             self.cards_layout.insertWidget(len(self._cards) - 1, card)
         return self._cards[index]
@@ -264,7 +282,36 @@ class LibraryPanel(QWidget):
         text = ' '.join(str(take.meta.get('transcript') or '').split())
         if text:
             lines.append(f'"{text[:140]}{"..." if len(text) > 140 else ""}"')
+        if take.kept:
+            lines.append('Drag the card into Explorer or another program to copy the clip.')
         return '\n'.join(lines)
+
+    # ---- dragging a clip out ----
+
+    def make_drag(self, take, source):
+        """The drag that carries a kept clip's WAV file out of the window, or None when the take is not kept or the file is
+        not there."""
+        path = take.export_path
+        if path is None or not Path(path).is_file():
+            return None
+        mime = QMimeData()
+        mime.setUrls([QUrl.fromLocalFile(str(path))])
+        drag = QDrag(source)
+        drag.setMimeData(mime)
+        picture = source.grab()
+        if not picture.isNull():
+            drag.setPixmap(picture.scaledToWidth(min(picture.width(), 240), Qt.TransformationMode.SmoothTransformation))
+            drag.setHotSpot(QPoint(16, 16))
+        return drag
+
+    def _drag(self, take):
+        if self.session.capturing.recording:
+            return
+        card = next((c for c in self._cards if c.take is take and not c.isHidden()), self)
+        drag = self.make_drag(take, card)
+        if drag is not None:
+            # Only copying is offered: whatever the clip is dropped on can copy it but cannot move it out of the library.
+            self.run_drag(drag, Qt.DropAction.CopyAction)
 
     def refresh_takes(self):
         workspace = self.session.workspace

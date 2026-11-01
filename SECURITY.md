@@ -28,7 +28,8 @@ program does read and write files, and it starts other programs, so these are th
   a speaker list whose entries are not plain folder names, are refused, because a clip folder can come from someone else.
   An autosave file (the saved work on a take that is not kept yet) is read the same way: it is used only if it fits the
   original recording it sits beside, and its edits and settings pass the checks a sidecar's do. Keep, which writes files,
-  and Discard, which removes them, act only inside the speaker's folder.
+  and Discard, which removes them, act only inside the speaker's folder, and Move to speaker, which does both, only between
+  two speakers' folders in the output folder. The manifest reads a sidecar by the same rules.
 - **Programs it runs.** Noise reduction runs `ffmpeg.exe`, and draft transcripts run a `python.exe` with a worker script
   (`recorder/asr_worker.py`, started in isolated mode with a local model folder). Their locations come from your
   `settings.json`, or are found on `PATH`. FFmpeg is looked for only in folders that `PATH` names in full, never in the
@@ -36,6 +37,12 @@ program does read and write files, and it starts other programs, so these are th
   started from is not run. **Treat `settings.json` as trusted**, like any configuration that names a
   program: anyone who can change it can make the recorder run a program of their choosing. It is not meant to be taken from
   strangers.
+- **What it writes for you to share.** *Save a copy* and *Export manifest* write one file to a place you choose, under a
+  temporary name first and then renamed, so a failure leaves no half-written file; *Save a copy* refuses a place inside the
+  output folder, and neither changes a kept clip. A CSV manifest puts an apostrophe in front of a text that a spreadsheet
+  would run as a formula. Dragging a kept card out of the window hands that clip's WAV to the program you drop it on, as a
+  copy and nothing else. A manifest holds transcripts and the notes on where each voice came from, so it is personal data
+  too.
 - **What it stores.** Recordings and sidecars are personal data. They are written where you choose, and are not encrypted
   by the program. See [Responsible use](docs/responsible-use.md) for how to look after them.
 - **What else it creates.** `voice-slate.log` (and `voice-slate-crash.log`, only after a crash) beside the settings

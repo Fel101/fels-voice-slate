@@ -3,7 +3,8 @@
 Each original capture is written to `<speaker>/masters/` the moment it is made (Stop, or an imported file), so nothing
 depends on keeping it. Keep writes the 24 kHz export WAV and the sidecar JSON beside it. A capture with no sidecar is
 not kept yet. New names are never overwritten: a clash gets a numeric suffix. A kept take that is kept again rewrites
-only its own export and sidecar. Discarding a take moves its files to the Recycle Bin.
+only its own export and sidecar. Discarding a take moves its files to the Recycle Bin. Moving a take to another speaker
+copies its files and checks the copies before it removes the old ones.
 
 The work on a take that is not kept yet (its cuts, Process settings, text and label) is saved to an autosave file in
 `masters/`, beside the original, shortly after each change, so a crash or a close does not lose it. The take comes back
@@ -16,6 +17,7 @@ import json
 import math
 import os
 import re
+import shutil
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -69,6 +71,15 @@ def send_to_trash(paths):
         raise TrashUnavailable(str(e)) from e
 
 
+def file_sha256(path):
+    """The SHA-256 of a file's bytes, as the sidecars hold it."""
+    digest = hashlib.sha256()
+    with open(path, 'rb') as f:
+        for block in iter(lambda: f.read(1 << 20), b''):
+            digest.update(block)
+    return digest.hexdigest()
+
+
 def slugify(name):
     return re.sub(r'[^a-z0-9]+', '-', str(name).lower()).strip('-')[:48] or 'speaker'
 
@@ -90,6 +101,15 @@ def clean_label(value):
 def _label_of(data):
     label = data.get('label')
     return clean_label(label) if isinstance(label, str) else ''
+
+
+def _moves_of(data):
+    """The `moves` of a sidecar: where the clip was filed before, as {'from', 'to', 'at'} text. Anything else is dropped."""
+    found = data.get('moves')
+    if not isinstance(found, list):
+        return []
+    return [{key: move[key] for key in ('from', 'to', 'at')} for move in found
+            if isinstance(move, dict) and all(isinstance(move.get(key), str) for key in ('from', 'to', 'at'))]
 
 
 # eq=False: a take is compared by identity. The default field-by-field comparison reaches the sample arrays, and
@@ -117,6 +137,7 @@ class Take:
     cache: dict = field(default_factory=dict, repr=False)      # derived data the window reuses: peaks, spectrogram
     restored: bool = field(default=False, repr=False)          # its edits and text came back from an autosave file
     autosave_problem: str = field(default='', repr=False)      # why an autosave file beside its original was not used
+    moves: list = field(default_factory=list, repr=False)      # where a kept clip has been filed before: from, to, at
 
     def __post_init__(self):
         if self.history is None:
@@ -267,8 +288,15 @@ class Library:
     def _write_json(path, data):
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_name(path.name + '.tmp')
-        tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
-        os.replace(tmp, path)
+        try:
+            tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
+            os.replace(tmp, path)
+        except BaseException:
+            try:
+                tmp.unlink(missing_ok=True)         # a failed write leaves no half-written file behind
+            except OSError:
+                pass
+            raise
 
     # ---- original captures --------------------------------------------------------------------------------------------
 
@@ -386,7 +414,7 @@ class Library:
         return takes
 
     @staticmethod
-    def _inside(folder, name):
+    def inside(folder, name):
         """The path a sidecar names, if it lies inside the speaker's folder.
 
         A sidecar can come from someone else, and Keep and Discard write to and remove the files it names, so an
@@ -407,7 +435,7 @@ class Library:
             source, take_id, created = data['source'], data['id'], data['created']
         except (KeyError, TypeError):
             raise SidecarProblem('it is incomplete') from None
-        master_path, export_path = self._inside(folder, master_name), self._inside(folder, export_name)
+        master_path, export_path = self.inside(folder, master_name), self.inside(folder, export_name)
         if not master_path.exists():
             raise SidecarProblem('its master file is missing')
         try:
@@ -428,6 +456,7 @@ class Library:
         take.master_path = master_path
         take.export_path = export_path
         take.sidecar_path = sidecar
+        take.moves = _moves_of(data)
         return take
 
     @staticmethod
@@ -470,7 +499,8 @@ class Library:
     def _unique_stem(self, folder, stem):
         candidate, n = stem, 2
         while (folder / f'{candidate}.wav').exists() or (folder / f'{candidate}.json').exists() \
-                or (folder / 'masters' / f'{candidate}.raw.wav').exists():
+                or (folder / 'masters' / f'{candidate}.raw.wav').exists() \
+                or (folder / 'masters' / f'{candidate}{AUTOSAVE_SUFFIX}').exists():
             candidate, n = f'{stem}-{n}', n + 1
         return candidate
 
@@ -544,7 +574,7 @@ class Library:
         export_tmp = take.export_path.with_name(take.export_path.name + '.tmp')
         sf.write(str(export_tmp), export, ac.EXPORT_RATE, subtype='PCM_16', format='WAV')
         os.replace(export_tmp, take.export_path)
-        sidecar['export']['sha256'] = hashlib.sha256(take.export_path.read_bytes()).hexdigest()
+        sidecar['export']['sha256'] = file_sha256(take.export_path)
         sidecar_tmp = take.sidecar_path.with_name(take.sidecar_path.name + '.tmp')
         sidecar_tmp.write_text(json.dumps(sidecar, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
         os.replace(sidecar_tmp, take.sidecar_path)
@@ -591,6 +621,8 @@ class Library:
         label = clean_label(take.meta.get('label'))
         if label:                                   # a take with no label has no such field, as before
             sidecar['label'] = label
+        if take.moves:                              # nor does a clip that was never moved to another speaker
+            sidecar['moves'] = list(take.moves)
         return sidecar
 
     # ---- work in progress ---------------------------------------------------------------------------------------------
@@ -719,3 +751,138 @@ class Library:
         os.replace(tmp, path)
         take.meta['saved_label'] = label
         return True
+
+    # ---- moving a take to another speaker -----------------------------------------------------------------------------
+
+    def _copy_checked(self, source, destination):
+        """Copy a file and check that the copy is the same bytes. The destination appears whole, or not at all."""
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        tmp = destination.with_name(destination.name + '.tmp')
+        try:
+            shutil.copyfile(source, tmp)
+            if file_sha256(tmp) != file_sha256(source):
+                raise OSError(f'{source.name} could not be copied exactly')
+            os.replace(tmp, destination)
+        except BaseException:
+            try:
+                tmp.unlink(missing_ok=True)
+            except OSError:
+                pass
+            raise
+
+    @staticmethod
+    def _remove_old(paths):
+        """Remove the files a move has left behind, the sidecar first. Returns those that could not be removed.
+
+        If the sidecar itself stays, so does everything else: the old place then still holds a whole clip, which is a
+        duplicate of the moved one but not a broken one.
+        """
+        left = []
+        for index, path in enumerate(paths):
+            try:
+                Path(path).unlink(missing_ok=True)
+            except OSError:
+                if Path(path).exists():
+                    left.append(Path(path))
+                if index == 0:
+                    left.extend(Path(p) for p in paths[1:] if Path(p).exists())
+                    break
+        return left
+
+    def _adopt_defaults(self, take, old, slug):
+        """A take still carrying the origin and allowed use remembered for its old speaker takes the new speaker's."""
+        before, after = self.speaker_defaults(old), self.speaker_defaults(slug)
+        for key in ('origin', 'allowed_use'):
+            if str(take.meta.get(key) or '').strip() == before[key].strip():
+                take.meta[key] = after[key]
+
+    def move_take(self, take, slug):
+        """File a take under another speaker. Returns the old files that could not be removed (none, normally).
+
+        The take's files are copied to the new speaker's folder and checked before any old file is removed, so a whole
+        copy of the take exists at every moment, whatever fails. A kept clip keeps its permission, origin and allowed
+        use; its sidecar is written for the new speaker and gains a `moves` entry saying where it came from. A take that
+        is not kept takes the new speaker's remembered origin and allowed use, unless it was given its own.
+
+        Raises ValueError, in words the person can read, when the take cannot be moved, and OSError when a file cannot
+        be written. In both cases the take is where it was.
+        """
+        if slug not in self.speakers():
+            raise ValueError('That speaker is not in this folder')
+        old = take.speaker
+        if not old:
+            raise ValueError('This take is not filed under a speaker')
+        if slug == old:
+            raise ValueError('The take is already filed under that speaker')
+        master = self._master_file(take)
+        if take.unsaved or master is None or not master.is_file():
+            raise ValueError('The original recording of this take is not saved on disk yet, so the take cannot be moved. '
+                             'Once the folder is writable, Keep writes it.')
+        target = self.folder(slug)
+        if take.kept:
+            return self._move_kept(take, old, slug, target, master)
+        return self._move_unkept(take, old, slug, target, master)
+
+    def _move_unkept(self, take, old, slug, target, master):
+        stem = self._unique_stem(target, master.name[:-len('.raw.wav')])
+        new_master = target / 'masters' / f'{stem}.raw.wav'
+        old_autosave = self._autosave_beside(master)
+        self._copy_checked(master, new_master)
+        before = (take.master_path, dict(take.device), take.speaker, dict(take.meta))
+        try:
+            take.master_path = new_master
+            take.device = {k: v for k, v in take.device.items() if k not in ('legacy_pending', 'file')}
+            take.speaker = slug
+            self._adopt_defaults(take, old, slug)
+            self.autosave(take)
+        except BaseException:
+            take.master_path, take.device, take.speaker = before[:3]
+            take.meta.clear()
+            take.meta.update(before[3])
+            for path in (new_master, self._autosave_beside(new_master)):
+                path.unlink(missing_ok=True)
+            raise
+        return self._remove_old([master, old_autosave])
+
+    def _move_kept(self, take, old, slug, target, master):
+        export, sidecar = Path(take.export_path), Path(take.sidecar_path) if take.sidecar_path else None
+        if sidecar is None or not sidecar.is_file():
+            raise ValueError('The saved description of this clip (its sidecar) is missing, so the clip cannot be moved')
+        if not export.is_file():
+            raise ValueError(f'{export.name} is missing, so the clip cannot be moved')
+        try:
+            data = json.loads(sidecar.read_text(encoding='utf-8'))
+        except ValueError:
+            data = None
+        if not isinstance(data, dict) or not isinstance(data.get('export'), dict) \
+                or not isinstance(data.get('master'), dict):
+            raise ValueError(f'{sidecar.name} cannot be read as a clip description, so the clip cannot be moved')
+        stem = self._unique_stem(target, export.stem)
+        new_master, new_export, new_sidecar = (target / 'masters' / f'{stem}.raw.wav', target / f'{stem}.wav',
+                                               target / f'{stem}.json')
+        made = []
+        try:
+            for source, copy in ((master, new_master), (export, new_export)):
+                self._copy_checked(source, copy)
+                made.append(copy)
+            data['speaker'] = slug
+            data['master']['file'] = f'masters/{new_master.name}'
+            data['export']['file'] = new_export.name
+            moves = _moves_of(data) + [{'from': old, 'to': slug, 'at': now_iso()}]
+            data['moves'] = moves
+            self._write_json(new_sidecar, data)
+            made.append(new_sidecar)
+        except BaseException:
+            for path in made:
+                try:
+                    path.unlink(missing_ok=True)
+                except OSError:
+                    pass
+            raise
+        old_files = [sidecar, export, master]
+        autosave = self.autosave_file(take)
+        if autosave is not None:
+            old_files.append(autosave)
+        take.master_path, take.export_path, take.sidecar_path, take.speaker = new_master, new_export, new_sidecar, slug
+        take.moves = moves
+        return self._remove_old(old_files)

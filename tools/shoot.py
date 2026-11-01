@@ -19,7 +19,8 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-STATES = ['edit', 'process', 'check', 'analyze', 'record', 'empty', 'compact', 'settings', 'about', 'shortcuts']
+STATES = ['edit', 'process', 'check', 'analyze', 'record', 'empty', 'compact', 'settings', 'about', 'shortcuts', 'copy',
+          'manifest']
 SAMPLE = ('The morning ferry left the harbour just as the fog began to lift from the water, and the gulls followed '
           'it out past the lighthouse.')
 SCRIPT = ('The morning ferry left the harbour just as the fog began to lift.\n'
@@ -184,13 +185,18 @@ def main():
             folder = work / state
             folder.mkdir()
             session = build_session(folder)
-            if state in ('settings', 'about', 'shortcuts'):
+            if state in ('settings', 'about', 'shortcuts', 'copy', 'manifest'):
+                from PySide6.QtCore import Qt
+
                 from recorder import clean
                 from recorder.ui import dialogs
                 clean.locate = lambda configured=None: Path(r'C:\Tools\ffmpeg\bin\ffmpeg.exe')   # no real paths in pictures
                 fake = {'root': r'C:\Apps\voice-slate\voice-clips', 'asr_language': 'en', 'tail_seconds': 0.5}
                 dialog = {'settings': lambda: dialogs.SettingsDialog(fake),
-                          'about': dialogs.AboutDialog, 'shortcuts': dialogs.ShortcutsDialog}[state]()
+                          'about': dialogs.AboutDialog, 'shortcuts': dialogs.ShortcutsDialog,
+                          'copy': lambda: dialogs.CopyDialog('Welcome back, take two'),
+                          'manifest': lambda: dialogs.ManifestDialog('My voice')}[state]()
+                dialog.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)        # drawn, but never on the person's screen
                 dialog.show()
                 for _ in range(4):
                     app.processEvents()

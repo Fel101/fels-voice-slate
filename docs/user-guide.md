@@ -4,10 +4,11 @@ This guide goes through Voice Slate from the first start to a kept clip. For ins
 [README](../README.md). Press `F1` in the program for the list of keyboard shortcuts.
 
 **Contents:** [Starting](#starting) · [The window](#the-window) · [Recording](#recording) · [Script mode](#script-mode) ·
-[Importing audio](#importing-audio) · [Speakers](#speakers) · [Naming and finding takes](#naming-and-finding-takes) ·
-[Editing](#editing) · [Process](#process-the-whole-take) ·
+[Importing audio](#importing-audio) · [Speakers](#speakers) · [Moving a take](#moving-a-take-to-another-speaker) ·
+[Naming and finding takes](#naming-and-finding-takes) · [Editing](#editing) · [Process](#process-the-whole-take) ·
 [Check](#check) · [Auto analyze and Auto fix](#auto-analyze-and-auto-fix) · [Keeping a clip](#keeping-a-clip) ·
-[Settings](#settings) · [Keyboard shortcuts](#keyboard-shortcuts) · [Troubleshooting](#troubleshooting)
+[Sharing your clips](#sharing-your-clips) · [Settings](#settings) · [Keyboard shortcuts](#keyboard-shortcuts) ·
+[Troubleshooting](#troubleshooting)
 
 ## Starting
 
@@ -29,8 +30,8 @@ To keep the program on the taskbar, pin the desktop icon (right-click it) rather
 
 | Area | What it holds |
 |---|---|
-| **Top bar** | Record (`F9`), Play (`Space`), Stop, Loop (`L`); the clock; the source (Microphone or System audio) and the device; the Arm button; the level meter; and the gear menu with Settings, Import, New speaker, Rename speaker, Load script, Open output folder and more. |
-| **Left** | The speaker, a box that filters the takes, and that speaker's takes. Each take shows a small waveform, its label (or its number and length, until you name it), when it was made, and a status: *Recording*, *In review* (the take that is open), *Kept*, *Not kept*, or *Not saved* (the original could not be written yet). Hover over a take to see its length, when and from where it was made, and the start of its transcript. See [Naming and finding takes](#naming-and-finding-takes). |
+| **Top bar** | Record (`F9`), Play (`Space`), Stop, Loop (`L`); the clock; the source (Microphone or System audio) and the device; the Arm button; the level meter; and the gear menu with Settings, Import, New speaker, Rename speaker, Move take to speaker, Save a copy, Export manifest, Load script, Open output folder and more. |
+| **Left** | The speaker, a box that filters the takes, and that speaker's takes. Each take shows a small waveform, its label (or its number and length, until you name it), when it was made, and a status: *Recording*, *In review* (the take that is open), *Kept*, *Not kept*, or *Not saved* (the original could not be written yet). Hover over a take to see its length, when and from where it was made, and the start of its transcript. Right-click a take for its menu. See [Naming and finding takes](#naming-and-finding-takes), [Moving a take](#moving-a-take-to-another-speaker), and [Sharing your clips](#sharing-your-clips) for dragging a kept clip out of the window. |
 | **Middle** | The editor: tools, the waveform, a spectrogram, an overview strip, and a line with In, Out, Length, Playhead and Zoom. While recording it shows the live waveform and a take-length guide instead. |
 | **Right** | Three tabs, **Clip**, **Process** and **Check**, and under them the **Ready to keep?** card with Keep, Re-record, Discard and Open folder. |
 | **Bottom** | A status line, and the state of the optional extras (FFmpeg and draft transcripts). |
@@ -108,6 +109,26 @@ filled in for their next takes. Your confirmation of permission is never remembe
 To change the name a speaker is shown under, choose **Rename speaker...** in the gear menu, or right-click the speaker
 list. Only the name changes: the speaker's folder keeps its old name, so no clip moves and nothing already kept is
 touched. Two speakers cannot have the same name.
+
+## Moving a take to another speaker
+
+A take that was recorded under the wrong speaker can be filed under the right one. Right-click the take and choose **Move
+to speaker**, or open it and choose **Move take to speaker...** in the gear menu, and pick the speaker. It needs a second
+speaker to move to, and it is not possible while recording. The take joins the other speaker's list, newest first like
+any list. If it was the open take, the next one in the old list opens in its place.
+
+- **A take that is not kept** moves with its original recording, its edits and its text, and you carry on editing it. If
+  it still has the origin and allowed use that were remembered for the old speaker, it takes the new speaker's instead;
+  texts you wrote yourself stay as they are.
+- **A kept clip** asks first, because its permission was about one person's voice. It moves exactly as it was kept: the
+  permission, origin and allowed use are not changed, and its sidecar gets a `moves` entry saying which speaker it came
+  from and when, so the history stays with the clip. If the other speaker has a clip with the same file name already, a
+  number is added to the moved one.
+
+The move is careful. The files are copied to the new speaker's folder and checked against the originals, the new
+description is written, and only then are the old files removed. If anything goes wrong on the way, the take stays where
+it was and the half-made copies are removed. If an old file cannot be removed afterwards (a locked file, say), the status
+line names it so that you can delete it yourself; until you do, it can show up again under the old speaker.
 
 ## Naming and finding takes
 
@@ -251,6 +272,66 @@ edited), the label if the take has one, and every edit and setting used. See [Cl
 the Recycle Bin, after asking, so you can restore them from there. If the Recycle Bin cannot take them (a network folder,
 say), the program says so and offers to delete them permanently instead; it never does that without asking.
 
+## Sharing your clips
+
+A kept clip is an ordinary file in the speaker's folder. Voice Slate gives you three ways to hand clips on without
+searching through the folders. They only write files on your own computer, and none of them changes a kept clip.
+
+### Drag a clip into another program
+
+Pull a kept take's card out of the list and drop it on a folder in Windows Explorer, in a chat window, in an audio
+program, or on anything else that accepts a file. The clip's WAV file is **copied** there: the original stays in the
+library, and a drag cannot move it out. A small movement is still a click that opens the take, and nothing is dragged for
+a take that is not kept, or while recording.
+
+Only the audio goes. The permission and origin are in the clip's sidecar, the `.json` file with the same name next to
+it, so send that along too when the voice is not your own (see [Responsible use](responsible-use.md)).
+
+### Save a copy
+
+For a place that wants another format or sample rate, choose **Save a copy...** in the gear menu (`Ctrl+Shift+S`), or
+right-click a kept take. Choose the format and the sample rate, then the file name:
+
+![The Save a copy dialog](images/copy.png)
+
+| Format | |
+|---|---|
+| **WAV, 16-bit** | Uncompressed. |
+| **FLAC** | The same audio, lossless, in a smaller file. |
+| **MP3, 128 kbit/s** | Small, and lossy. |
+| **Ogg Vorbis** | Small, and lossy. |
+
+The sample rate can be 16, 22.05, 24 (as kept), 44.1 or 48 kHz. The copy is made from the kept clip, which is 24 kHz
+mono, so a higher rate adds no detail; it is there for programs and sites that ask for 44.1 or 48 kHz. The copy is a plain
+audio file: it has no sidecar, Voice Slate does not list it, and the permission records stay with the kept clip. It cannot
+be saved inside the output folder, so that it is not taken for a kept clip. FFmpeg is not needed. The file dialog asks
+before it replaces a file.
+
+### Export a manifest
+
+A manifest is one file that lists the kept clips with their transcripts, so that a program that trains or tests on speech
+can read the whole set instead of walking the folders. Choose **Export manifest...** in the gear menu, say whether it
+should list the open speaker's clips or everyone's, and choose **JSON Lines** (`.jsonl`, one JSON object per line) or
+**CSV** (`.csv`, for spreadsheets and data tools), then the file name.
+
+![The Export manifest dialog](images/manifest.png)
+
+Each kept clip is one row, with `audio_filepath`, `text` and `duration`, which are the names that speech toolkits such as
+NeMo read, followed by `speaker`, `speaker_id`, `label`, `sample_rate`, `source`, `created`, `id`, `origin`,
+`allowed_use`, `transcript_status` and `sha256`. The audio paths are written relative to the folder the manifest is saved
+in (with forward slashes), so a manifest saved in the output folder keeps working when the folder is copied; on another
+drive, where there is no relative path, the full path is written. Rows are in the order of the speakers' names, then of
+when the clips were made. [Clip format](clip-format.md) describes each column.
+
+A clip is **left out, and named in a message**, when it cannot be vouched for: its sidecar cannot be read or does not
+record the permission, its WAV is missing, or its WAV has changed since it was kept (the program checks the SHA-256 of
+every WAV). A take that is not kept is never listed. A spreadsheet can run a cell that starts with `=`, `+`, `-` or `@` as a
+formula, so in the CSV such a text gets a `'` in front of it; the JSON Lines file holds every text exactly as it is. The CSV
+is UTF-8 without a byte-order mark, which is what data tools expect; if Excel shows accented letters wrongly when you
+double-click it, open it with *Data > From Text/CSV* and choose UTF-8.
+
+A manifest holds transcripts and notes about where each voice came from. Treat it like the recordings themselves.
+
 ## Settings
 
 Open them with the gear at the top right, or `Ctrl+,`.
@@ -335,6 +416,23 @@ in the Voice Slate window.
 **A saved clip is missing from the list.** The program lists a message in the status line when a sidecar cannot be used,
 and does not change the files. Common reasons are a moved or deleted original, or a sidecar edited by hand. The files
 stay where they are.
+
+**Dragging a clip out does nothing.** Only the card of a kept take can be dragged, and not while recording. The place you
+drop it on must accept files: some web pages take a file only on their own drop area, and Windows does not let a program
+drop files onto a program that runs as administrator. **Copy file path** in the take's menu gives the clip's path, and
+**Open folder** shows it in Explorer.
+
+**Save a copy asks for a place outside the output folder.** A copy saved among the kept clips could be taken for one.
+Save it somewhere else, such as the desktop or a project folder.
+
+**The manifest says some clips were left out.** The message names each one and the reason. A clip whose WAV has changed
+since it was kept (its SHA-256 no longer matches the sidecar) is left out on purpose, because its row would describe a
+different file; the clip itself is not touched. If you changed it yourself, keep it again from the original, or move the
+file back.
+
+**It says the old files of a moved take could not be removed.** The move itself worked: the take is under the new
+speaker. The files named are copies left in the old speaker's folder (a locked file, or a folder that does not let the
+program delete). Delete them yourself, or they can show up again under the old speaker.
 
 **It says a take is "Not saved".** The original could not be written (a full disk, or a locked folder). The take is held
 in memory; fix the problem and press Keep, or close the window and read the message, which tells you if anything is

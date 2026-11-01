@@ -14,6 +14,22 @@ the project uses [Semantic Versioning](https://semver.org/).
   shown under. Their folder keeps its name, so no clip moves and nothing already kept is touched.
 - **A filter box above the list of takes** shows only the takes whose label, transcript or notes contain all the words
   typed, whatever the capitals. The take numbers do not change while it is on.
+- **Move to speaker.** A take recorded under the wrong speaker can be filed under the right one: right-click it and
+  choose *Move to speaker*, or use *Move take to speaker...* in the gear menu. The files are copied to the new speaker's
+  folder and checked, the new description is written, and only then are the old files removed, so a failure leaves the take
+  where it was. A kept clip asks first, keeps its permission, origin and allowed use as they were written, and gets an
+  optional `moves` list in its sidecar (where it came from, and when); its `speaker` field is the new folder, as programs
+  that read the format expect. A take that is not kept moves with its edits and text.
+- **Drag a kept clip out of the window.** Pull a kept take's card onto Explorer, a chat window or an audio program to
+  copy the clip's WAV there. Only copying is offered, so a drop cannot move a clip out of the library.
+- **Save a copy...** (`Ctrl+Shift+S`, the gear menu, or the take's right-click menu) writes a copy of a kept clip as WAV,
+  FLAC, MP3 or Ogg Vorbis at 16, 22.05, 24, 44.1 or 48 kHz, made from the kept clip without FFmpeg. The kept clip is not
+  touched, and a copy cannot be saved inside the output folder.
+- **Export manifest...** in the gear menu lists the kept clips of the open speaker, or of everyone, in a JSON Lines or CSV
+  file: `audio_filepath`, `text` and `duration` (the names speech toolkits such as NeMo read), then the speaker, origin,
+  allowed use and the SHA-256 of the WAV. Paths are relative to the folder the manifest is saved in. A clip whose WAV has
+  changed since it was kept, or whose sidecar does not record the permission, is left out and named, and in a CSV a text
+  that a spreadsheet would run as a formula gets an apostrophe in front. See [Clip format](docs/clip-format.md#manifest-files).
 
 ### Changed
 

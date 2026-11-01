@@ -11,7 +11,7 @@ from PySide6.QtCore import QByteArray, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QApplication, QLabel, QMainWindow, QMenu, QWidget
 
-from .. import asr_setup, transcript
+from .. import asr_setup, manifest, share, transcript
 from .. import audio_core as ac
 from .. import clean, settings
 from ..clean import CleanError
@@ -19,7 +19,7 @@ from ..core import render
 from ..core.edits import describe
 from ..session import Session
 from ..session.measure import recipe_key
-from ..store import KeepBlocked, TrashUnavailable
+from ..store import KeepBlocked, TrashUnavailable, clean_label
 from .actions import SPEC, Actions, shortcut_text
 from .dialogs import Dialogs
 from .editor_panel import EditorPanel
@@ -123,10 +123,12 @@ class MainWindow(QMainWindow):
 
     def _build_menu(self):
         a, menu = self.actions, self.topbar.menu
-        for name in ('settings', 'import_recording', 'new_speaker', 'rename_speaker', 'load_script', 'clear_script',
-                     'open_folder'):
-            menu.addAction(a[name])
-        menu.addSeparator()
+        for group in (('settings', 'import_recording', 'new_speaker', 'rename_speaker'),
+                      ('move_take', 'save_copy', 'export_manifest'),
+                      ('load_script', 'clear_script', 'open_folder')):
+            for name in group:
+                menu.addAction(a[name])
+            menu.addSeparator()
         menu.addAction(a.refresh_devices)
         menu.addSeparator()
         menu.addAction(a.shortcuts)
@@ -174,6 +176,9 @@ class MainWindow(QMainWindow):
         a.import_recording.triggered.connect(self.import_recording)
         a.new_speaker.triggered.connect(self.new_speaker)
         a.rename_speaker.triggered.connect(self.rename_speaker)
+        a.move_take.triggered.connect(self.move_take)
+        a.save_copy.triggered.connect(self.save_copy)
+        a.export_manifest.triggered.connect(self.export_manifest)
         a.open_folder.triggered.connect(self.open_folder)
         a.refresh_devices.triggered.connect(capturing.refresh_devices)
         a.load_script.triggered.connect(self.load_script)
@@ -372,6 +377,9 @@ class MainWindow(QMainWindow):
             'keep': has_take, 'discard': has_take, 'rerecord': has_take, 'rename': has_take,
             'import_recording': idle, 'new_speaker': idle, 'settings': idle, 'arm': idle,
             'rename_speaker': idle and s.workspace.speaker is not None,
+            'move_take': has_take and not take.unsaved and len(s.workspace.speakers) > 1,
+            'save_copy': has_take and take.kept,
+            'export_manifest': idle and s.workspace.speaker is not None,
             'prev_line': bool(s.script.lines) and s.script.index > 0,
             'next_line': bool(s.script.lines) and s.script.index < len(s.script.lines) - 1,
             'clear_script': bool(s.script.lines),
@@ -567,6 +575,133 @@ class MainWindow(QMainWindow):
             except ValueError as e:
                 self.dialogs.notice('warning', 'Rename speaker', str(e))
 
+    def _other_speakers(self, take):
+        return [(slug, name) for slug, name in self.session.workspace.speakers if slug != take.speaker]
+
+    def move_take(self):
+        """Ask which speaker, then file the open take under them."""
+        take = self.session.current
+        if take is None:
+            return
+        others = self._other_speakers(take)
+        if not others:
+            self.dialogs.notice('info', 'Move take', 'There is no other speaker yet. Add one with New speaker, then move '
+                                                      'the take.')
+            return
+        index = self.dialogs.choose_item('Move take', 'File this take under:', [name for _, name in others])
+        if index is not None:
+            self._move(take, others[index][0])
+
+    def _move(self, take, slug):
+        """File `take` under the speaker `slug`. A kept clip asks first: it is a statement about whose voice it is."""
+        workspace = self.session.workspace
+        if self.session.capturing.recording:
+            self.session.bus.status('Stop the recording before moving a take.')
+            return
+        if take.kept and not self.dialogs.confirm(
+                'Move this kept clip?',
+                f'The clip will be filed under {workspace.name_of(slug)}. Its permission, origin and allowed use go with '
+                f'it, and its saved description will say it was moved from {workspace.name_of(take.speaker)}.',
+                yes='Move clip'):
+            return
+        try:
+            workspace.move_take(slug, take)
+        except (ValueError, OSError) as e:
+            self.dialogs.notice('error', 'Could not move the take', str(e))
+
+    @staticmethod
+    def _with_ending(path, ending, known):
+        """The chosen file name with the ending the format needs: added if it has none, put in place of another ending of
+        a format on offer, and left alone otherwise."""
+        path = Path(path)
+        if path.suffix.lower() == ending:
+            return path
+        if path.suffix.lower() in known:
+            return path.with_suffix(ending)
+        return path.with_name(path.name + ending)
+
+    def save_copy(self):
+        """Save a copy of the open kept clip as WAV, FLAC, MP3 or Ogg, at a sample rate chosen here."""
+        s = self.session
+        take = s.current
+        if take is None or not take.kept or s.capturing.recording:
+            return
+        if not Path(take.export_path).is_file():
+            self.dialogs.notice('error', 'Save a copy', f'The kept clip {Path(take.export_path).name} is not in its folder '
+                                                        'any more.')
+            return
+        name = clean_label(take.meta.get('label')) or ' '.join(str(take.meta.get('transcript') or '').split())[:60] \
+            or Path(take.export_path).stem
+        choice = self.dialogs.copy_options(name)
+        if choice is None:
+            return
+        kind, rate = choice
+        text, ending = share.FORMATS[kind][:2]
+        known = {entry[1] for entry in share.FORMATS.values()}
+        path = self.dialogs.choose_save_file('Save a copy', share.filename_for(name, Path(take.export_path).stem) + ending,
+                                             f'{text} (*{ending})')
+        if not path:
+            return
+        path = self._with_ending(path, ending, known)
+        try:
+            Path(path).resolve().relative_to(s.lib.root.resolve())
+        except (ValueError, OSError):
+            pass
+        else:
+            self.dialogs.notice('warning', 'Save a copy', 'Choose a place outside the output folder, so that the copy is not '
+                                                          'mistaken for a kept clip.')
+            return
+        try:
+            share.save_copy(take.export_path, path, kind, rate)
+        except OSError as e:                        # share.CopyError is one
+            self.dialogs.notice('error', 'Could not save the copy', str(e))
+            return
+        s.bus.status(f'Saved a copy ({share.rate_text(rate)}) to {path}')
+
+    def export_manifest(self):
+        """List the kept clips of this speaker, or of everyone, in a CSV or JSON Lines file."""
+        s = self.session
+        workspace = s.workspace
+        slug = workspace.speaker
+        if slug is None or s.capturing.recording:
+            return
+        choice = self.dialogs.manifest_options(workspace.name_of(slug))
+        if choice is None:
+            return
+        scope, kind = choice
+        text, ending = manifest.FORMATS[kind]
+        known = {entry[1] for entry in manifest.FORMATS.values()}
+        folder = s.lib.folder(slug) if scope == 'speaker' and s.lib.folder(slug).is_dir() else s.lib.root
+        name = f'{slug}-manifest' if scope == 'speaker' else 'manifest'
+        path = self.dialogs.choose_save_file('Export manifest', folder / (name + ending), f'{text} (*{ending})')
+        if not path:
+            return
+        path = self._with_ending(path, ending, known)
+        error = None
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            rows, left_out = manifest.collect(s.lib, [slug] if scope == 'speaker' else None, base=path.parent)
+            if rows:
+                manifest.write(path, rows, kind)
+        except (OSError, ValueError) as e:
+            error = e
+        finally:
+            QApplication.restoreOverrideCursor()
+        if error is not None:                       # said once the busy cursor is gone, not under it
+            self.dialogs.notice('error', 'Could not export the manifest', str(error))
+            return
+        detail = '\n'.join(f'- {file}: {reason}' for file, reason in left_out)
+        if not rows:
+            self.dialogs.notice('info', 'Export manifest', 'There are no kept clips to list yet.' +
+                                (f'\n\nLeft out:\n{detail}' if detail else ''))
+            return
+        s.bus.status(f'Listed {len(rows)} clip{"s" if len(rows) != 1 else ""} in {path}' +
+                     (f'. {len(left_out)} left out.' if left_out else ''))
+        if left_out:
+            self.dialogs.notice('warning', 'Some clips were left out',
+                                f'{len(rows)} clip{"s are" if len(rows) != 1 else " is"} in the manifest. These are not:'
+                                f'\n\n{detail}')
+
     def open_folder(self):
         s = self.session
         folder = s.lib.folder(s.workspace.speaker) if s.workspace.speaker else s.lib.root
@@ -668,6 +803,13 @@ class MainWindow(QMainWindow):
         menu.addAction('Rename', lambda: (self._take_picked(take), self.rename_take()))
         copy = menu.addAction('Copy file path', lambda: QApplication.clipboard().setText(str(take.export_path or take.master_path)))
         copy.setEnabled((take.export_path or take.master_path) is not None)
+        if take.kept:
+            menu.addAction('Save a copy...', lambda: (self._take_picked(take), self.save_copy()))
+        others = [] if take.unsaved else self._other_speakers(take)
+        if others:
+            move = menu.addMenu('Move to speaker')
+            for slug, name in others:
+                move.addAction(name, lambda checked=False, slug=slug: self._move(take, slug))
         menu.addSeparator()
         menu.addAction('Discard...', lambda: (self._take_picked(take), self.discard()))
         return menu

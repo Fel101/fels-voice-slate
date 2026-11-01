@@ -10,7 +10,10 @@ recorder/
   ui/            the PySide6 window: draws what the session says changed, and forwards what the person does
   session/       the controller. No toolkit. Session.tick() drives it, and a Bus tells the window what changed
   core/          pure functions on arrays and recipes: edits, chain, render, analysis, autofix
-  store.py       the files: speakers, originals, kept clips and their sidecars, and the autosave files of takes not kept yet
+  store.py       the files: speakers, originals, kept clips and their sidecars, the autosave files of takes not kept yet,
+                 and moving a take to another speaker
+  share.py       a copy of a kept clip as WAV, FLAC, MP3 or Ogg at another sample rate (SoundFile's libsndfile, no FFmpeg)
+  manifest.py    a list of the kept clips, as JSON Lines or CSV, for programs that read a whole set
   audio_core.py  small pure helpers, and the rules for what can be kept
   capture.py     microphone (sounddevice) and system audio (PyAudioWPatch), behind one interface
   audio_io.py    playback through a sounddevice output stream
@@ -119,6 +122,29 @@ takes the key from the machine it runs on.
   remembered. Keep deletes it, and Discard sends it to the Recycle Bin with the other files. A failed write is reported
   once and tried again; closing with a write still failing refuses once, and then lets go, so a broken folder cannot trap
   the window. A kept take has no autosave file: only a changed label is written, into its sidecar.
+
+## Moving, copying and listing clips
+
+None of these changes a kept clip, and none goes online.
+
+- **Moving a take** is `Library.move_take`, called through `Workspace.move_take`, which keeps the lists and the open take
+  right. The order is what makes it safe. The files are copied to the new speaker's folder under a temporary name and
+  compared by SHA-256 (`_copy_checked`); the new sidecar is written, with `speaker`, the new file names and a `moves`
+  entry; and only then are the old files removed, the sidecar first (`_remove_old`). A whole copy of the take exists at
+  every moment. A failure before the removal removes what was made and leaves the take where it was, and one during it
+  comes back as the list of files left behind. A take that is not kept moves its original, writes its autosave at the new
+  place, and takes the new speaker's remembered origin and allowed use only if it still had the old speaker's. The tests
+  in `tests/test_store_move.py` make every file operation fail in turn.
+- **Save a copy** is `share.save_copy`. It reads the kept WAV, resamples it with `audio_core.resample`, and writes it
+  through SoundFile to a temporary name and then renames it. It writes 8192 frames at a time: libsndfile's Ogg Vorbis
+  writer crashes the whole process (a stack overflow, which no `try` catches) when it is given half a minute of audio in
+  one call, and the tests run every encoder on a long clip in a subprocess so that this cannot come back.
+- **Export manifest** is `manifest.collect` and `manifest.write`. A row is built from each sidecar, read by the rules of
+  the library (a name that leaves the sidecar's folder is refused), and the WAV is hashed again; a clip that does not
+  check out is left out and named. The escaping is described in [Clip format](clip-format.md#manifest-files).
+- **Drag out** is in `ui/library.py`. A kept card pulled past `startDragDistance` emits `dragRequested`, and the panel
+  starts a `QDrag` carrying the file URL of the WAV, offered `CopyAction` only. `run_drag` is the seam the tests use,
+  because `QDrag.exec` waits for a real mouse; the drop itself is the system's, and is not tested.
 
 ## The window
 

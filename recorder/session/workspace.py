@@ -290,6 +290,38 @@ class Workspace:
         self.bus.status(f"Kept. Saved to {paths['export']}")
         return paths
 
+    def move_take(self, slug, take=None):
+        """File a take (the open one unless another is given) under another speaker. Returns the old files that could
+        not be removed, or None if nothing was moved. Raises ValueError or OSError, with the take where it was.
+
+        The take keeps its edits, text and undo history. It leaves this speaker's list and joins the other's, and if it
+        was the open take, the next one in the list opens.
+        """
+        take = take or self.current
+        if take is None:
+            return None
+        if self.is_recording():
+            self.bus.status('Stop the recording before moving a take.')
+            return None
+        index = self.takes.index(take) if take in self.takes else 0
+        left = self.lib.move_take(take, slug)
+        if take in self.takes:
+            self.takes.remove(take)
+        there = self._session_takes.setdefault((self.lib.root.resolve(), slug), [])
+        there.append(take)
+        there.sort(key=lambda t: t.created, reverse=True)
+        self._remember_takes()
+        was_open = self.current is take
+        if was_open:
+            self.current = self.takes[min(index, len(self.takes) - 1)] if self.takes else None
+        name = self.name_of(slug) or slug
+        self.bus.notify('takes')
+        if was_open:
+            self.bus.notify('current')
+        self.bus.status(f'Moved to {name}.' if not left else
+                        f'Moved to {name}, but these old files could not be removed: {", ".join(p.name for p in left)}.')
+        return left
+
     def discard(self, permanent=False):
         """Move the current take's files to the Recycle Bin (or delete them) and drop it. Raises TrashUnavailable."""
         take = self.current

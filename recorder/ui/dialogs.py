@@ -9,10 +9,11 @@ from pathlib import Path
 import PySide6
 from PySide6.QtCore import QRegularExpression, Qt, QUrl, qVersion
 from PySide6.QtGui import QDesktopServices, QFont, QRegularExpressionValidator
-from PySide6.QtWidgets import (QCheckBox, QDialog, QDoubleSpinBox, QFileDialog, QFormLayout, QInputDialog, QLabel,
-                               QLineEdit, QMessageBox, QPushButton, QWidget)
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFileDialog, QFormLayout, QInputDialog,
+                               QLabel, QLineEdit, QMessageBox, QPushButton, QWidget)
 
-from .. import __version__, clean, settings, transcript
+from .. import __version__, clean, manifest, settings, share, transcript
+from .. import audio_core as ac
 from .actions import SPEC, shortcut_text
 from .palette import PALETTE
 from .widgets import button, hbox, label, vbox
@@ -57,6 +58,26 @@ class Dialogs:
     def choose_file(self, title, start='', filter=AUDIO_FILTER):
         path, _ = QFileDialog.getOpenFileName(self.parent, title, str(start), filter)
         return path or None
+
+    def choose_save_file(self, title, start='', filter='All files (*)'):
+        """A file name to write to. The dialog asks before it replaces a file."""
+        path, _ = QFileDialog.getSaveFileName(self.parent, title, str(start), filter)
+        return path or None
+
+    def choose_item(self, title, prompt, items):
+        """The position of the item chosen from a list of names, or None."""
+        item, ok = QInputDialog.getItem(self.parent, title, prompt, list(items), 0, False)
+        return list(items).index(item) if ok and item in items else None
+
+    def copy_options(self, name):
+        """(format, sample rate) for a copy of a kept clip, or None."""
+        dialog = CopyDialog(name, self.parent)
+        return dialog.values() if dialog.exec() == QDialog.DialogCode.Accepted else None
+
+    def manifest_options(self, speaker_name):
+        """('speaker' or 'all', 'jsonl' or 'csv') for a manifest, or None."""
+        dialog = ManifestDialog(speaker_name, self.parent)
+        return dialog.values() if dialog.exec() == QDialog.DialogCode.Accepted else None
 
     def settings(self, values):
         dialog = SettingsDialog(values, self.parent)
@@ -224,6 +245,88 @@ class SettingsDialog(QDialog):
                 'asr_model': self.model.text() or None, 'asr_language': self.language.text().strip().lower() or None}
 
 
+# ---- sharing ----------------------------------------------------------------------------------------------------------
+
+class CopyDialog(QDialog):
+    """The format and sample rate of a copy of a kept clip. Choosing the file comes next, in the system's own dialog."""
+
+    def __init__(self, name, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle('Save a copy')
+        self.setMinimumWidth(460)
+        layout = vbox(self, (22, 20, 22, 18), 12)
+        layout.addWidget(label(f'A copy of "{name}" is made from the kept clip, which does not change.', wrap=True))
+        form = QFormLayout()
+        form.setSpacing(10)
+        self.kind = QComboBox()
+        for key, (text, *_) in share.FORMATS.items():
+            self.kind.addItem(text, key)
+        self.kind.setCurrentIndex(self.kind.findData(share.DEFAULT_KIND))
+        self.rate = QComboBox()
+        for rate in share.RATES:
+            self.rate.addItem(share.rate_text(rate) + (' (as kept)' if rate == ac.EXPORT_RATE else ''), rate)
+        self.rate.setCurrentIndex(self.rate.findData(share.DEFAULT_RATE))
+        form.addRow('Format', self.kind)
+        form.addRow('Sample rate', self.rate)
+        layout.addLayout(form)
+        layout.addWidget(label('The copy is mono, like the kept clip. A higher sample rate adds no detail: some programs and '
+                               'sites just ask for 44.1 or 48 kHz.', 'muted', size=11, wrap=True))
+        row = hbox(spacing=8)
+        row.addStretch(1)
+        cancel = QPushButton('Cancel')
+        cancel.clicked.connect(self.reject)
+        ok = QPushButton('Choose file...')
+        ok.setDefault(True)
+        ok.setProperty('kind', 'primary')
+        ok.clicked.connect(self.accept)
+        row.addWidget(cancel)
+        row.addWidget(ok)
+        layout.addLayout(row)
+
+    def values(self):
+        return self.kind.currentData(), self.rate.currentData()
+
+
+class ManifestDialog(QDialog):
+    """Whose clips a manifest lists, and in which file format. Choosing the file comes next."""
+
+    def __init__(self, speaker_name, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle('Export manifest')
+        self.setMinimumWidth(480)
+        layout = vbox(self, (22, 20, 22, 18), 12)
+        layout.addWidget(label('A manifest lists the kept clips, one row each: the file, the transcript, the length, the '
+                               'speaker and where the voice came from. Programs that train or test on speech read it '
+                               'instead of walking the folders.', wrap=True))
+        form = QFormLayout()
+        form.setSpacing(10)
+        self.scope = QComboBox()
+        self.scope.addItem(f'Kept clips of {speaker_name}', 'speaker')
+        self.scope.addItem('Kept clips of all speakers', 'all')
+        form.addRow('List', self.scope)
+        self.kind = QComboBox()
+        for key, (text, ending) in manifest.FORMATS.items():
+            self.kind.addItem(f'{text} ({ending})', key)
+        form.addRow('File type', self.kind)
+        layout.addLayout(form)
+        layout.addWidget(label('Paths in the file are relative to the folder you save it in. A clip whose file has changed '
+                               'since it was kept is left out, and named.', 'muted', size=11, wrap=True))
+        row = hbox(spacing=8)
+        row.addStretch(1)
+        cancel = QPushButton('Cancel')
+        cancel.clicked.connect(self.reject)
+        ok = QPushButton('Choose file...')
+        ok.setDefault(True)
+        ok.setProperty('kind', 'primary')
+        ok.clicked.connect(self.accept)
+        row.addWidget(cancel)
+        row.addWidget(ok)
+        layout.addLayout(row)
+
+    def values(self):
+        return self.scope.currentData(), self.kind.currentData()
+
+
 # ---- about and shortcuts ----------------------------------------------------------------------------------------------
 
 class AboutDialog(QDialog):
@@ -266,8 +369,8 @@ SHORTCUT_GROUPS = (
     ('Edit', ('undo', 'redo', 'cut', 'trim', 'silence', 'select_all', 'set_in', 'set_out')),
     ('Check and repair', ('auto_analyze', 'auto_fix')),
     ('View', ('zoom_in', 'zoom_out', 'fit', 'zoom_selection')),
-    ('Clips and files', ('keep', 'rename', 'import_recording', 'new_speaker', 'open_folder', 'load_script', 'prev_line',
-                         'next_line')),
+    ('Clips and files', ('keep', 'rename', 'save_copy', 'import_recording', 'new_speaker', 'open_folder', 'load_script',
+                         'prev_line', 'next_line')),
     ('Program', ('settings', 'shortcuts', 'quit')),
 )
 MOUSE_ROWS = (('Select', 'Drag on the waveform'), ('Move the playhead', 'Click, or the arrow keys'),

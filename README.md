@@ -35,7 +35,9 @@ is in it and whether you had the right to record it.
 - **Keep** only when the clip is ready: it needs a transcript, the origin of the recording, the allowed use, and your
   confirmation that you have the right to use the voice. Keep writes the 24 kHz mono WAV and a sidecar JSON file.
 - **Name and find takes.** Give a take a label, rename a speaker, and filter the list of takes by the words in their
-  labels, transcripts and notes.
+  labels, transcripts and notes. A take recorded under the wrong speaker can be moved to the right one.
+- **Share.** Drag a kept clip into Explorer or another program, save a copy as WAV, FLAC, MP3 or Ogg at 16 to 48 kHz, or
+  export a manifest of the kept clips (JSON Lines or CSV) that speech toolkits can read. The kept clips are never changed.
 - **Draft transcripts** (optional) from a speech recognizer that runs on your own computer, set up in one step.
 - **Stays on your computer.** No account, no network access, no telemetry. Discard sends files to the Recycle Bin.
 

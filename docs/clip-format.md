@@ -103,6 +103,7 @@ A UTF-8 JSON object. An example, written compactly (the program writes it with o
 | `notes` | Free text. |
 | `flags` | Facts about the take: `edited`, `filtered` (high-pass or hum notch on), `cleaned` (noise reduction on), `level_changed`, `limited` (limiter on), `clipped`, `interrupted` (the device stopped while recording). |
 | `label` | Optional. A name the person gave the take to find it by: one line, at most 80 characters. The field is absent when the take has no label. It can change after the clip was kept (renaming a kept take rewrites only this field of the sidecar), and the WAV never changes with it, so the SHA-256 in `export` still holds. |
+| `moves` | Optional. Present only on a clip that was moved to another speaker: a list, oldest first, of `{ "from": "<speaker folder>", "to": "<speaker folder>", "at": "<ISO 8601 time>" }`. `speaker` always names where the clip is now. The WAV is the same bytes, so the SHA-256 in `export` still holds. |
 
 ### Edits
 
@@ -143,6 +144,10 @@ For each `*.json` file in a speaker's folder whose `schema` starts with `voice-r
 3. Optionally check the SHA-256 of `export.file` against `export.sha256`.
 4. Use `export.file` and `transcript`.
 
+`speaker` is the name of the folder the sidecar is in. If you move a clip's files between speaker folders by hand,
+change `speaker` in the sidecar as well, or use **Move to speaker** in the program, which does it for you and keeps a
+note in `moves`.
+
 A short Python example:
 
 ```python
@@ -158,6 +163,37 @@ for sidecar in Path("voice-clips/my-voice").glob("*.json"):      # the output fo
     intact = hashlib.sha256(wav.read_bytes()).hexdigest() == data["export"]["sha256"]
     print(wav.name, "intact" if intact else "CHANGED", "|", data["allowed_use"], "|", data["transcript"])
 ```
+
+## Manifest files
+
+**Export manifest...** in the program writes one file that lists the kept clips, for programs that read a whole set of
+clips at once. It is made from the sidecars, so it holds nothing they do not. It is a snapshot: write it again after you
+keep, move or discard clips. Choose JSON Lines (`.jsonl`, one JSON object per line) or CSV (`.csv`, with a header row).
+
+| Column | Meaning |
+|---|---|
+| `audio_filepath` | The kept WAV. Relative to the folder the manifest is saved in, with `/` between the names; the full path when there is no relative one (another drive). |
+| `text` | The transcript, trimmed. |
+| `duration` | The length in seconds to three decimals, read from the WAV. |
+| `speaker`, `speaker_id` | The speaker's name as shown, and the speaker's folder name. |
+| `label` | The take's label, or empty. |
+| `sample_rate` | Of the WAV: 24000. |
+| `source`, `created`, `id` | As in the sidecar: `mic`, `system` or `import`; when the take was made; the take's id. |
+| `origin`, `allowed_use`, `transcript_status` | As in the sidecar. |
+| `sha256` | The SHA-256 of the WAV, checked against the sidecar's when the manifest was written. |
+
+`audio_filepath`, `text` and `duration` are the names that speech toolkits such as NeMo read. A clip is only listed when
+its sidecar can be read and records the permission, and its WAV is next to it, readable, and still the file that was
+kept; any other clip is left out and named to the person who exports. The file is UTF-8 with no byte-order mark, so the
+first column name is exactly `audio_filepath`.
+
+- **JSON Lines**: one object per line, the keys in the order above. The characters U+2028, U+2029 and U+0085, which some
+  programs treat as a line end although JSON does not, are written as `\u` escapes, so one clip is always one line.
+- **CSV**: standard quoting, `\r\n` line ends. A text that a spreadsheet could run as a formula, one that starts with
+  `=`, `+`, `-`, `@`, a tab or a carriage return, has a `'` put in front of it, in every column except `audio_filepath`
+  and `sha256`; the JSON Lines file never changes a text. Excel opens a CSV that has no byte-order mark as if it were in
+  the local code page, so accented letters can come out wrong when you double-click the file; use *Data > From Text/CSV*
+  and choose UTF-8.
 
 ## Older sidecars
 

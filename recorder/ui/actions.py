@@ -56,6 +56,11 @@ SPEC = {
     'new_speaker': ('New speaker...', 'plus', ['Ctrl+N'], 'Add a speaker', False),
     'rename_speaker': ('Rename speaker...', None, [], 'Change the name this speaker is shown under. Their folder and clips '
                                                        'are not touched', False),
+    'move_take': ('Move take to speaker...', None, [], 'File this take under a different speaker', False),
+    'save_copy': ('Save a copy...', None, ['Ctrl+Shift+S'],
+                  'Save a copy of this kept clip as WAV, FLAC, MP3 or Ogg, at the sample rate you choose', False),
+    'export_manifest': ('Export manifest...', None, [],
+                        'List the kept clips with their transcripts in a CSV or JSON Lines file, for other programs', False),
     'refresh_devices': ('Refresh devices', None, [], 'Look for microphones and outputs again', False),
     'open_folder': ('Open output folder', 'folder', ['Ctrl+Shift+O'], 'Show the output folder in Explorer', False),
     'load_script': ('Load script...', None, ['Ctrl+Shift+L'], 'Read prompts from a text file, one line per take', False),
