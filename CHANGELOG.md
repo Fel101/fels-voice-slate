@@ -5,6 +5,11 @@ the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- The release workflow no longer replaces an installer already on the Release, such as one built and tried by hand. Its own
+  build is then kept with the run.
+
 ## [0.5.0] - 2026-11-02
 
 ### Added

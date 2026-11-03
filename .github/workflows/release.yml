@@ -1,7 +1,8 @@
 name: Release installer
 
-# Builds the Windows installer when a version tag is pushed and attaches it to the GitHub Release of that tag.
-# It does nothing else: the Release itself, and its notes, are written by hand first.
+# Builds the Windows installer when a version tag is pushed and attaches it to the GitHub Release of that tag. An
+# installer already on the Release, such as one built and tried by hand, is left as it is, and this build is then
+# only kept with the run. It does nothing else: the Release itself, and its notes, are written by hand first.
 
 on:
   push:
@@ -38,4 +39,12 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$env:GITHUB_REF_NAME" (Get-Item build/Fels-Voice-Slate-*-Setup.exe).FullName --clobber
+        run: |
+          $attached = @(gh release view "$env:GITHUB_REF_NAME" --json assets --jq '.assets[].name')
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $installers = $attached -like 'Fels-Voice-Slate-*-Setup.exe'
+          if ($installers) {
+            "::notice::The Release already has $installers, so it is left as it is. This build is kept with the run."
+          } else {
+            gh release upload "$env:GITHUB_REF_NAME" (Get-Item build/Fels-Voice-Slate-*-Setup.exe).FullName
+          }

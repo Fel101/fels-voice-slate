@@ -81,7 +81,8 @@ are very welcome, above all to the statement of permission, which has to mean ex
 **The installer.** `python -m pip install -r requirements-build.txt`, then `python tools/build_installer.py`, with
 [Inno Setup 6](https://jrsoftware.org/isinfo.php) installed. It builds in `build/`, opens the real window from what it built as a
 test, and fails if that does not work. `--no-installer` stops before Inno Setup. A version tag does this on GitHub and attaches the
-installer to the Release (`.github/workflows/release.yml`).
+installer to the Release (`.github/workflows/release.yml`). If the Release already has an installer, such as one built and tried
+by hand and attached when the Release was written, the workflow leaves it as it is and keeps its own build with the run.
 
 **New dependencies.** Please ask first. A dependency must have a licence compatible with MIT (permissive, or LGPL used as
 an installed library), must be needed by the program, and must be added to `requirements.txt` and
