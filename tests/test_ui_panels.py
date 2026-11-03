@@ -13,6 +13,7 @@ from PySide6.QtWidgets import QLabel, QPushButton  # noqa: E402
 
 import ui_helpers  # noqa: E402
 from helpers import fill, record, speech  # noqa: E402
+from ui_helpers import click_row, row_point  # noqa: E402
 from recorder import audio_core as ac  # noqa: E402
 from recorder import clean, transcript  # noqa: E402
 from recorder.ui import dialogs as dialog_mod  # noqa: E402
@@ -26,7 +27,7 @@ def label_text(widget):
 
 
 def cards(window):
-    return [card for card in window.library._cards if not card.isHidden()]
+    return window.library.rows()
 
 
 def settle(window, session):
@@ -49,7 +50,7 @@ def test_takes_are_listed_newest_first_with_their_state(window, session):
     assert [c.status for c in shown] == ['In review', 'Not kept', 'Kept']
     assert [c.title for c in shown] == ['Take 3  ·  9.0 s', 'Take 2  ·  10.0 s', 'Take 1  ·  12.0 s']
     assert 'System' in shown[1].sub and 'Mic' in shown[0].sub
-    assert [c.selected for c in shown] == [True, False, False]
+    assert [c.opened for c in shown] == [True, False, False]
 
 
 def test_a_take_that_could_not_be_written_is_marked(window, session, monkeypatch):
@@ -63,16 +64,16 @@ def test_clicking_a_card_opens_that_take(window, session):
     first = record(session, 12.0)
     record(session, 10.0)
     window.flush()
-    QTest.mouseClick(cards(window)[1], Qt.MouseButton.LeftButton)
+    click_row(window, 1)
     assert session.current is first
     window.flush()
-    assert [c.selected for c in cards(window)] == [False, True]
+    assert [c.opened for c in cards(window)] == [False, True]
 
 
 def test_right_clicking_a_card_offers_the_take_menu(window, session, dialogs):
     record(session, 12.0)
     window.flush()
-    QTest.mouseClick(cards(window)[0], Qt.MouseButton.RightButton)
+    window.library._context_menu(row_point(window, 0))
     assert len(dialogs.menus) == 1
     assert [a.text() for a in dialogs.menus[0].actions()][:3] == ['Open', 'Rename', 'Copy file path']
 
@@ -160,7 +161,8 @@ def test_the_live_card_shows_what_has_been_recorded_so_far(window, session, open
     window.flush()
     window._tick()
     live = cards(window)[0]
-    assert live.live and live.take is None and live.status == 'Recording' and live.thumb is not None
+    assert live.live and live.take is None and live.status == 'Recording'
+    assert library.live_thumbnail(*window.library.model.live) is not None
     session.capturing.stop()
     clock.advance(1.0)                                  # the stop tail passes, and the take is saved
     window._tick()
@@ -196,7 +198,7 @@ def test_typing_in_the_text_fields_writes_to_the_take(window, session):
     QTest.keyClicks(clip.origin, 'my room')
     QTest.keyClicks(clip.allowed, 'my own use')
     QTest.keyClicks(clip.source_url, 'https://example.org')
-    clip.consent.setChecked(True)
+    window.inspector.ready.consent.setChecked(True)
     assert take.meta['transcript'] == 'The harbour lights came on at dusk.'
     assert (take.meta['origin'], take.meta['allowed_use'], take.meta['source_url']) == \
         ('my room', 'my own use', 'https://example.org')
@@ -476,7 +478,7 @@ def test_the_checklist_starts_with_what_is_left_to_do(window, session):
     ready = window.inspector.ready
     assert ready.verdict.text().endswith('to fix') and not ready.keep.isEnabled()
     text = ' | '.join(lines(ready))
-    assert 'Transcript must be' in text and 'Enter the origin' in text and 'Tick the permission box' in text
+    assert 'Transcript must be' in text and 'Enter the origin' in text and 'Tick the box below' in text
     assert text.count('Measuring the clip...') == 1
 
 
@@ -654,7 +656,8 @@ def test_the_settings_dialog_returns_what_was_typed_and_none_for_what_was_cleare
     monkeypatch.setattr(clean, 'locate', lambda configured=None: None)
     dialog = dialog_mod.SettingsDialog({'root': 'C:/clips', 'tail_seconds': 0.3, 'ffmpeg': 'C:/tools/ffmpeg.exe'})
     assert dialog.values() == {'root': 'C:/clips', 'tail_seconds': 0.3, 'ffmpeg': 'C:/tools/ffmpeg.exe', 'asr_python': None,
-                               'asr_model': None, 'asr_language': None, 'global_hotkey': True}
+                               'asr_model': None, 'asr_language': None, 'global_hotkey': False, 'output_device': None,
+                               'record_key': None, 'theme': 'dark', 'text_scale': None, 'language': None}
     dialog.ffmpeg.edit.setText('')
     dialog.root.edit.setText('D:/voice')
     dialog.tail.setValue(1.5)
@@ -665,11 +668,11 @@ def test_the_settings_dialog_returns_what_was_typed_and_none_for_what_was_cleare
 def test_the_settings_dialog_offers_the_record_key_in_other_programs_and_starts_from_the_saved_choice(qapp, monkeypatch):
     monkeypatch.setattr(clean, 'locate', lambda configured=None: None)
     dialog = dialog_mod.SettingsDialog({})
-    assert dialog.hotkey.isChecked() and dialog.values()['global_hotkey'] is True            # on unless the settings say not
-    dialog = dialog_mod.SettingsDialog({'global_hotkey': False})
-    assert not dialog.hotkey.isChecked() and dialog.values()['global_hotkey'] is False
-    dialog.hotkey.setChecked(True)
-    assert dialog.values()['global_hotkey'] is True
+    assert not dialog.hotkey.isChecked() and dialog.values()['global_hotkey'] is False       # off unless the settings say so
+    dialog = dialog_mod.SettingsDialog({'global_hotkey': True})
+    assert dialog.hotkey.isChecked() and dialog.values()['global_hotkey'] is True
+    dialog.hotkey.setChecked(False)
+    assert dialog.values()['global_hotkey'] is False
 
 
 def test_the_settings_dialog_takes_a_language_code_and_nothing_longer(qapp, monkeypatch):

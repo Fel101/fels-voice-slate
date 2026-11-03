@@ -5,6 +5,8 @@ and described in one place.
 """
 from PySide6.QtGui import QAction, QKeySequence
 
+from .. import hotkey
+from ..i18n import tr
 from . import icons
 
 # name: (text, icon, shortcuts, tooltip, checkable)
@@ -35,6 +37,8 @@ SPEC = {
     'shorten': ('Shorten pauses', 'shorten', [], 'Cut long pauses inside the clip down to 0.5 s each', False),
     'check_joins': ('Check joins', 'check_joins', [], 'Play one second either side of each cut, so every join can be '
                                                        'judged', False),
+    'split_take': ('Split at pauses...', 'split', [], 'Make a new take of each part of this long take, cut in the middle of '
+                                                       'its pauses. The take itself stays', False),
     'cut_start': ('Cut from start to here', None, [], 'Cut everything before the playhead (or the end of the selection)',
                   False),
     'cut_end': ('Cut from here to end', None, [], 'Cut everything after the playhead (or the start of the selection)',
@@ -52,21 +56,37 @@ SPEC = {
     'discard': ('Discard take...', 'trash', [], 'Move this take to the Recycle Bin', False),
     'rerecord': ('Re-record', None, [], 'Move this take to the Recycle Bin and record again', False),
     'rename': ('Rename take', None, ['F2'], 'Give this take a label to find it by', False),
+    'next_take': ('Next take', None, ['Alt+Down'], 'Open the next take down the list', False),
+    'prev_take': ('Previous take', None, ['Alt+Up'], 'Open the next take up the list', False),
+    'keep_selected': ('Keep selected takes...', None, [], 'Keep the takes selected in the list, with one statement of '
+                                                           'permission for all of them', False),
+    'discard_selected': ('Discard selected takes...', None, [], 'Move the takes selected in the list to the Recycle Bin',
+                         False),
+    'move_selected': ('Move selected takes to speaker...', None, [], 'File the takes selected in the list under a different '
+                                                                      'speaker', False),
     'import_recording': ('Import recording...', 'import', ['Ctrl+O'], 'Copy a recording in as a new take', False),
     'new_speaker': ('New speaker...', 'plus', ['Ctrl+N'], 'Add a speaker', False),
     'rename_speaker': ('Rename speaker...', None, [], 'Change the name this speaker is shown under. Their folder and clips '
                                                        'are not touched', False),
+    'speaker_details': ('Speaker details...', None, [], "This speaker's signed release: the file, when it was signed and "
+                                                        'when it runs out', False),
+    'delete_speaker': ('Delete speaker...', None, [], 'Move this speaker, their clips and their release to the Recycle Bin',
+                       False),
     'move_take': ('Move take to speaker...', None, [], 'File this take under a different speaker', False),
     'save_copy': ('Save a copy...', None, ['Ctrl+Shift+S'],
                   'Save a copy of this kept clip as WAV, FLAC, MP3 or Ogg, at the sample rate you choose', False),
     'export_manifest': ('Export manifest...', None, [],
                         'List the kept clips with their transcripts in a CSV or JSON Lines file, for other programs', False),
+    'export_dataset': ('Export dataset...', None, [], 'Gather the kept clips in one new folder, as clips with their sidecars or '
+                                                      'in the LJSpeech layout, at the sample rate you choose', False),
     'refresh_devices': ('Refresh devices', None, [], 'Look for microphones and outputs again', False),
     'open_folder': ('Open output folder', 'folder', ['Ctrl+Shift+O'], 'Show the output folder in Explorer', False),
     'load_script': ('Load script...', None, ['Ctrl+Shift+L'], 'Read prompts from a text file, one line per take', False),
     'clear_script': ('Clear script', None, [], 'Stop using the script', False),
     'prev_line': ('Previous script line', 'chevron_left', ['Ctrl+Up'], 'Go back one line of the script', False),
     'next_line': ('Next script line', 'chevron_right', ['Ctrl+Down'], 'Go to the next line of the script', False),
+    'next_open': ('Next line to record', None, ['Ctrl+Shift+Down'], 'Go to the next line of the script that has no kept clip',
+                  False),
     # the program
     'settings': ('Settings...', 'settings', ['Ctrl+,'], 'Output folder, record key, FFmpeg and draft transcripts', False),
     'shortcuts': ('Keyboard shortcuts', None, ['F1'], 'List every shortcut', False),
@@ -79,23 +99,41 @@ def shortcut_text(keys):
     return ' / '.join(QKeySequence(k).toString(QKeySequence.SequenceFormat.NativeText) for k in keys)
 
 
+def key_problem(text):
+    """Why a key cannot be the record key, in words the person can read, or '' when it can."""
+    if hotkey.parse_key(text) is None:
+        return 'Use a function key such as F9, or a letter or number held with Ctrl or Alt.'
+    wanted = QKeySequence(text)
+    for name, (label, _, keys, _, _) in SPEC.items():
+        if name != 'record' and any(QKeySequence(key) == wanted for key in keys):
+            return f'That key is already used for {label.rstrip(".")}.'
+    return ''
+
+
 class Actions:
     """The window's QActions by name: `actions.cut`, `actions['cut']`."""
 
     def __init__(self, parent):
         self._items = {}
         for name, (text, icon, keys, tip, checkable) in SPEC.items():
-            action = QAction(text, parent)
+            action = QAction(tr(text), parent)
             if icon:
                 action.setIcon(icons.icon(icon))
             if keys:
                 action.setShortcuts([QKeySequence(k) for k in keys])
-            action.setToolTip(f'{tip} ({shortcut_text(keys)})' if keys else tip)
-            action.setStatusTip(tip)
+            action.setToolTip(f'{tr(tip)} ({shortcut_text(keys)})' if keys else tr(tip))
+            action.setStatusTip(tr(tip))
             action.setCheckable(checkable)
             action.setObjectName(name)
             parent.addAction(action)                  # shortcuts work even when a button is hidden or collapsed
             self._items[name] = action
+
+    def set_record_key(self, text):
+        """Make `text` the key of the Record command."""
+        _, _, _, tip, _ = SPEC['record']
+        action = self._items['record']
+        action.setShortcut(QKeySequence(text))
+        action.setToolTip(f'{tr(tip)} ({text})')
 
     def __getattr__(self, name):
         try:

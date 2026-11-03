@@ -13,11 +13,12 @@ from pathlib import Path
 
 import soundfile as sf
 
+from . import audio_core as ac
 from .store import KNOWN_SCHEMAS, Library, SidecarProblem, clean_label, file_sha256
 
 FORMATS = {'jsonl': ('JSON Lines', '.jsonl'), 'csv': ('CSV', '.csv')}
 COLUMNS = ('audio_filepath', 'text', 'duration', 'speaker', 'speaker_id', 'label', 'sample_rate', 'source', 'created', 'id',
-           'origin', 'allowed_use', 'transcript_status', 'sha256')
+           'origin', 'allowed_use', 'transcript_status', 'sha256', 'purpose', 'release_signed', 'release_expires')
 # A spreadsheet reads a cell that starts with one of these as a formula, and a transcript can start with anything.
 _FORMULA_STARTS = ('=', '+', '-', '@', '\t', '\r')
 # Text that some programs treat as the end of a line, although JSON does not: written as escapes so a row is one line.
@@ -46,6 +47,8 @@ def _row(library, folder, data, slug, speaker, base):
         raise SidecarProblem('it is incomplete')
     if data.get('consent_confirmed') is not True:
         raise SidecarProblem('it does not record the permission to use the voice')
+    if library.release_problem(slug):
+        raise SidecarProblem(f'the release for this voice ran out on {library.release_ends(slug)[1]}')
     wav = Library.inside(folder, export.get('file'))
     if wav.name != export.get('file'):
         raise SidecarProblem('its WAV is not next to it')
@@ -61,6 +64,7 @@ def _row(library, folder, data, slug, speaker, base):
         raise SidecarProblem('its WAV could not be read') from None
     if actual != recorded.lower():
         raise SidecarProblem('its WAV has changed since it was kept (the SHA-256 differs)')
+    release = library.release(slug) or {}
     return {
         'audio_filepath': _path_text(wav, base),
         'text': data['transcript'].strip(),
@@ -76,6 +80,9 @@ def _row(library, folder, data, slug, speaker, base):
         'allowed_use': str(data.get('allowed_use') or '').strip(),
         'transcript_status': str(data.get('transcript_status') or ''),
         'sha256': actual,
+        'purpose': ac.purpose_of(data.get('purpose')).key,
+        'release_signed': release.get('signed', ''),
+        'release_expires': release.get('expires', ''),
     }
 
 

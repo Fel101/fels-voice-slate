@@ -32,8 +32,8 @@ def test_an_empty_capture_is_refused_with_a_notice(session):
 
 
 def test_a_capture_longer_than_the_limit_is_cut_to_it(session):
-    take = record(session, samples=np.zeros(41 * RATE, np.float32) + 0.1)
-    assert take.seconds == pytest.approx(40.0, abs=0.01)
+    take = record(session, samples=np.zeros(121 * RATE, np.float32) + 0.1)
+    assert take.seconds == pytest.approx(120.0, abs=0.01)
 
 
 def test_a_second_take_while_reviewing_the_first_opens_the_new_one(session):
@@ -324,7 +324,7 @@ def test_re_record_replaces_the_take_and_starts_again(session, monkeypatch):
     from recorder import capture as cap
     fake = FakeCapture(speech(1.0))
     fake.recording = False
-    monkeypatch.setattr(cap, 'open_capture', lambda source, device, pre_roll: fake)
+    monkeypatch.setattr(cap, 'open_capture', lambda source, device, pre_roll, channel: fake)
     take = record(session, 5.0)
     assert session.re_record() is True
     assert take not in session.workspace.takes and session.capturing.recording

@@ -33,6 +33,19 @@ def test_asking_for_a_draft_without_the_recognizer_explains_how_to_get_one():
         transcript.suggest(np.zeros(24000, np.float32), None, None)
 
 
+def test_a_long_clip_is_given_longer_to_draft(recognizer, monkeypatch):
+    python, model = recognizer
+    seen = {}
+
+    def run(command, **kwargs):
+        seen.update(kwargs)
+        return subprocess.CompletedProcess(command, 0, stdout='{"text": "Words."}', stderr='')
+
+    monkeypatch.setattr(transcript.subprocess, 'run', run)
+    transcript.suggest(np.zeros(24000 * 600, np.float32), python, model)
+    assert seen['timeout'] == transcript.TIMEOUT_SECONDS + 1800
+
+
 def test_a_draft_is_read_from_the_last_line_of_the_workers_output(recognizer, monkeypatch):
     python, model = recognizer
     seen = {}
@@ -44,7 +57,7 @@ def test_a_draft_is_read_from_the_last_line_of_the_workers_output(recognizer, mo
 
     monkeypatch.setattr(transcript.subprocess, 'run', run)
     result = transcript.suggest(np.zeros(24000, np.float32), python, model)
-    assert result == {'text': 'Hello there.', 'language': 'en', 'duration_seconds': 1.0, 'tidied': False}
+    assert result == {'text': 'Hello there.', 'words': [], 'language': 'en', 'duration_seconds': 1.0, 'tidied': False}
     assert seen['command'][:3] == [str(python), '-I', str(transcript.WORKER)]
     assert '--model-dir' in seen['command'] and str(model) in seen['command']
     assert '--language' not in seen['command']
@@ -178,7 +191,7 @@ def test_the_worker_reads_a_local_folder_and_never_downloads(tmp_path, monkeypat
     monkeypatch.setitem(sys.modules, 'faster_whisper', types.SimpleNamespace(WhisperModel=FakeModel))
     assert asr_worker.main(['--model-dir', str(tmp_path), '--audio', 'clip.wav']) == 0
     assert seen['kwargs']['local_files_only'] is True
-    assert json.loads(capsys.readouterr().out) == {'text': 'Good morning. Everyone.', 'language': 'en',
+    assert json.loads(capsys.readouterr().out) == {'text': 'Good morning. Everyone.', 'words': [], 'language': 'en',
                                                    'language_probability': 0.988, 'duration_seconds': 3.0,
                                                    'silence_filter': True}
 

@@ -8,7 +8,7 @@ from collections import namedtuple
 
 from .. import clean
 from ..core import autofix
-from .measure import recipe_key
+from .measure import take_key
 
 Advice = namedtuple('Advice', 'key diagnosis error')            # diagnosis is None when the clip could not be looked at
 Done = namedtuple('Done', 'key steps changes')                  # what the last Auto fix did, for the recipe it produced
@@ -31,7 +31,7 @@ class Advisor:
     def advice(take):
         """The advice for the take as it is now, or None (not asked for, still being worked out, or out of date)."""
         have = take.cache.get('advice') if take is not None else None
-        return have if have is not None and have.key == recipe_key(take.history) else None
+        return have if have is not None and have.key == take_key(take) else None
 
     def working(self, take):
         """True while the advice for the take as it is now is being worked out."""
@@ -41,7 +41,7 @@ class Advisor:
     def done(take):
         """What Auto fix did to produce the take as it is now, or None if anything was changed since."""
         have = take.cache.get('advice_done') if take is not None else None
-        return have if have is not None and have.key == recipe_key(take.history) else None
+        return have if have is not None and have.key == take_key(take) else None
 
     @staticmethod
     def summary(advice):
@@ -70,7 +70,7 @@ class Advisor:
         if have is not None:
             self.bus.status(self.summary(have))
         else:
-            take.cache['advice_announce'] = recipe_key(take.history)
+            take.cache['advice_announce'] = take_key(take)
             self.bus.status('Analyzing the clip...')
             self.refresh()
         self.bus.notify('advice')
@@ -86,7 +86,7 @@ class Advisor:
         have = self.advice(take)
         if have is not None:
             return self._apply(take, have)
-        take.cache['advice_fix'] = recipe_key(take.history)
+        take.cache['advice_fix'] = take_key(take)
         self.bus.status('Auto fix: looking at the clip first...')
         self.refresh()
         self.bus.notify('advice')
@@ -97,7 +97,7 @@ class Advisor:
         take = self.workspace.current
         if not self.watching(take):
             return
-        key = recipe_key(take.history)
+        key = take_key(take)
         if self.advice(take) is None and take.cache.get('advice_requested') != key:
             self._request(take, key)
 
@@ -105,11 +105,11 @@ class Advisor:
 
     def _request(self, take, key):
         take.cache['advice_requested'] = key
-        history, lib, can_clean = take.history.copy(), self.workspace.lib, clean.available()
+        history, lib, can_clean, purpose = take.history.copy(), self.workspace.lib, clean.available(), take.purpose
 
         def work():
             diagnosis = autofix.diagnose(take.samples, take.rate, history, lambda recipe: lib.before_level(take, recipe),
-                                         denoise_ok=can_clean)
+                                         denoise_ok=can_clean, purpose=purpose)
             return Advice(key, diagnosis, '')
 
         def arrived(result):
@@ -131,7 +131,7 @@ class Advisor:
         asked = take.cache.pop('advice_fix', None)
         if asked is None or take is not self.workspace.current:
             return
-        if asked != advice.key or advice.key != recipe_key(take.history):
+        if asked != advice.key or advice.key != take_key(take):
             self.bus.status('The clip changed while Auto fix was looking at it. Press Auto fix again.')
             return
         self._apply(take, advice)
@@ -147,7 +147,7 @@ class Advisor:
             return False
         if not self.editor.apply_auto_fix(diagnosis):
             return False
-        take.cache['advice_done'] = Done(recipe_key(take.history), list(diagnosis.steps), diagnosis.changes)
+        take.cache['advice_done'] = Done(take_key(take), list(diagnosis.steps), diagnosis.changes)
         self.refresh()
         self.bus.notify('advice')
         return True

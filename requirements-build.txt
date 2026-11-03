@@ -1,0 +1,2 @@
+# What is needed to build the Windows installer, besides Inno Setup 6: see tools/build_installer.py.
+uv==0.12.1

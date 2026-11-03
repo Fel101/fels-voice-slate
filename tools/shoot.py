@@ -1,6 +1,6 @@
 """Render every state of the window to PNG with synthetic audio, so the look can be checked and the README illustrated.
 
-    python tools/shoot.py [--out DIR] [--scale 1.5] [--size 1440x960] [--only edit process ...]
+    python tools/shoot.py [--out DIR] [--scale 1.5] [--size 1440x960] [--theme light] [--only edit process ...]
 
 It needs no microphone, speaker or recording: the take is generated (tools/synthetic.py) and the library is a temporary
 folder that is removed afterwards. Run it with the same Python as the recorder.
@@ -11,6 +11,7 @@ The pictures come out the same size on every display (1440 by 960 by default, wh
 import argparse
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -19,8 +20,9 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-STATES = ['edit', 'process', 'check', 'analyze', 'record', 'empty', 'compact', 'settings', 'about', 'shortcuts', 'copy',
-          'manifest']
+STATES = ['edit', 'process', 'check', 'analyze', 'record', 'empty', 'compact', 'reading', 'script', 'light', 'settings', 'about',
+          'shortcuts', 'copy', 'manifest', 'dataset', 'speaker', 'keepmany']
+DIALOGS = ('settings', 'about', 'shortcuts', 'copy', 'manifest', 'dataset', 'speaker', 'keepmany')
 SAMPLE = ('The morning ferry left the harbour just as the fog began to lift from the water, and the gulls followed '
           'it out past the lighthouse.')
 SCRIPT = ('The morning ferry left the harbour just as the fog began to lift.\n'
@@ -34,6 +36,8 @@ def parse():
     parser.add_argument('--out', default=str(ROOT / 'docs' / 'images'), help='folder for the PNG files')
     parser.add_argument('--scale', type=float, default=1.0, help='display scale, for example 1.5 for a sharper picture')
     parser.add_argument('--size', default='1440x960', help='window size, WIDTHxHEIGHT')
+    parser.add_argument('--theme', default='dark', choices=('dark', 'light', 'contrast'), help='the look of the window')
+    parser.add_argument('--language', default='en', help='the language of the window, such as de')
     parser.add_argument('--only', nargs='*', choices=STATES, help='render only these states')
     return parser.parse_args()
 
@@ -49,6 +53,7 @@ def build_session(work):
     capture.default_microphone = lambda: 1
     capture.list_loopbacks = lambda: [(9, 'Speakers [Loopback]')]
     capture.default_loopback = lambda: 9
+    capture.input_channels = lambda device: 1
     settings_file = work / 'settings.json'
     settings.update({'root': str(work / 'clips')}, settings_file)
     session = Session(settings_file=settings_file, jobs=Jobs(inline=True), player=synthetic.NullPlayer(),
@@ -145,6 +150,48 @@ def analyze_take(app, window):
     window.flush()
 
 
+def read_a_line(session, heard=None):
+    """A take of the script line in front, with what the recognizer heard and the times of its words."""
+    import numpy as np
+
+    import synthetic
+    line = session.script.current
+    take = session.workspace.add_take(np.array(session.current.samples), synthetic.RATE, 'mic', {}, script_line=line)
+    words = (heard or line).split()
+    step = take.seconds / len(words)
+    session.drafts.receive(take, heard or line, None,
+                           words=[(word, round(i * step + 0.1, 3), round((i + 1) * step - 0.1, 3)) for i, word in enumerate(words)])
+    session.workspace.set_meta(origin='Recorded by me, in my room, microphone only', allowed_use='Personal voice projects')
+    return take
+
+
+def reading_take(app, window):
+    """A line read from a script with two places that differ, and the words of the take under the waveform."""
+    session = window.session
+    session.script.load_text(SCRIPT)
+    read_a_line(session, 'The morning ferry left the harbour as the fog started to lift.')
+    session.editor.select_words(5, 5)
+    window.flush()
+    settle(app, session)
+    measure(app, window)
+    window._show_status('Reading check: 2 places differ from the script. The Clip tab shows where. Listen: the recognizer can be '
+                        'wrong too.')
+
+
+def script_take(app, window):
+    """The Script tab, part of the way through a script."""
+    session = window.session
+    session.script.load_text(SCRIPT)
+    read_a_line(session)
+    session.workspace.set_meta(consent_confirmed=True)
+    session.keep()
+    read_a_line(session)
+    window.flush()
+    settle(app, session)
+    measure(app, window)
+    window.inspector.show_tab(window.inspector.SCRIPT_TAB)
+
+
 def save_picture(widget, path, scale):
     """Save a picture of the widget, `scale` times its size in logical pixels whatever the display's own scaling is."""
     from PySide6.QtCore import Qt
@@ -163,6 +210,7 @@ def render(window, app, path, size, scale):
     window.show()
     for _ in range(6):
         app.processEvents()
+    settle(app, window.session)                  # the outlines in the list are asked for as the rows are first drawn
     save_picture(window, path, scale)
 
 
@@ -172,30 +220,44 @@ def main():
     os.environ['QT_SCALE_FACTOR'] = str(args.scale)
     from PySide6.QtWidgets import QApplication
 
+    from recorder import i18n
     from recorder.ui import theme
+    i18n.use(args.language)
     theme.prepare_display()
     app = QApplication(sys.argv[:1])
-    theme.install(app)
+    theme.install(app, args.theme)
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     wanted = args.only or STATES
     work = Path(tempfile.mkdtemp(prefix='recorder-shoot-'))
     try:
         for state in wanted:
+            if state == 'light' and args.theme != 'light':      # a theme is chosen as the program starts, so this one is its own run
+                subprocess.run([sys.executable, __file__, '--out', str(out), '--theme', 'light', '--only', 'light'], check=True)
+                continue
             folder = work / state
             folder.mkdir()
             session = build_session(folder)
-            if state in ('settings', 'about', 'shortcuts', 'copy', 'manifest'):
+            if state in DIALOGS:
+                from types import SimpleNamespace
+
                 from PySide6.QtCore import Qt
 
                 from recorder import clean
                 from recorder.ui import dialogs
                 clean.locate = lambda configured=None: Path(r'C:\Tools\ffmpeg\bin\ffmpeg.exe')   # no real paths in pictures
-                fake = {'root': r'C:\Apps\voice-slate\voice-clips', 'asr_language': 'en', 'tail_seconds': 0.5}
+                fake = {'root': r'C:\Users\you\Recordings\voice-clips', 'asr_language': 'en', 'tail_seconds': 0.5,
+                        'outputs': ['Speakers  [Windows WASAPI]']}
+                said = {'origin': 'Recorded by me, in my room, microphone only', 'allowed_use': 'Personal voice projects'}
+                release = {'file': 'signed-release.pdf', 'signed': '2026-09-02', 'expires': '2027-09-02',
+                           'notes': 'Covers the narrator of the game, and nothing else.'}
                 dialog = {'settings': lambda: dialogs.SettingsDialog(fake),
                           'about': dialogs.AboutDialog, 'shortcuts': dialogs.ShortcutsDialog,
                           'copy': lambda: dialogs.CopyDialog('Welcome back, take two'),
-                          'manifest': lambda: dialogs.ManifestDialog('My voice')}[state]()
+                          'manifest': lambda: dialogs.ManifestDialog('My voice'),
+                          'dataset': lambda: dialogs.DatasetDialog('My voice'),
+                          'speaker': lambda: dialogs.SpeakerDialog('Sam Rivera', release, True),
+                          'keepmany': lambda: dialogs.KeepManyDialog('My voice', [SimpleNamespace(meta=said)] * 12, said)}[state]()
                 dialog.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)        # drawn, but never on the person's screen
                 dialog.show()
                 for _ in range(4):
@@ -215,7 +277,7 @@ def main():
             if state == 'record':
                 import synthetic
                 from recorder import capture
-                capture.open_capture = lambda source, device, pre_roll: synthetic.SyntheticCapture(12.48)
+                capture.open_capture = lambda source, device, pre_roll, channel=None: synthetic.SyntheticCapture(12.48)
                 session.script.load_text(SCRIPT)
                 session.script.step(2)
                 session.capturing.start()
@@ -227,6 +289,9 @@ def main():
             elif state == 'analyze':
                 analyze_take(app, window)
                 render(window, app, out / 'analyze.png', size, args.scale)
+            elif state in ('reading', 'script'):
+                (reading_take if state == 'reading' else script_take)(app, window)
+                render(window, app, out / f'{state}.png', size, args.scale)
             else:
                 review_take(app, window)
                 if state == 'process':
@@ -238,7 +303,7 @@ def main():
                     window.inspector.show_tab(1)
                 elif state == 'check':
                     window.inspector.show_tab(2)
-                render(window, app, out / f'{state}.png', (1100, 700) if state == 'compact' else size, args.scale)
+                render(window, app, out / f'{state}.png', (1100, 640) if state == 'compact' else size, args.scale)
             window.timer.stop()
             window.close()
     finally:

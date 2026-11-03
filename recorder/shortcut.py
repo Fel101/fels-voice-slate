@@ -23,7 +23,7 @@ from . import settings
 
 ICON = Path('recorder') / 'resources' / 'voice-slate.ico'
 ARGUMENTS = '-m recorder'
-DESCRIPTION = 'Record, edit and check short voice reference clips'
+DESCRIPTION = 'Record, edit and check clean voice clips'
 FOLDERS = {'desktop': 'B4BFCC3A-DB2C-424C-B029-7FE99A87C641', 'start-menu': 'A77F5D77-2E2B-44C3-A6A2-ABA601054A51'}
 FALLBACK_FOLDERS = {'desktop': Path('Desktop'), 'start-menu': Path('AppData/Roaming/Microsoft/Windows/Start Menu/Programs')}
 VT_LPWSTR = 31

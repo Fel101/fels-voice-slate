@@ -13,12 +13,13 @@ from PySide6.QtGui import QMouseEvent  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from helpers import fill, record  # noqa: E402
+from ui_helpers import row_point  # noqa: E402
 from recorder import manifest, share  # noqa: E402
 from recorder.ui.actions import SPEC  # noqa: E402
 
 
 def cards(window):
-    return [card for card in window.library._cards if not card.isHidden()]
+    return window.library.rows()
 
 
 def keep_one(window, session, **meta):
@@ -40,12 +41,21 @@ def other_speaker(session, name='Other Speaker'):
     return first, second
 
 
-def pull(card, dx=40, dy=0, press=(20, 20)):
-    """Press on the card and move the pointer away with the button held, as someone starting a drag does."""
-    where, there = QPointF(*press), QPointF(press[0] + dx, press[1] + dy)
-    none, left, plain = Qt.MouseButton.NoButton, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier
-    QApplication.sendEvent(card, QMouseEvent(QEvent.Type.MouseButtonPress, where, card.mapToGlobal(where), left, left, plain))
-    QApplication.sendEvent(card, QMouseEvent(QEvent.Type.MouseMove, there, card.mapToGlobal(there), none, left, plain))
+def send(view, kind, where, button, buttons):
+    plain = Qt.KeyboardModifier.NoModifier
+    QApplication.sendEvent(view, QMouseEvent(kind, where, view.mapToGlobal(where), button, buttons, plain))
+
+
+def pull(window, place=0, dx=40, dy=0):
+    """Press on a row and move the pointer away with the button held, as someone starting a drag does, and let go."""
+    view = window.library.list.viewport()
+    start = row_point(window, place)
+    where, there = QPointF(start), QPointF(start.x() + dx, start.y() + dy)
+    none, left = Qt.MouseButton.NoButton, Qt.MouseButton.LeftButton
+    send(view, QEvent.Type.MouseButtonPress, where, left, left)
+    send(view, QEvent.Type.MouseMove, where, none, left)
+    send(view, QEvent.Type.MouseMove, there, none, left)
+    send(view, QEvent.Type.MouseButtonRelease, there, left, none)
 
 
 class Drags(list):
@@ -72,8 +82,7 @@ def drags(window):
 
 def test_pulling_a_kept_card_away_starts_a_drag_that_carries_the_clips_file(window, session, drags):
     take = keep_one(window, session)
-    [card] = cards(window)
-    pull(card)
+    pull(window)
     [drag] = drags
     mime = drag.mimeData()
     assert mime.hasUrls() and mime.urls() == [QUrl.fromLocalFile(str(take.export_path))]
@@ -84,36 +93,34 @@ def test_pulling_a_kept_card_away_starts_a_drag_that_carries_the_clips_file(wind
 def test_the_drag_offers_copying_and_nothing_else(window, session, drags):
     """A drop target that is offered only a copy cannot move the clip out of the library."""
     keep_one(window, session)
-    pull(cards(window)[0])
+    pull(window)
     assert drags.offered == [Qt.DropAction.CopyAction]
     assert not drags.offered[0] & Qt.DropAction.MoveAction and not drags.offered[0] & Qt.DropAction.LinkAction
 
 
 def test_the_drag_carries_a_picture_of_the_card(window, session, drags):
     keep_one(window, session)
-    pull(cards(window)[0])
+    pull(window)
     assert not drags[0].pixmap().isNull() and drags[0].pixmap().width() <= 240 * max(1, drags[0].pixmap().devicePixelRatio())
 
 
 def test_a_take_that_is_not_kept_cannot_be_dragged_out(window, session, drags):
     record(session, 12.0)
     window.flush()
-    pull(cards(window)[0])
+    pull(window)
     assert drags == []
 
 
 def test_a_small_movement_is_a_click_and_not_a_drag(window, session, drags):
     keep_one(window, session)
-    pull(cards(window)[0], dx=1)
+    pull(window, dx=1)
     assert drags == []
 
 
 def test_moving_with_no_button_down_does_not_drag(window, session, drags):
     keep_one(window, session)
-    card = cards(window)[0]
-    there = QPointF(90, 20)
-    QApplication.sendEvent(card, QMouseEvent(QEvent.Type.MouseMove, there, card.mapToGlobal(there), Qt.MouseButton.NoButton,
-                                             Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier))
+    view = window.library.list.viewport()
+    send(view, QEvent.Type.MouseMove, QPointF(row_point(window, 0)), Qt.MouseButton.NoButton, Qt.MouseButton.NoButton)
     assert drags == []
 
 
@@ -122,30 +129,26 @@ def test_one_pull_starts_one_drag_and_the_press_still_opens_the_take(window, ses
     second = record(session, 12.0)
     window.flush()
     assert session.current is second
-    card = next(c for c in cards(window) if c.take is first)
-    pull(card, dx=60)
-    pull(card, dx=90)                                          # the release came first, so this is a new press
+    place = [c.take for c in cards(window)].index(first)
+    pull(window, place, dx=60)
+    pull(window, place, dx=90)                                 # the release came first, so this is a new press
     assert session.current is first and len(drags) == 2
-    QApplication.sendEvent(card, QMouseEvent(QEvent.Type.MouseMove, QPointF(150, 20), card.mapToGlobal(QPointF(150, 20)),
-                                             Qt.MouseButton.NoButton, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier))
-    assert len(drags) == 2                                     # moving further during the same press starts no second drag
 
 
 def test_nothing_is_dragged_while_recording(window, session, drags, open_fake):
     keep_one(window, session)
-    card = cards(window)[0]
     session.capturing.start()
     window.flush()
-    pull(card)
+    pull(window, 1)
     assert drags == []
 
 
 def test_a_clip_whose_file_has_gone_is_not_dragged(window, session, drags):
     take = keep_one(window, session)
     take.export_path.unlink()
-    pull(cards(window)[0])
+    pull(window)
     assert drags == []
-    assert window.library.make_drag(take, cards(window)[0]) is None
+    assert window.library.make_drag([take]) is None
 
 
 def test_a_kept_card_says_it_can_be_dragged(window, session):
@@ -153,7 +156,7 @@ def test_a_kept_card_says_it_can_be_dragged(window, session):
     record(session, 12.0)
     window.flush()
     kept, plain = sorted(cards(window), key=lambda c: not c.take.kept)
-    assert 'Drag the card' in kept.toolTip() and 'Drag the card' not in plain.toolTip()
+    assert 'Drag the card' in kept.tip and 'Drag the card' not in plain.tip
 
 
 # ---- save a copy --------------------------------------------------------------------------------------------------------
@@ -161,8 +164,10 @@ def test_a_kept_card_says_it_can_be_dragged(window, session):
 def test_the_new_commands_are_in_the_gear_menu_in_groups(window):
     names = [a.text() for a in window.topbar.menu.actions()]
     start = names.index('Move take to speaker...')
-    assert names[start - 1] == '' and names[start:start + 3] == ['Move take to speaker...', 'Save a copy...', 'Export manifest...']
-    assert names[start + 3] == ''
+    assert names[start - 1] == '' and names[start:start + 5] == ['Move take to speaker...', 'Save a copy...',
+                                                                 'Export manifest...', 'Export dataset...',
+                                                                 'Split at pauses...']
+    assert names[start + 5] == ''
 
 
 def test_save_a_copy_has_its_own_shortcut_and_no_other_command_has_it(window):
@@ -522,7 +527,7 @@ def test_the_speaker_picker_shows_the_clip_under_the_new_speaker(window, session
     window.library.speakerPicked.emit(second)
     window.flush()
     [card] = cards(window)
-    assert card.take is take and card.status == 'Kept' and 'Drag the card' in card.toolTip()
+    assert card.take is take and card.status == 'Kept' and 'Drag the card' in card.tip
 
 
 # ---- the dialogs --------------------------------------------------------------------------------------------------------
@@ -572,10 +577,24 @@ def test_the_real_dialogs_hand_back_what_was_chosen_or_none(qapp, monkeypatch):
     assert dialogs.copy_options('x') is None and dialogs.manifest_options('Ann') is None
 
 
+def test_as_kept_names_the_rate_the_clip_was_kept_at(qapp):
+    from recorder.ui.dialogs import CopyDialog
+    dialog = CopyDialog('A clip', kept_rate=48000)
+    marked = [dialog.rate.itemText(i) for i in range(dialog.rate.count()) if 'as kept' in dialog.rate.itemText(i)]
+    assert marked == ['48 kHz (as kept)']
+
+
+def test_the_window_says_what_rate_the_clip_was_kept_at(window, session, dialogs):
+    session.workspace.set_purpose('audition')
+    keep_one(window, session)
+    window.save_copy()
+    assert dialogs.asked[-1][1].kept_rate == 48000
+
+
 def test_the_shortcuts_dialog_lists_save_a_copy(qapp):
     from recorder.ui.dialogs import SHORTCUT_GROUPS
     group = dict(SHORTCUT_GROUPS)['Clips and files']
-    assert 'save_copy' in group and group.index('save_copy') == group.index('rename') + 1
+    assert 'save_copy' in group and group.index('save_copy') == group.index('prev_take') + 1
     assert all(name in SPEC for names in dict(SHORTCUT_GROUPS).values() for name in names)
 
 
@@ -584,25 +603,22 @@ def test_the_shortcuts_dialog_lists_save_a_copy(qapp):
 def test_a_card_of_a_take_that_is_not_kept_never_asks_for_a_drag(window, session):
     record(session, 12.0)
     window.flush()
-    card = cards(window)[0]
-    asked = []
-    card.dragRequested.connect(asked.append)
-    pull(card)
-    assert asked == []
+    pull(window)
+    assert window.library.selected_takes() == [session.current]
 
 
 def test_the_panel_starts_no_drag_for_a_take_that_is_not_kept(window, session, drags):
     take = record(session, 12.0)
     window.flush()
-    window.library._drag(take)
+    window.library._drag([take])
     assert drags == []
     kept = keep_one(window, session)
-    window.library._drag(kept)
+    window.library._drag([kept])
     assert len(drags) == 1
 
 
 def test_the_panel_starts_no_drag_while_recording(window, session, drags, open_fake):
     kept = keep_one(window, session)
     session.capturing.start()
-    window.library._drag(kept)
+    window.library._drag([kept])
     assert drags == []

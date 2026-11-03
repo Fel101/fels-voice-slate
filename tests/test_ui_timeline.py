@@ -406,7 +406,8 @@ def test_the_number_boxes_are_disabled_without_a_take(window):
 
 # ---- the live view --------------------------------------------------------------------------------------------------------
 
-@pytest.mark.parametrize('elapsed, end', [(0.0, 10.0), (3.0, 10.0), (9.5, 15.0), (14.5, 20.0), (38.5, 40.0), (60.0, 40.0)])
+@pytest.mark.parametrize('elapsed, end', [(0.0, 10.0), (3.0, 10.0), (9.5, 15.0), (14.5, 20.0), (38.5, 40.0), (118.0, 120.0),
+                                          (130.0, 120.0)])
 def test_the_live_view_widens_in_steps_up_to_the_limit(qapp, elapsed, end):
     live = timeline.LiveWaveView()
     live.set_state(None, elapsed)

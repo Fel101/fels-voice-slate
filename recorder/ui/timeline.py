@@ -196,7 +196,7 @@ class TimelineView(QWidget):
         self.view = view
         view.changed.connect(self.update)
         self.setMouseTracking(True)
-        self.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self._drag = None
         self._moved = False
         self._mouse_x = 0.0
@@ -416,7 +416,10 @@ class WaveformView(TimelineView):
         self._layer = None
         self._layer_key = None
         self.layer_builds = 0
-        self.setMinimumHeight(200)
+        self.setMinimumHeight(140)
+        self.setAccessibleName('Waveform')
+        self.setAccessibleDescription('Left and Right move the playhead. Open and close square brackets set the start and the '
+                                      'end of a selection')
 
     def _geometry(self):
         area = self.height() - RULER
@@ -478,6 +481,10 @@ class WaveformView(TimelineView):
         draw_ruler(p, self.width(), self.view.t0, self.view.t1, self.x_of)
         self.paint_selection(p, rect)
         self.paint_playhead(p)
+        if self.hasFocus():
+            p.setPen(QPen(color('accent'), 1.5))
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.drawRect(QRectF(self.rect()).adjusted(1, 1, -1, -1))
 
 
 # ---- the spectrogram --------------------------------------------------------------------------------------------------
@@ -511,15 +518,17 @@ class SpectrogramView(TimelineView):
 
     def __init__(self, session, view, parent=None):
         super().__init__(session, view, parent)
-        self.setMinimumHeight(110)
+        self.setMinimumHeight(70)
+        self.setAccessibleName('Spectrogram')
 
     def _image(self, take):
         spec = self.session.measure.spectrogram(take)
         if spec is None:
             return None, None
-        if 'spectrogram_image' not in take.cache:
-            take.cache['spectrogram_image'] = spectrogram_image(spec)
-        return spec, take.cache['spectrogram_image']
+        image = take.cache.get('spectrogram_image')
+        if image is None:
+            image = take.cache['spectrogram_image'] = spectrogram_image(spec)
+        return spec, image
 
     def paintEvent(self, event):
         p = QPainter(self)
@@ -572,6 +581,7 @@ class Minimap(QWidget):
         view.changed.connect(self.update)
         self.setFixedHeight(58)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setAccessibleName('Overview of the clip')
         self._offset = None
         self._layer = None
         self._layer_key = None
@@ -666,16 +676,19 @@ class LiveWaveView(QWidget):
         super().__init__(parent)
         self.rows = np.zeros((0, 3), dtype=np.float32)
         self.elapsed = 0.0
-        self.setMinimumHeight(200)
+        self.limit = ac.PURPOSES[ac.DEFAULT_PURPOSE].record_limit
+        self.setMinimumHeight(140)
+        self.setAccessibleName('The recording so far')
 
-    def set_state(self, rows, elapsed):
+    def set_state(self, rows, elapsed, limit=None):
         self.rows = rows if rows is not None else np.zeros((0, 3), dtype=np.float32)
         self.elapsed = float(elapsed)
+        self.limit = limit or self.limit
         self.update()
 
     def window_end(self):
-        """The right edge of the picture in seconds: 10 s, then growing in steps of 5 s up to the 40 s limit."""
-        return min(max(10.0, math.ceil((self.elapsed + 1.0) / 5.0) * 5.0), ac.MAX_SECONDS)
+        """The right edge of the picture in seconds: 10 s, then growing in steps of 5 s up to the longest recording."""
+        return min(max(10.0, math.ceil((self.elapsed + 1.0) / 5.0) * 5.0), self.limit)
 
     def paintEvent(self, event):
         p = QPainter(self)

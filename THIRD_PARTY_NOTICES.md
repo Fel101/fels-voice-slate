@@ -5,6 +5,7 @@ The code of Fel's Voice Slate itself is released under the [MIT License](LICENSE
 It **uses** the libraries below. They are not copied into this repository and are not modified: `pip` installs them
 from PyPI (see [requirements.txt](requirements.txt)), and each one stays under its own licence. The full licence text of
 every package is installed with it, in `<your environment>\Lib\site-packages\<package>-<version>.dist-info\licenses\`.
+The **Windows installer** does contain them: see [The Windows installer](#the-windows-installer).
 
 The versions in the table are the ones this release was built and tested with.
 
@@ -31,9 +32,23 @@ puts in your environment, which you can replace with another build of the same v
 The source code of Qt for Python is available from <https://code.qt.io/cgit/pyside/pyside-setup.git/> and Qt's from
 <https://code.qt.io>.
 
-This repository does not contain a packaged build. If you make one (for example an `.exe` with PyInstaller), you are
-distributing Qt, and the LGPL-3.0 then asks you to ship its licence text, say that Qt is used, and let users replace the
-Qt libraries. See the [Qt licensing page](https://www.qt.io/licensing/) and the licence texts in the installed packages.
+This repository does not contain a packaged build. The installer made from it is described below. See the
+[Qt licensing page](https://www.qt.io/licensing/) and the licence texts in the installed packages.
+
+## The Windows installer
+
+The installer that `tools/build_installer.py` makes **distributes** these libraries, unchanged apart from leaving out parts the
+window does not use, with their licence files in `python\Lib\site-packages`:
+
+- **Python** itself, from the relocatable builds of [python-build-standalone](https://github.com/astral-sh/python-build-standalone)
+  (PSF-2.0, with bundled libraries under their own licences, listed in the Python folder), and
+- **Qt for Python and Qt**, under the **LGPL-3.0**: the program is plain Python that imports them, and they are ordinary files in
+  `python\Lib\site-packages\PySide6` of the installed folder, so you can replace them with another build of the same version. Their
+  source is at the links above. Nothing is frozen together, and
+- the other packages in the table above, including PortAudio, libsndfile (LGPL-2.1) and its codec libraries, under their own licences.
+
+The installer does not contain FFmpeg, the speech recognizer or a speech model. Installers are made with
+[Inno Setup](https://jrsoftware.org/isinfo.php), whose licence puts no conditions on what it packs.
 
 ## Tools for developing and testing
 
@@ -43,6 +58,7 @@ to run the program.
 | Package | Version | Licence |
 |---|---|---|
 | [pytest](https://docs.pytest.org) | 9.1.1 | MIT |
+| [uv](https://github.com/astral-sh/uv), only to build the installer | 0.12.1 | MIT or Apache-2.0 |
 | [pyflakes](https://github.com/PyCQA/pyflakes) | 4.0.3 | MIT |
 | pluggy 1.7.0, iniconfig 2.3.1 | | MIT |
 | packaging 26.3 | | Apache-2.0 or BSD-2-Clause |

@@ -81,6 +81,9 @@ class SyntheticCapture:
     def new_blocks(self):
         return []
 
+    def only_input(self):
+        return None
+
     def stalled(self):
         return False
 

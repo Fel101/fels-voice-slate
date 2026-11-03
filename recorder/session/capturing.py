@@ -1,4 +1,4 @@
-"""Recording: devices, start, stop with a tail, and what happens when a device fails or the take reaches 40 s.
+"""Recording: devices, start, stop with a tail, and what happens when a device fails or the take reaches its limit.
 
 While a take runs, what has arrived is written to a spool file on each tick, so a crash costs a moment and not the whole
 take. That writing can never disturb the recording: if it fails, the take carries on in memory, as it would have anyway.
@@ -10,7 +10,6 @@ toolkit and no sleeping.
 """
 import time
 
-from .. import audio_core as ac
 from .. import capture as cap
 from .. import settings
 
@@ -39,6 +38,8 @@ class Capturing:
         self.source = 'mic'
         self.devices = []                   # [(index, label)] for the current source
         self.device = None                  # index of the chosen device
+        self.inputs = 0                     # how many inputs that device has; more than one offers a choice
+        self.channel = None                 # which input to record, from 0; None mixes the first two
         self.interrupted = False
         self.finishing = False
         self.state = 'idle'
@@ -50,6 +51,7 @@ class Capturing:
         self._stay_armed = False            # the input was armed when this take started, so it is armed again after it
         self._spool = None                  # where the running take is being written as it is made
         self._spool_synced = 0.0
+        self._told_inputs = False           # the hint about a silent input has been given for this device
 
     # ---- state --------------------------------------------------------------------------------------------------------
 
@@ -85,6 +87,10 @@ class Capturing:
         if self.capture is not None and not self.recording:
             self.close_capture()
 
+    def _remembered(self, key):
+        found = settings.load(self.settings_file).get(key)
+        return found if isinstance(found, dict) else {}
+
     def refresh_devices(self):
         try:
             if self.source == 'mic':
@@ -96,19 +102,55 @@ class Capturing:
             self.bus.status(f'Could not list devices: {e}')
         self.devices = list(options)
         indexes = [index for index, _ in self.devices]
-        self.device = default if default in indexes else (indexes[0] if indexes else None)
+        chosen = self._remembered('input_device').get(self.source)      # by name: the numbers change as devices come and go
+        named = next((index for index, label in self.devices if label == chosen), None)
+        self.device = named if named is not None else default if default in indexes else (indexes[0] if indexes else None)
+        self._read_inputs()
         self.bus.notify('devices')
+
+    def _read_inputs(self):
+        """How many inputs the chosen device has, and which of them was chosen for it last time."""
+        self._told_inputs = False
+        self.inputs, self.channel = 0, None
+        if self.source != 'mic' or self.device is None:
+            return
+        try:
+            self.inputs = cap.input_channels(self.device)
+        except Exception:                       # the device has gone since the list was made: its own error comes at Record
+            return
+        chosen = self._remembered('input_channels').get(self.device_label())
+        self.channel = chosen if isinstance(chosen, int) and not isinstance(chosen, bool) and 0 <= chosen < self.inputs else None
 
     def select_device(self, index):
         """A device was picked from the list. Keep that choice; an idle capture is released so the next start uses it."""
         self.device = index
+        self._release_idle()
+        self._read_inputs()
+        settings.update({'input_device': {**self._remembered('input_device'), self.source: self.device_label()}},
+                        self.settings_file)
+        self.bus.notify('devices')
+
+    def select_channel(self, channel):
+        """Record one input of the device (from 0), or mix the first two (None). Remembered for this device."""
+        self.channel = channel
+        self._release_idle()
+        chosen = {name: value for name, value in self._remembered('input_channels').items() if name != self.device_label()}
+        if channel is not None:
+            chosen[self.device_label()] = channel
+        settings.update({'input_channels': chosen or None}, self.settings_file)
+        self.bus.notify('devices')
+
+    def _release_idle(self):
         if self.capture is not None and not self.recording:
             self.close_capture()
             self._set_state('idle')
-        self.bus.notify('devices')
 
     def device_label(self):
         return next((label for index, label in self.devices if index == self.device), '')
+
+    @property
+    def record_key(self):
+        return settings.record_key(settings.load(self.settings_file))
 
     def info(self):
         """What the window shows about the take being made. The rate and channels are known once a device is open."""
@@ -128,8 +170,8 @@ class Capturing:
         if self.capture is None:
             if self.device is None:
                 raise ValueError('Choose a device first.')
-            self.capture = cap.open_capture(self.source, self.device,
-                                            PRE_ROLL_SECONDS if self.source == 'mic' else 0.0)
+            self.capture = cap.open_capture(self.source, self.device, PRE_ROLL_SECONDS if self.source == 'mic' else 0.0,
+                                            self.channel)
         return self.capture
 
     def toggle(self):
@@ -168,7 +210,7 @@ class Capturing:
             self.close_capture()
             return False
         self._set_state('recording')
-        self.bus.status(self._open_spool(capture) or 'Recording. Press F9 or Stop when finished.')
+        self.bus.status(self._open_spool(capture) or f'Recording. Press {self.record_key} or Stop when finished.')
         return True
 
     def stop(self):
@@ -185,12 +227,13 @@ class Capturing:
 
     def tick(self):
         """The meter, the elapsed time, and the three ways a take ends by itself: the tail passes, the device stops,
-        or 40 s is reached."""
+        or it reaches the limit of its purpose."""
         capture = self.capture
         if capture is None:
             self._cancel_stop()
             return
         self.level = tuple(capture.level)
+        self._hint_about_inputs(capture)
         if not capture.recording:
             return
         self._write_spool(capture)
@@ -198,14 +241,26 @@ class Capturing:
         if not capture.alive() or capture.stalled():
             self.interrupted = True
             self.finish_take()
-        elif self.elapsed >= ac.MAX_SECONDS:
-            self.finish_take(message='Stopped at 40 s, the longest a reference can be.')
+        elif self.elapsed >= self.workspace.purpose.record_limit:
+            rules = self.workspace.purpose
+            self.finish_take(message=f'Stopped at {rules.record_limit:g} s, the longest recording for {rules.a_name}. '
+                                     'Trim the take or split it at its pauses.')
         elif self._stop is not None:
             pending, deadline = self._stop
             if pending is not capture:
                 self._cancel_stop()             # a tail left over from another capture can never end this one
             elif self.clock() >= deadline:
                 self.finish_take()
+
+    def _hint_about_inputs(self, capture):
+        """A voice on one of two mixed inputs comes out 6 dB low, and nothing else would show why."""
+        if self._told_inputs or self.channel is not None or self.source != 'mic':
+            return
+        only = capture.only_input()
+        if only is not None:
+            self._told_inputs = True
+            self.bus.status(f'Only input {only} has sound, and mixing it with the silent one lowers the voice by 6 dB. '
+                            f'Choose Input {only} beside the device.')
 
     def capture_failed(self, error):
         """An error while a device was open. Save what a running take captured, and always release the device."""
@@ -285,7 +340,7 @@ class Capturing:
         try:
             self._spool = self.workspace.lib.open_spool(self.workspace.speaker, capture.rate, capture.channels,
                                                         capture.backend.kind, self._device_of(capture),
-                                                        self.take_script_line)
+                                                        self.take_script_line, self.workspace.purpose.key)
         except OSError as e:
             self._spool = None
             return f'Recording, but only in memory until you stop: {e}'

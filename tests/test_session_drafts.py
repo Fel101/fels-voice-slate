@@ -78,7 +78,7 @@ def test_the_drafting_runs_on_the_edited_audio(session, monkeypatch):
     sent = []
     monkeypatch.setattr(transcript, 'available', lambda python, model: True)
     monkeypatch.setattr(transcript, 'suggest',
-                        lambda audio, python, model, language=None: sent.append(len(audio)) or {'text': 'ok'})
+                        lambda audio, python, model, language=None, rate=None: sent.append(len(audio)) or {'text': 'ok'})
     take = record(session, 12.0)
     session.drafts.request(take)
     first = sent[-1]
@@ -196,7 +196,7 @@ def test_the_language_setting_reaches_the_recognizer(session, monkeypatch):
     settings.update({'asr_language': ' es '}, session.settings_file)
     monkeypatch.setattr(transcript, 'available', lambda python, model: True)
     monkeypatch.setattr(transcript, 'suggest',
-                        lambda audio, python, model, language=None: seen.append(language) or {'text': 'Hola.'})
+                        lambda audio, python, model, language=None, rate=None: seen.append(language) or {'text': 'Hola.'})
     record(session, 8.0)
     session.tick()
     settings.update({'asr_language': None}, session.settings_file)

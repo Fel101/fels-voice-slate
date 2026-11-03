@@ -159,8 +159,13 @@ class FakeKey(QObject):
         self.problem = 'another program already uses F9' if enabled and not self.allowed else ''
         return self.active
 
+    def set_key(self, name):
+        self.name = name
+        return True
+
 
 def open_window(qapp, session, dialogs, fake):
+    settings.update({'global_hotkey': True}, session.settings_file)
     window = MainWindow(session=session, dialogs=dialogs, hotkey=fake)
     window.timer.stop()
     window.show()
@@ -237,12 +242,12 @@ def test_the_setting_gives_the_key_back_and_takes_it_again(keyed, session, dialo
                                'global_hotkey': False}
     window.open_settings()
     assert fake.asked[-1] is False and not fake.active
-    assert settings.load(session.settings_file)['global_hotkey'] is False
+    assert 'global_hotkey' not in settings.load(session.settings_file)              # off is the default: nothing is stored
     assert 'also while another program' not in window.actions.record.toolTip()
     dialogs.settings_answer = dict(dialogs.settings_answer, global_hotkey=True)
     window.open_settings()
     assert fake.asked[-1] is True and fake.active
-    assert 'global_hotkey' not in settings.load(session.settings_file)              # on is the default: nothing is stored
+    assert settings.load(session.settings_file)['global_hotkey'] is True
 
 
 def test_the_dialog_is_shown_the_current_choice(keyed, dialogs, session):

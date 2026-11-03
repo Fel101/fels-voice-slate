@@ -344,17 +344,60 @@ def shorten_pause_ranges(x, rate, keep_seconds=0.5):
     return ranges
 
 
+WORD_EDGE_REACH = 0.08          # seconds either side of where a recognizer says a word starts or ends
+WORD_EDGE_FRAME = 0.005
+
+
+def quietest_near(x, rate, seconds, reach=WORD_EDGE_REACH):
+    """The moment within `reach` of `seconds` where the sound is quietest. The times a recognizer gives a word are rough, and a
+    cut made exactly on them can leave the first sound of the word behind. The gap between two words is where it belongs."""
+    m = ac.to_mono(x).astype(np.float64)
+    frame = max(1, int(rate * WORD_EDGE_FRAME))
+    first, last = max(int((seconds - reach) * rate), 0), min(int((seconds + reach) * rate), len(m))
+    count = (last - first) // frame
+    if count < 2:
+        return seconds
+    energy = np.sum(m[first:first + count * frame].reshape(-1, frame) ** 2, axis=1)
+    return (first + (int(np.argmin(energy)) + 0.5) * frame) / rate
+
+
+SPLIT_PAUSE_SECONDS = 0.35      # a pause at least this long is a place to split a take
+
+
+def split_ranges(x, rate, shortest, keep_min, keep_max):
+    """Where to split a long take: (first, end) sample ranges that cover all of it, cut in the middle of its pauses.
+
+    Each part closes at the first pause after it has reached `shortest` seconds, which gives parts of about that length
+    that end where the speaker stopped. A last part too short to keep (`keep_min`) joins the one before, if the two together
+    are not too long to keep (`keep_max`). One range, the whole take, means there is nowhere to split it.
+    """
+    n = len(ac.to_mono(x))
+    total = n / rate
+    pauses = [(a + b) / 2 for a, b in silent_runs(x, rate, min_seconds=SPLIT_PAUSE_SECONDS) if a > 1e-9 and b < total - 0.05]
+    parts, start = [], 0.0
+    for point in pauses:
+        if point - start >= shortest:
+            parts.append((start, point))
+            start = point
+    if parts and total - start < keep_min and total - parts[-1][0] <= keep_max:
+        parts[-1] = (parts[-1][0], total)
+    else:
+        parts.append((start, total))
+    return [(int(round(a * rate)), min(int(round(b * rate)), n)) for a, b in parts]
+
+
 # ---- the Check tab ----------------------------------------------------------------------------------------------------
 
 Check = namedtuple('Check', 'key label value status hint')     # status: ok, warn, bad or info
 
 
-def quality_report(x, rate=ac.EXPORT_RATE, recorded_clipped=0.0):
+def quality_report(x, rate=ac.EXPORT_RATE, recorded_clipped=0.0, purpose=None):
     """The measurements of a finished clip, each with a status, in the order the Check tab shows them.
 
     `recorded_clipped` is the share of the recording behind it that is at full scale (render.recorded_clipping), which the
-    finished clip can hide.
+    finished clip can hide. `purpose` gives the length rules (a Reference's if none is given).
     """
+    rules = purpose or ac.PURPOSES[ac.DEFAULT_PURPOSE]
     stats = ac.measure(x, rate)
     seconds = stats['seconds']
     speech = ac.voiced_rms_db(x, rate)
@@ -369,8 +412,10 @@ def quality_report(x, rate=ac.EXPORT_RATE, recorded_clipped=0.0):
 
     rows = [
         Check('length', 'Length', f'{seconds:.1f} s',
-              rank(seconds, lambda v: 10 <= v <= 25, lambda v: ac.MIN_SECONDS <= v <= ac.MAX_SECONDS),
-              'Between 6 and 40 s can be kept; 10 to 25 s works best.'),
+              rank(seconds, lambda v: rules.best_from <= v <= rules.best_to,
+                   lambda v: rules.min_seconds <= v <= rules.max_seconds),
+              f'Between {rules.min_seconds:g} and {rules.max_seconds:g} s can be kept; {rules.best_from:g} to '
+              f'{rules.best_to:g} s works best.'),
         Check('speech', 'Speech level', f'{speech:.1f} dB',
               rank(abs(speech - ac.TARGET_VOICED_DB), lambda v: v <= 3, lambda v: v <= 8),
               f'Loudness of the voiced parts. The target is {ac.TARGET_VOICED_DB:.0f} dB; Normalize sets it.'),

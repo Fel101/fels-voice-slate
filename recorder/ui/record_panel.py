@@ -4,6 +4,7 @@ from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QFrame, QLabel, QWidget
 
 from .. import audio_core as ac
+from ..i18n import tr
 from . import theme
 from .timeline import LiveWaveView
 from .widgets import TargetBar, button, caption, card, hbox, label, vbox
@@ -30,6 +31,8 @@ class ScriptStrip(QFrame):
         layout.addLayout(column, 1)
         self.previous = button('', 'ghost', 'chevron_left', 'Previous line (Ctrl+Up)', size=(36, 36))
         self.next = button('', 'ghost', 'chevron_right', 'Next line (Ctrl+Down)', size=(36, 36))
+        self.previous.setAccessibleName('Previous line')
+        self.next.setAccessibleName('Next line')
         self.previous.clicked.connect(self.previousRequested)
         self.next.clicked.connect(self.nextRequested)
         layout.addWidget(self.previous)
@@ -44,7 +47,9 @@ class ScriptStrip(QFrame):
         script = self.session.script
         self.setVisible(bool(script.lines))
         if script.lines:
-            self.caption.setText(f'SCRIPT  ·  LINE {script.label.replace(" of ", " OF ")}')
+            done = sum(1 for line in script.progress(self.session.workspace.takes) if line.kept)
+            self.caption.setText(tr('Script  ·  line {line} of {total}  ·  {done} kept').format(
+                line=script.index + 1, total=len(script.lines), done=done).upper())
             self.line.setText(script.current)
             self.previous.setEnabled(script.index > 0)
             self.next.setEnabled(script.index < len(script.lines) - 1)
@@ -70,8 +75,10 @@ class RecordPanel(QWidget):
         inner.addWidget(self.target)
         layout.addWidget(box)
 
-    def set_state(self, rows, elapsed):
-        self.wave.set_state(rows, elapsed)
-        self.target.set_seconds(elapsed)
-        self.length.setText(f'{elapsed:.1f} s  ·  aim for {ac.TARGET_MIN_SECONDS:g} to {ac.TARGET_MAX_SECONDS:g} s, '
-                            f'{ac.MIN_SECONDS:g} to {ac.MAX_SECONDS:g} s is allowed')
+    def set_state(self, rows, elapsed, purpose=None):
+        rules = purpose or ac.PURPOSES[ac.DEFAULT_PURPOSE]
+        self.wave.set_state(rows, elapsed, rules.record_limit)
+        self.target.set_seconds(elapsed, rules)
+        self.length.setText(f'{elapsed:.1f} s  ·  ' + tr('aim for {low} to {high} s, {least} to {most} s can be kept').format(
+            low=f'{rules.best_from:g}', high=f'{rules.best_to:g}', least=f'{rules.min_seconds:g}',
+            most=f'{rules.max_seconds:g}'))

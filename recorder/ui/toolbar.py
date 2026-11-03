@@ -4,6 +4,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QFrame, QMenu, QToolButton
 
 from . import icons
+from .palette import PALETTE
 from .widgets import hbox
 
 SPACING = 2
@@ -32,6 +33,7 @@ class ToolBar(QFrame):
         self.more = QToolButton()
         self.more.setIcon(icons.icon('more'))
         self.more.setToolTip('More commands')
+        self.more.setAccessibleName('More commands')
         self.more.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self.more.setFocusPolicy(Qt.FocusPolicy.TabFocus)
         self.menu = QMenu(self.more)
@@ -76,7 +78,7 @@ class ToolBar(QFrame):
     def add_separator(self):
         line = QFrame()
         line.setFixedSize(1, 20)
-        line.setStyleSheet('background: #3a3731; border: none;')
+        line.setStyleSheet(f'background: {PALETTE["line2"]}; border: none;')
         self._entries.append(Entry('sep', line, None, 0, 11, 11))
         self._layout.addSpacing(5)
         self._layout.addWidget(line)

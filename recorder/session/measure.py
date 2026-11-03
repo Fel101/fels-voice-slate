@@ -13,6 +13,7 @@ from types import SimpleNamespace
 from ..core import analysis
 
 Derived = namedtuple('Derived', 'key stats report error')
+THUMB_COLUMNS = 90
 
 
 def frozen(history):
@@ -25,6 +26,11 @@ def recipe_key(history):
     return json.dumps([history.edits, history.chain, history.fade_ms], sort_keys=True)
 
 
+def take_key(take):
+    """What decides a take's measurements: its recipe, and its purpose, which sets the rate and the length rules."""
+    return json.dumps([recipe_key(take.history), take.purpose.key])
+
+
 class Measurements:
     def __init__(self, bus, workspace, jobs):
         self.bus = bus
@@ -34,7 +40,7 @@ class Measurements:
     def derived(self, take):
         if take is None:
             return None
-        key = recipe_key(take.history)
+        key = take_key(take)
         have = take.cache.get('derived')
         if have is not None and have.key == key:
             return have
@@ -45,7 +51,7 @@ class Measurements:
             def work():
                 export = lib.export_for(take, recipe)
                 stats = lib.stats_for(take, export, recipe)
-                report = analysis.quality_report(export, recorded_clipped=stats['recording_clipped_fraction'])
+                report = analysis.quality_report(export, take.export_rate, stats['recording_clipped_fraction'], take.purpose)
                 return Derived(key, stats, report, '')
 
             def done(result):
@@ -80,6 +86,26 @@ class Measurements:
 
     def pyramid(self, take):
         """The master's peak pyramid for drawing, built once per take."""
-        if 'pyramid' not in take.cache:
-            take.cache['pyramid'] = analysis.PeakPyramid(take.mono)
-        return take.cache['pyramid']
+        pyramid = take.cache.get('pyramid')                 # read once: another thread can drop it (store._Resident)
+        if pyramid is None:
+            pyramid = take.cache['pyramid'] = analysis.PeakPyramid(take.mono)
+        return pyramid
+
+    def thumbnail(self, take):
+        """The take's outline for the list, as (highs, lows) in THUMB_COLUMNS columns, or None until it has been worked out.
+        Only the rows on screen ask, so a long list never reads all of its audio."""
+        outline = take.cache.get('thumb')
+        if outline is None and not take.cache.get('thumb_requested'):
+            take.cache['thumb_requested'] = True
+
+            def work():
+                pyramid = analysis.PeakPyramid(take.mono)
+                lo, hi = pyramid.columns(0, pyramid.n, THUMB_COLUMNS)
+                return hi, lo
+
+            def done(result):
+                take.cache['thumb'] = result
+                self.bus.notify('thumb', take)
+
+            self.jobs.submit(work, done, lambda error: None)        # no outline is no harm: the file says so when it is opened
+        return outline

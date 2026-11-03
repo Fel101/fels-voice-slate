@@ -19,6 +19,7 @@ def isolated(tmp_path, monkeypatch):
     monkeypatch.setattr(cap, 'default_microphone', lambda: 1)
     monkeypatch.setattr(cap, 'list_loopbacks', lambda: [(9, 'Test speakers [Loopback]')])
     monkeypatch.setattr(cap, 'default_loopback', lambda: 9)
+    monkeypatch.setattr(cap, 'input_channels', lambda device: 1)
     monkeypatch.setattr(transcript, 'available', lambda python, model: False)
     yield
     clean.set_ffmpeg_path(None)
@@ -63,10 +64,11 @@ def open_fake(monkeypatch):
     """Make the next capture the session opens a FakeCapture that is not recording yet. Returns the list of them."""
     opened = []
 
-    def factory(source, device, pre_roll):
+    def factory(source, device, pre_roll, channel=None):
         fake = FakeCapture(speech(2.0), kind=source)
         fake.recording = fake.armed = False
         fake.opened_with = (source, device, pre_roll)
+        fake.channel = channel
         opened.append(fake)
         return fake
 

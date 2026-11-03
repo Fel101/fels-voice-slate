@@ -1,4 +1,4 @@
-"""Recording: devices, start and stop with a tail, and what happens when a device fails or a take reaches 40 s."""
+"""Recording: devices, start and stop with a tail, and what happens when a device fails or a take reaches its limit."""
 import json
 from types import SimpleNamespace
 
@@ -43,7 +43,7 @@ def test_the_first_recording_creates_the_speaker_my_voice(make_session, open_fak
 
 
 def test_a_device_that_cannot_be_opened_is_reported_and_leaves_things_idle(session, monkeypatch):
-    def broken(source, device, pre_roll):
+    def broken(source, device, pre_roll, channel):
         raise OSError('Invalid device')
 
     monkeypatch.setattr(cap, 'open_capture', broken)
@@ -229,13 +229,34 @@ def test_a_device_that_dies_ends_the_take_as_interrupted(session):
     assert fake.stopped and 'interrupted' in session.workspace.takes[0].flags
 
 
-def test_the_40_second_limit_is_measured_by_the_clock(session):
+def test_the_limit_of_the_purpose_is_measured_by_the_clock(session):
+    fake = FakeCapture(speech(3.0))
+    fake.elapsed = 1.0
+    fake.wall = 121.0
+    session.capturing.capture = fake
+    session.tick()
+    assert fake.stopped and 'Stopped at 120 s' in session.status_text
+
+
+def test_a_take_runs_on_past_the_longest_clip_so_it_never_stops_in_the_middle_of_a_sentence(session):
     fake = FakeCapture(speech(3.0))
     fake.elapsed = 1.0
     fake.wall = 41.0
     session.capturing.capture = fake
     session.tick()
-    assert fake.stopped and 'Stopped at 40 s' in session.status_text
+    assert not fake.stopped and session.capturing.recording
+
+
+def test_each_purpose_has_its_own_limit(session):
+    session.workspace.set_purpose('audition')
+    fake = FakeCapture(speech(3.0))
+    fake.wall = 121.0
+    session.capturing.capture = fake
+    session.tick()
+    assert not fake.stopped
+    fake.wall = 901.0
+    session.tick()
+    assert fake.stopped and 'Stopped at 900 s' in session.status_text
 
 
 def test_a_saved_take_is_reported_without_a_pending_folder(session):
@@ -435,7 +456,7 @@ class Device:
 @pytest.fixture
 def device(monkeypatch):
     hardware = Device()
-    monkeypatch.setattr(cap, 'open_capture', lambda source, index, pre_roll: Capture(hardware, pre_roll))
+    monkeypatch.setattr(cap, 'open_capture', lambda source, index, pre_roll, channel: Capture(hardware, pre_roll))
     return hardware
 
 

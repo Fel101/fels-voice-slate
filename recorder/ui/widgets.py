@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (QAbstractButton, QComboBox, QFrame, QHBoxLayout, 
                                QStyleOptionComboBox, QStylePainter, QVBoxLayout, QWidget)
 
 from .. import audio_core as ac
+from ..i18n import tr
 from . import icons, theme
 from .palette import color
 
@@ -53,14 +54,14 @@ def tagged(widget, **props):
 
 def caption(text):
     """A small spaced-out capital heading above a group of controls."""
-    label = QLabel(text.upper())
+    label = QLabel(tr(text).upper())
     label.setFont(theme.ui_font(11, QFont.Weight.DemiBold, 0.9))
     label.setProperty('role', 'dim')
     return label
 
 
 def label(text='', role=None, size=None, weight=None, wrap=False):
-    out = QLabel(text)
+    out = QLabel(tr(text))
     if size is not None or weight is not None:
         out.setFont(theme.ui_font(size or theme.BASE_PIXELS, weight))
     if role:
@@ -77,7 +78,7 @@ class Chip(QLabel):
                'gray': (None, 0)}
 
     def __init__(self, text='', kind='gray', parent=None):
-        super().__init__(text, parent)
+        super().__init__(tr(text), parent)
         self.kind = kind
         self.setFont(theme.ui_font(11, QFont.Weight.DemiBold))
         self.setContentsMargins(9, 2, 9, 2)
@@ -110,7 +111,7 @@ def chip(text, kind):
 
 def set_chip(widget, text, kind=None):
     """Change a chip's text and colour; an empty text hides it."""
-    widget.setText(text)
+    widget.setText(tr(text))
     if kind:
         widget.set_kind(kind)
     widget.setVisible(bool(text))
@@ -118,14 +119,14 @@ def set_chip(widget, text, kind=None):
 
 def button(text='', kind=None, icon=None, tip=None, size=None):
     """A push button. It takes focus from the Tab key only, so a click never steals Space from play and pause."""
-    out = QPushButton(text)
+    out = QPushButton(tr(text))
     if kind:
         tagged(out, kind=kind)
     if icon:
         out.setIcon(icons.icon(icon, 'text' if kind not in ('primary', 'recording', 'record') else _icon_color(kind)))
         out.setIconSize(QSize(16, 16))
     if tip:
-        out.setToolTip(tip)
+        out.setToolTip(tr(tip))
     if size:
         out.setFixedSize(*size)
     out.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -134,7 +135,7 @@ def button(text='', kind=None, icon=None, tip=None, size=None):
 
 
 def _icon_color(kind):
-    return {'primary': 'ink', 'record': '#230d0b', 'recording': 'red'}.get(kind, 'text')
+    return {'primary': 'ink', 'record': 'red_ink', 'recording': 'red'}.get(kind, 'text')
 
 
 def card():
@@ -208,12 +209,13 @@ class Meter(QWidget):
         self.rms = self.peak = self.hold = self.FLOOR
         self._drawn = (self.FLOOR, self.FLOOR, self.FLOOR)
         self._hold_at = 0.0
-        self.setMinimumWidth(120)
+        self.setMinimumWidth(80)
         self.setMaximumWidth(width)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.setFixedHeight(40)
         self.setToolTip('Input level in dBFS. The bar is the RMS level, the white tick the latest peak and the amber '
                         'tick the held peak.')
+        self.setAccessibleName('Input level')
 
     def set_levels(self, peak_db, rms_db, now=None):
         now = time.monotonic() if now is None else now
@@ -221,6 +223,7 @@ class Meter(QWidget):
         if peak_db >= self.hold or now - self._hold_at > self.HOLD_SECONDS:
             self.hold, self._hold_at = peak_db, now
         self.rms, self.peak = rms_db, peak_db
+        self.setAccessibleDescription(f'{self.peak:.0f} dB')
         shown = (self.rms, self.peak, self.hold)
         if any(abs(a - b) > 0.4 for a, b in zip(shown, self._drawn)):       # a change of under half a dB is not visible
             self._drawn = shown
@@ -315,7 +318,7 @@ class Segmented(QWidget):
         layout = hbox(self)
         self.buttons = []
         for i, text in enumerate(labels):
-            b = QPushButton(text)
+            b = QPushButton(tr(text))
             b.setCursor(Qt.CursorShape.PointingHandCursor)
             b.setFocusPolicy(Qt.FocusPolicy.TabFocus)
             shape = 's' if len(labels) == 1 else 'l' if i == 0 else 'r' if i == len(labels) - 1 else 'm'
@@ -342,45 +345,54 @@ class Segmented(QWidget):
 
     def set_tooltips(self, *tips):
         for b, tip in zip(self.buttons, tips):
-            b.setToolTip(tip)
+            b.setToolTip(tr(tip))
 
 
 # ---- the take length bar ----------------------------------------------------------------------------------------------
 
 class TargetBar(QWidget):
-    """Where the take's length falls against the rules: 6 to 40 s can be kept, 10 to 25 s works best."""
+    """Where the take's length falls against the rules of its purpose. A take can run past what can be kept: it is trimmed or
+    split afterwards, so the bar goes on to the longest recording."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.seconds = 0.0
+        self.rules = ac.PURPOSES[ac.DEFAULT_PURPOSE]
         self.setFixedHeight(36)
 
-    def set_seconds(self, seconds):
+    def set_seconds(self, seconds, rules=None):
         self.seconds = float(seconds)
+        self.rules = rules or self.rules
         self.update()
 
     def paintEvent(self, event):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         w = self.width()
+        rules = self.rules
+        end = rules.max_seconds * 1.25                      # a little room past the longest clip: it can run over
 
         def x(s):
-            return min(s / ac.MAX_SECONDS, 1.0) * w
+            return min(s / end, 1.0) * w
 
         p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(color('bg3'))
         p.drawRoundedRect(QRectF(0, 6, w, 10), 5, 5)
-        for a, b, name in ((ac.MIN_SECONDS, ac.TARGET_MIN_SECONDS, 'amber'),
-                           (ac.TARGET_MIN_SECONDS, ac.TARGET_MAX_SECONDS, 'green'),
-                           (ac.TARGET_MAX_SECONDS, ac.MAX_SECONDS, 'amber')):
-            p.setBrush(color(name, 110 if name == 'amber' else 170))
+        for a, b, name in ((rules.min_seconds, rules.best_from, 'amber'),
+                           (rules.best_from, rules.best_to, 'green'),
+                           (rules.best_to, rules.max_seconds, 'amber'),
+                           (rules.max_seconds, end, 'red')):
+            p.setBrush(color(name, 170 if name == 'green' else 110))
             p.drawRect(QRectF(x(a), 6, x(b) - x(a), 10))
         p.setBrush(color('text'))
         p.drawRoundedRect(QRectF(x(self.seconds) - 1.5, 2, 3, 18), 1.5, 1.5)
         p.setFont(theme.ui_font(10))
         p.setPen(color('dim'))
-        for s in (0, 6, 10, 25, 40):
+        last = -100.0
+        for s in (0, rules.min_seconds, rules.best_from, rules.best_to, rules.max_seconds):
+            if x(s) - last < 26:                            # an audition's 3 s sits on top of its 0
+                continue
+            last = x(s)
             left = min(max(x(s) - 14, 0), w - 28)
-            align = Qt.AlignmentFlag.AlignLeft if s == 0 else Qt.AlignmentFlag.AlignRight if s == 40 \
-                else Qt.AlignmentFlag.AlignHCenter
-            p.drawText(QRectF(left, 20, 28, 12), int(align | Qt.AlignmentFlag.AlignVCenter), f'{s}')
+            align = Qt.AlignmentFlag.AlignLeft if s == 0 else Qt.AlignmentFlag.AlignHCenter
+            p.drawText(QRectF(left, 20, 28, 12), int(align | Qt.AlignmentFlag.AlignVCenter), f'{s:g}')

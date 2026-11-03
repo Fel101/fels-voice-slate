@@ -8,14 +8,37 @@ import threading
 import numpy as np
 
 
-def _default_stream(rate, callback):
+def _default_stream(rate, callback, device=None):
     import sounddevice as sd
-    return sd.OutputStream(samplerate=int(rate), channels=1, dtype='float32', callback=callback)
+    return sd.OutputStream(samplerate=int(rate), channels=1, dtype='float32', callback=callback, device=device)
+
+
+def list_outputs():
+    """The names of the output devices, with their Windows audio interface, as the input list shows them."""
+    import sounddevice as sd
+    apis = sd.query_hostapis()
+    return [f"{d['name']}  [{apis[d['hostapi']]['name']}]" for d in sd.query_devices() if d['max_output_channels'] > 0]
+
+
+def find_output(name):
+    """The number of the output device called `name`, or None for Windows' default, also when that device has gone."""
+    if not name:
+        return None
+    try:
+        import sounddevice as sd
+        apis = sd.query_hostapis()
+        for index, d in enumerate(sd.query_devices()):
+            if d['max_output_channels'] > 0 and f"{d['name']}  [{apis[d['hostapi']]['name']}]" == name:
+                return index
+    except Exception:                       # no sound library, no devices: playing says so when it is tried
+        pass
+    return None
 
 
 class Player:
     def __init__(self, stream_factory=None):
-        self._factory = stream_factory or _default_stream
+        self.device = None                  # the output to play through; None is Windows' default
+        self._factory = stream_factory or (lambda rate, callback: _default_stream(rate, callback, self.device))
         self._lock = threading.Lock()
         self._stream = None
         self._buffer = np.zeros(0, dtype=np.float32)
