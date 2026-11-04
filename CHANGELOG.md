@@ -34,6 +34,8 @@ the project uses [Semantic Versioning](https://semver.org/).
   seconds. The quiet before and after the word counted as speech, so nothing was trimmed. A take with a quiet voice, and one
   with no speech at all, are measured as they were.
 - A window that has closed no longer has its last status line read out by a screen reader a moment later.
+- `tools/build_installer.py --work` takes a relative folder. Inno Setup looked for the program folder beside its own script,
+  so the build stopped at its last step.
 
 ## [0.5.0] - 2026-11-02
 

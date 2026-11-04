@@ -82,3 +82,26 @@ def test_the_build_copies_what_the_program_refers_to():
 def test_the_transcript_setup_finds_the_python_it_comes_with():
     script = (settings.program_dir() / 'setup-transcripts.bat').read_text(encoding='utf-8')
     assert 'python\\python.exe' in script and '.venv\\Scripts\\python.exe' in script
+
+
+def test_a_build_folder_given_as_a_relative_path_reaches_inno_setup_in_full(monkeypatch, tmp_path):
+    """Inno Setup reads a relative folder from the folder of its script, installer/, where nothing was built."""
+    for name in ('install_packages', 'prune', 'copy_program', 'compile_program', 'smoke_test'):
+        monkeypatch.setattr(build_installer, name, lambda *args: None)
+    monkeypatch.setattr(build_installer, 'fetch_python', lambda work: work / 'app' / 'python')
+    monkeypatch.setattr(build_installer, 'size_of', lambda folder: 0)
+    monkeypatch.setattr(build_installer, 'compiler', lambda named: Path('ISCC.exe'))
+    commands = []
+
+    def compile_installer(command, **options):
+        commands.append([str(part) for part in command])
+        output = Path(next(part for part in commands[-1] if part.startswith('/O'))[2:])
+        (output / f'Fels-Voice-Slate-{build_installer.version()}-Setup.exe').write_bytes(b'')
+
+    monkeypatch.setattr(build_installer, 'run', compile_installer)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(sys, 'argv', ['build_installer.py', '--work', 'out'])
+    assert build_installer.main() == 0
+    (command,) = commands
+    assert Path(next(part for part in command if part.startswith('/DAppFolder='))[12:]) == tmp_path / 'out' / 'app'
+    assert Path(next(part for part in command if part.startswith('/O'))[2:]) == tmp_path / 'out'
