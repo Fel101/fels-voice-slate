@@ -1,4 +1,5 @@
 """Draft transcripts: the optional recognizer is run in another Python, so the tests stand in for it."""
+import io
 import json
 import subprocess
 import sys
@@ -256,3 +257,158 @@ def test_anything_else_for_the_language_is_refused(given, tmp_path, capsys):
 def test_the_worker_refuses_a_model_name_instead_of_a_folder(capsys):
     assert asr_worker.main(['--model-dir', 'large-v3', '--audio', 'clip.wav']) == 2
     assert 'does not exist' in capsys.readouterr().err
+
+
+def test_the_worker_needs_a_clip_unless_it_serves(tmp_path, capsys):
+    with pytest.raises(SystemExit):
+        asr_worker.main(['--model-dir', str(tmp_path)])
+    assert '--serve' in capsys.readouterr().err
+
+
+# ---- the recognizer kept running for a session's drafts ---------------------------------------------------------------
+
+KEPT = r'''
+import runpy, sys, types
+from pathlib import Path
+
+sys.stdout.reconfigure(encoding='cp1252')           # what a pipe has here, and it must not depend on the test's computer
+here = Path(__file__).parent
+with open(here / 'starts.txt', 'a', encoding='utf-8') as starts:
+    starts.write('start\n')
+
+
+class Model:
+    def __init__(self, path, **kwargs):
+        with open(here / 'loads.txt', 'a', encoding='utf-8') as loads:
+            loads.write('load\n')
+        if LOAD_FAILS:
+            raise RuntimeError('model.bin is damaged')
+
+    def transcribe(self, audio, language=None, **kwargs):
+        text = SAID + ' (' + (language or 'detected') + ')'
+        return [types.SimpleNamespace(text=text)], types.SimpleNamespace(language=language or 'en', language_probability=1.0,
+                                                                          duration=1.0)
+
+
+sys.modules['faster_whisper'] = types.SimpleNamespace(WhisperModel=Model)
+runpy.run_path(WORKER, run_name='__main__')
+'''
+
+
+def kept(tmp_path, monkeypatch, said='Grüße aus dem Café.', load_fails=False, script=None):
+    """A Worker running the real asr_worker.py --serve in a real process, with only faster-whisper stood in for (or
+    `script` instead), and the model folder to give it. The stand-in counts its starts and model loads in files."""
+    worker_file = tmp_path / 'worker.py'
+    worker_file.write_text(script or KEPT.replace('SAID', repr(said)).replace('LOAD_FAILS', repr(load_fails))
+                           .replace('WORKER', repr(asr_worker.__file__)), encoding='utf-8')
+    monkeypatch.setattr(transcript, 'WORKER', worker_file)
+    model = tmp_path / 'model'
+    model.mkdir(exist_ok=True)
+    return transcript.Worker(), model
+
+
+def draft(worker, model, language=None):
+    return transcript.suggest(np.zeros(24000, np.float32), sys.executable, model, language, 24000, worker)
+
+
+def counted(tmp_path, name):
+    """How many lines the stand-in wrote to starts.txt or loads.txt."""
+    path = tmp_path / f'{name}.txt'
+    return len(path.read_text(encoding='utf-8').splitlines()) if path.exists() else 0
+
+
+def test_a_kept_recognizer_loads_its_model_once_for_all_the_drafts(tmp_path, monkeypatch):
+    worker, model = kept(tmp_path, monkeypatch)
+    try:
+        first, second = draft(worker, model), draft(worker, model, 'de')
+    finally:
+        worker.close()
+    assert first['text'] == 'Grüße aus dem Café. (detected)' and second['text'] == 'Grüße aus dem Café. (de)'
+    assert counted(tmp_path, 'starts') == 1 and counted(tmp_path, 'loads') == 1
+
+
+def test_a_kept_recognizer_that_cannot_start_says_why(tmp_path, monkeypatch):
+    """What a recognizer environment says once its Python was uninstalled. The message is how the cause is found."""
+    worker, model = kept(tmp_path, monkeypatch, script='import sys\n'
+                         'sys.stderr.write("No Python at \'C:\\\\NoSuchPython313\\\\python.exe\'\\n")\n'
+                         'sys.exit(103)\n')
+    with pytest.raises(transcript.DraftUnavailable, match=r"failed: No Python at 'C:\\NoSuchPython313"):
+        draft(worker, model)
+    worker.close()
+
+
+def test_a_kept_recognizer_with_no_message_gives_its_exit_code(tmp_path, monkeypatch):
+    worker, model = kept(tmp_path, monkeypatch, script='import sys\nsys.exit(7)\n')
+    with pytest.raises(transcript.DraftUnavailable, match='exit code 7'):
+        draft(worker, model)
+    worker.close()
+
+
+def test_a_model_that_will_not_load_is_reported_and_tried_again_for_the_next_draft(tmp_path, monkeypatch):
+    worker, model = kept(tmp_path, monkeypatch, load_fails=True)
+    try:
+        for _ in range(2):
+            with pytest.raises(transcript.DraftUnavailable, match='RuntimeError: model.bin is damaged'):
+                draft(worker, model)
+    finally:
+        worker.close()
+    assert counted(tmp_path, 'starts') == 1 and counted(tmp_path, 'loads') == 2
+
+
+def test_a_kept_recognizer_that_takes_too_long_is_stopped_and_a_new_one_started(tmp_path, monkeypatch):
+    worker, model = kept(tmp_path, monkeypatch, script='import sys\nfrom pathlib import Path\n'
+                         "Path(__file__).with_name('starts.txt').open('a').write('start\\n')\n"
+                         'for line in sys.stdin:\n    pass\n')            # never answers
+    monkeypatch.setattr(transcript, 'TIMEOUT_SECONDS', 0.3)
+    monkeypatch.setattr(transcript, 'TIMEOUT_PER_SECOND', 0)
+    try:
+        for _ in range(2):
+            with pytest.raises(transcript.DraftUnavailable, match='too long'):
+                draft(worker, model)
+    finally:
+        worker.close()
+    assert counted(tmp_path, 'starts') == 2
+
+
+def test_other_recognizer_settings_start_another_recognizer(tmp_path, monkeypatch):
+    worker, model = kept(tmp_path, monkeypatch)
+    other = tmp_path / 'other-model'
+    other.mkdir()
+    try:
+        draft(worker, model)
+        draft(worker, other)
+        draft(worker, other)
+    finally:
+        worker.close()
+    assert counted(tmp_path, 'starts') == 2
+
+
+def test_a_closed_recognizer_is_stopped_and_starts_no_other(tmp_path, monkeypatch):
+    worker, model = kept(tmp_path, monkeypatch)
+    draft(worker, model)
+    process = worker._process
+    worker.close()
+    assert process.poll() is not None
+    with pytest.raises(transcript.DraftUnavailable, match='stopped'):
+        draft(worker, model)
+    assert counted(tmp_path, 'starts') == 1
+
+
+def test_the_serving_worker_answers_each_request_by_its_id_and_carries_on_after_a_bad_one(tmp_path, monkeypatch):
+    loads = []
+    monkeypatch.setattr(asr_worker, 'load', lambda folder: loads.append(folder) or object())
+    monkeypatch.setattr(asr_worker, 'transcribe', lambda model, audio, language, filtered: (
+        f'Heard {audio}.', [['Heard', 0.0, 0.4]], types.SimpleNamespace(language=language or 'en', language_probability=0.5,
+                                                                        duration=1.0)))
+    requests = io.StringIO('\n'.join([json.dumps({'id': 1, 'audio': 'a.wav', 'language': 'de'}), '',
+                                      json.dumps({'id': 2, 'audio': 'b.wav', 'language': 'not a code'}),
+                                      json.dumps({'id': 3, 'audio': 'c.wav'})]) + '\n')
+    replies = io.StringIO()
+    assert asr_worker.serve(str(tmp_path), requests, replies) == 0
+    answers = [json.loads(line) for line in replies.getvalue().splitlines()]
+    assert [answer['id'] for answer in answers] == [1, 2, 3]
+    assert answers[0]['text'] == 'Heard a.wav.' and answers[0]['language'] == 'de'
+    assert answers[0]['words'] == [['Heard', 0.0, 0.4]]
+    assert answers[1]['error'].startswith('ValueError: The language must be a code')
+    assert answers[2]['text'] == 'Heard c.wav.' and answers[2]['language'] == 'en'
+    assert loads == [str(tmp_path)]

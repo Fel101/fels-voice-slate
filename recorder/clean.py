@@ -34,6 +34,10 @@ class CleanError(ValueError):
     pass
 
 
+class NotFound(CleanError):
+    """FFmpeg is not installed, or not anywhere it is looked for."""
+
+
 def set_ffmpeg_path(path):
     """Use this ffmpeg.exe instead of searching for one (the "ffmpeg" setting). None goes back to searching."""
     global _configured
@@ -95,7 +99,7 @@ def find_ffmpeg():
     candidates = _winget_candidates()
     if candidates:
         return candidates[0]
-    raise CleanError(NOT_FOUND)
+    raise NotFound(NOT_FOUND)
 
 
 def available():

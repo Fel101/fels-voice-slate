@@ -292,13 +292,26 @@ def detect_hum(x, rate):
 
 # ---- silence and pauses -----------------------------------------------------------------------------------------------
 
+SPEECH_ABOVE_NOISE_DB = 15.0    # the loudest tenth of the frames is speech when this far above the noise floor: a room whose
+                                # noise rises and falls by 6 dB comes within 12 dB of its own floor
+
+
 def speech_threshold_db(x, rate):
-    """Frames at or below this level count as pauses: well above the noise floor, well below the speech."""
+    """Frames at or below this level count as pauses: well above the noise floor, well below the speech.
+
+    The speech level is that of the loudest tenth of the frames. In a take that is mostly pause, such as one short word
+    in ten seconds, that tenth is still pause, and the pauses would be taken for speech: then the loudest hundredth is
+    the speech. The threshold stays below the frames the speech level is read from, so some of every take is speech, and
+    a take is never all pause, however quiet the voice.
+    """
     db = frame_db(x, rate)
     if db.size == 0:
         return ac.SILENCE_FRAME_DB
+    noise = noise_floor_db(x, rate)
     speech = float(np.percentile(db, 90))
-    return min(max(noise_floor_db(x, rate) + 6.0, speech - 25.0, ac.SILENCE_FRAME_DB - 15.0), speech - 10.0)
+    if speech < noise + SPEECH_ABOVE_NOISE_DB:
+        speech = float(np.percentile(db, 99))
+    return min(max(noise + 6.0, speech - 25.0, ac.SILENCE_FRAME_DB - 15.0), speech - 10.0)
 
 
 def silent_runs(x, rate, min_seconds=0.0):

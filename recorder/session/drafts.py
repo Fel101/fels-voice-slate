@@ -5,6 +5,8 @@ for that and has not touched the text since asking. A result for a take that has
 
 While the transcript is still the recognizer's own text it follows the edits: once the cutting pauses, the draft is made
 again from the edited audio, so the words match the clip. Text that was typed or corrected is never replaced that way.
+The session keeps one recognizer running for all its drafts (transcript.Worker), so the speech model is loaded once,
+not again for each draft; it is stopped when the session closes.
 
 A take read from a script keeps its script line as its transcript, and the draft becomes the reading check: what the
 recognizer heard is set against what was written (core/reading.py), and made again after a cut. The times of the words come
@@ -30,6 +32,7 @@ class Drafts:
         self.settings_file = settings_file
         self.clock = clock
         self._due = None                # (take, time) of a draft wanted after the latest edits
+        self.worker = transcript.Worker()   # the recognizer kept running, so a draft after a cut does not reload the model
 
     def _recognizer(self):
         data = settings.load(self.settings_file)
@@ -41,6 +44,10 @@ class Drafts:
 
     def available(self):
         return transcript.available(*self._recognizer())
+
+    def close(self):
+        """Stop the recognizer kept for the drafts, as the session ends."""
+        self.worker.close()
 
     @staticmethod
     def machine_text(take):
@@ -74,7 +81,7 @@ class Drafts:
         rate = take.export_rate
 
         def work():
-            return transcript.suggest(export, python, model, language, rate)
+            return transcript.suggest(export, python, model, language, rate, self.worker)
 
         self.jobs.submit(
             work,

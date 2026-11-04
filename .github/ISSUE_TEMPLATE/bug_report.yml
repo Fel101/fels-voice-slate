@@ -11,6 +11,9 @@ body:
         Describe the problem instead, or use generated test audio (`tools/synthetic.py`). Remove personal folder names
         from anything you paste.
 
+        **Export diagnostics...** in the gear menu saves a zip you can attach instead: what is installed, your settings
+        and the end of the log, with your folders, user name and speaker names replaced. Open it and read it first.
+
         For a security problem, do not open an issue: see the Security policy.
   - type: textarea
     id: what-happened

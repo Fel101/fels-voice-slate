@@ -3,4 +3,5 @@
 #     python -m pip install -r requirements-dev.txt
 -r requirements.txt
 pytest==9.1.1
+pytest-xdist==3.6.1                                   # runs the tests in parallel: pytest -n auto
 pyflakes==4.0.3

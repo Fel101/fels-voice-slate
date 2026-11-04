@@ -2,7 +2,9 @@
 
 Everything runs on Qt's offscreen platform with a fake player, a fake capture and canned dialogs.
 """
+import subprocess
 import threading
+import zipfile
 
 import pytest
 
@@ -10,10 +12,11 @@ pytest.importorskip('PySide6')
 import soundfile as sf  # noqa: E402
 from PySide6.QtCore import QMimeData, QPointF, Qt, QUrl  # noqa: E402
 from PySide6.QtGui import QDropEvent  # noqa: E402
+from PySide6.QtWidgets import QApplication  # noqa: E402
 
 import ui_helpers  # noqa: E402
 from helpers import RATE, fill, record, speech  # noqa: E402
-from recorder import settings  # noqa: E402
+from recorder import audio_import, clean, settings  # noqa: E402
 from recorder.ui.editor_panel import EditorPanel  # noqa: E402
 from recorder.ui.inspector import Inspector  # noqa: E402
 
@@ -330,13 +333,29 @@ def test_re_record_replaces_the_take_and_starts_recording(window, session, dialo
 def test_import_copies_a_chosen_file_in_as_a_take(window, session, dialogs, tmp_path):
     path = tmp_path / 'voice.wav'
     sf.write(str(path), speech(8.0), RATE)
-    dialogs.file_answer = None
+    dialogs.files_answer = []
     window.import_recording()
     assert session.workspace.takes == []
-    dialogs.file_answer = str(path)
+    dialogs.files_answer = [str(path)]
     window.import_recording()
     window.flush()
     assert len(session.workspace.takes) == 1 and session.current.source == 'import'
+
+
+def test_several_recordings_can_be_chosen_at_once(window, session, dialogs, tmp_path):
+    paths = [tmp_path / f'memo {n}.wav' for n in (1, 2, 3)]
+    for path in paths:
+        sf.write(str(path), speech(8.0), RATE)
+    broken = tmp_path / 'broken.wav'
+    broken.write_text('not audio', encoding='utf-8')
+    dialogs.files_answer = [str(paths[0]), str(broken), str(paths[1]), str(paths[2])]
+    window.import_recording()
+    window.flush()
+    assert [take.device['name'] for take in session.workspace.takes] == ['memo 3.wav', 'memo 2.wav', 'memo 1.wav']
+    assert session.current is session.workspace.takes[0]
+    assert 'Imported 3 recordings' in session.status_text
+    assert [n.title for n in dialogs.notices] == ['Could not import'] and not dialogs.notices[0].busy
+    assert QApplication.overrideCursor() is None
 
 
 def drop(window, *paths):
@@ -352,6 +371,35 @@ def test_dropping_audio_files_imports_them_and_ignores_other_files(window, sessi
     other.write_text('hello', encoding='utf-8')
     drop(window, good, other)
     assert [t.source for t in session.workspace.takes] == ['import']
+
+
+def test_a_phone_recording_dropped_on_the_window_is_imported_through_ffmpeg(window, session, tmp_path, monkeypatch):
+    memo = tmp_path / 'Voice memo.m4a'
+    memo.write_bytes(b'not really an m4a')
+    program = tmp_path / 'ffmpeg.exe'
+    program.write_bytes(b'')
+    monkeypatch.setattr(clean, '_configured', str(program))
+
+    def ffmpeg(command, **kwargs):              # stands in for FFmpeg: the M4A decodes to eight seconds of speech
+        sf.write(command[-1], speech(8.0), RATE, subtype='FLOAT')
+        return subprocess.CompletedProcess(command, 0, stdout='', stderr='')
+
+    monkeypatch.setattr(audio_import.subprocess, 'run', ffmpeg)
+    drop(window, memo)
+    assert [take.device['name'] for take in session.workspace.takes] == ['Voice memo.m4a']
+
+
+def test_export_diagnostics_saves_a_zip_where_it_is_asked_and_says_so(window, session, dialogs, tmp_path):
+    dialogs.save_answer = None
+    window.actions.diagnostics.trigger()
+    assert dialogs.notices == []
+    dialogs.save_answer = str(tmp_path / 'for the report')
+    window.actions.diagnostics.trigger()
+    made = tmp_path / 'for the report.zip'
+    assert zipfile.is_zipfile(made)
+    assert dialogs.notices[-1].title == 'Export diagnostics' and str(made) in dialogs.notices[-1].text
+    with zipfile.ZipFile(made) as bundle:
+        assert str(session.lib.root) not in bundle.read('summary.txt').decode('utf-8')
 
 
 def test_a_drag_that_holds_no_audio_is_not_accepted(window, tmp_path):

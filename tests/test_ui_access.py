@@ -249,6 +249,16 @@ def test_a_burst_of_status_messages_is_said_once_as_the_last_of_them(window, ses
     assert said == ['Keeping 4 of 5...']
 
 
+def test_a_closed_window_reads_out_nothing_more(window, session, monkeypatch):
+    """Its last status would otherwise be said once the delay ran out, over whatever came after: in the tests, another
+    test's window."""
+    said = heard(monkeypatch)
+    session.bus.status('Something to say.')
+    assert window.close()
+    QTest.qWait(main_window.ANNOUNCE_AFTER_MS + 200)
+    assert said == []
+
+
 def test_a_mark_is_read_out_as_a_word(window, session):
     """Windows' accessibility tree showed them read out as "white circle", which says nothing about the check beside it."""
     record(session)

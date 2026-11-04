@@ -156,10 +156,15 @@ Capitals and punctuation do not count as differences. After a cut, the check is 
 
 ## Importing audio
 
-Press `Ctrl+O`, click **Import**, or drag audio files onto the window. A WAV, FLAC, Ogg, MP3 or AIFF file is copied
-into the current speaker's `masters` folder as a new take. Your file is not touched, and the take is edited and kept like
-a recording. A file with no audio in it, or a damaged one, is refused with a message. Only import audio you have the right
-to use.
+Press `Ctrl+O`, click **Import**, or drag audio files onto the window. The dialog lets you choose several files at once.
+A WAV, FLAC, Ogg, MP3 or AIFF file is copied into the current speaker's `masters` folder as a new take. Your file is not
+touched, and the take is edited and kept like a recording. A file with no audio in it, or a damaged one, is refused with a
+message, and the others are still imported. Only import audio you have the right to use.
+
+With [FFmpeg](../README.md#optional-extras) installed, the import also reads the M4A that phones and Windows' Sound Recorder
+make, AAC, AMR, WMA and WebM, and the sound of a video (MP4, MOV or 3GP). FFmpeg turns the sound into a temporary WAV for
+the import, which is deleted after. Without FFmpeg, such a file is refused with a message that says how to get it; or save
+the recording as WAV first.
 
 ## Speakers
 
@@ -546,6 +551,12 @@ unless it can show a message. Wait a few seconds (it takes one to three to open)
 portable copy). It records every start and any error with its details. `voice-slate-crash.log` beside it is only
 written if a native library crashes. Run `run.bat` to see the error in a console, and `python -m recorder --check` to
 see whether everything the program needs is installed.
+
+**I want to report a problem.** In the gear menu, choose **Export diagnostics...** and save the zip. It holds what
+`--check` says, your settings and the end of the log, with your recordings folder, your home folder, your user name and
+your speakers' names and folders replaced by `<recordings>`, `<home>`, `<user>` and `<speaker 1>`, `<speaker 2>`. Open it,
+read it, and attach it to the [bug report](https://github.com/Fel101/fels-voice-slate/issues/new/choose). The program
+sends nothing itself.
 
 **It says Voice Slate is already running.** Only one copy runs at a time. Look for its window on the taskbar. If it
 is not there, it may have stopped without closing: end the `pythonw.exe` process in Task Manager and start again.

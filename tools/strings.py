@@ -21,8 +21,8 @@ FILES = [*sorted((ROOT / 'recorder' / 'ui').glob('*.py')), ROOT / 'recorder' / '
 CALLS = {'label', 'caption', 'button', 'chip', 'set_chip', 'setToolTip', 'setPlaceholderText', 'setText', 'setWindowTitle',
          'addRow', 'addItem', 'QCheckBox', 'QPushButton', 'QLabel', 'notice', 'confirm', 'ask_text', 'choose_item', 'addAction',
          'addMenu', 'setAccessibleName', 'setAccessibleDescription', 'set_tooltips', 'Segmented', 'status', 'tr', 'Step',
-         'setStatusTip', 'StepCard', 'choose_file', 'choose_folder', 'choose_save_file', 'add_note', '_field', 'PathRow', 'say',
-         'get', 'format'}
+         'setStatusTip', 'StepCard', 'choose_file', 'choose_files', 'choose_folder', 'choose_save_file', 'add_note', '_field',
+         'PathRow', 'say', 'get', 'format'}
 NAMES = {'STATEMENT', 'EMPTY_TEXT', 'INTRO', 'SPEC', 'TABS', 'THEME_NAMES', 'MOUSE_ROWS', 'SHORTCUT_GROUPS', 'STATES', 'SOURCES',
          'STATUS_WORDS', 'GLYPH_WORDS'}
 SKIP = {'F9', 'muted', 'dim', 'ghost', 'primary', 'link', 'danger', 'amber', 'violet', 'green', 'red', 'gray', 'text',

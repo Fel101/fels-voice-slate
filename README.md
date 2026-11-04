@@ -22,6 +22,8 @@ what is in it and whether you had the right to record it.
 - **Record** from a microphone, or from what your computer is playing. An armed input keeps the half second before you
   press Record, so the first word is never cut off, and it stays armed from one take to the next. On an interface with
   several inputs you choose which one.
+- **Import** recordings, several at once, with **Import** or by dragging them onto the window: WAV, FLAC, Ogg, MP3 and AIFF,
+  and with FFmpeg also the M4A that phones and Windows' Sound Recorder make, and the sound of a video.
 - **Long sessions.** A script shows one prompt per take, remembers your place, and shows which lines have a kept clip. Keys
   walk the takes, and several takes can be kept, discarded or moved together.
 - **Reading check** (needs draft transcripts). A take read from a script is compared with what the recognizer heard, and the
@@ -171,7 +173,7 @@ Both are off until you set them up, and the recorder works fully without them.
 
 **Noise reduction** uses [FFmpeg](https://ffmpeg.org). Install it yourself, for example `winget install Gyan.FFmpeg`,
 and restart Voice Slate. It is found automatically, or you can give its path in **Settings**. The recorder runs FFmpeg
-as a separate program and does not include it.
+as a separate program and does not include it. With FFmpeg, **Import** also reads M4A, AAC and the sound of a video.
 
 **Draft transcripts** use [faster-whisper](https://github.com/SYSTRAN/faster-whisper) running on your computer. They also make
 the reading check and cutting by clicking words possible. Press **Suggest from audio** and choose *Open the setup* (or
@@ -255,12 +257,13 @@ Read [docs/responsible-use.md](docs/responsible-use.md) before you record anyone
 ```bash
 python -m venv .venv
 .venv\Scripts\python -m pip install -r requirements-dev.txt
-.venv\Scripts\python -m pytest
+.venv\Scripts\python -m pytest -n auto
 .venv\Scripts\python -m pyflakes recorder tests tools
 ```
 
 The tests need no microphone, speakers or display: the window tests run on Qt's offscreen platform with a fake
-recorder and fake dialogs. `python tools/shoot.py` redraws the screenshots in `docs/images` from generated audio,
+recorder and fake dialogs. `-n auto` runs them in parallel, one process for each processor core; without it they run one
+after another. `python tools/shoot.py` redraws the screenshots in `docs/images` from generated audio,
 `python tools/make_icon.py` redraws the program's icon, and `python tools/build_installer.py` builds the installer.
 [CONTRIBUTING.md](CONTRIBUTING.md) has the rest.
 

@@ -56,6 +56,7 @@ class StubDialogs:
         self.number_answer = None
         self.folder_answer = None
         self.file_answer = None
+        self.files_answer = []                   # the files chosen where several can be
         self.save_answer = None                  # the file name chosen to save to
         self.item_answer = None                  # the position chosen from a list
         self.copy_answer = None                  # (format, sample rate) for a copy of a clip
@@ -88,6 +89,10 @@ class StubDialogs:
 
     def choose_file(self, title, start='', filter=''):
         return self.file_answer
+
+    def choose_files(self, title, start='', filter=''):
+        self.asked.append(('files', SimpleNamespace(title=title, start=str(start), filter=filter)))
+        return list(self.files_answer)
 
     def choose_save_file(self, title, start='', filter=''):
         self.asked.append(('save', SimpleNamespace(title=title, start=str(start), filter=filter)))

@@ -42,7 +42,7 @@ import soundfile as sf
 
 from . import __version__
 from . import audio_core as ac
-from . import clean
+from . import audio_import, clean
 from .core import chain as chain_mod
 from .core import render
 from .core.edits import History, validate_edits, words_key
@@ -682,8 +682,9 @@ class Library:
         return take.master_path
 
     def import_file(self, slug, path, purpose=ac.DEFAULT_PURPOSE):
-        """Copy a recording from anywhere on disk into the speaker's masters, as a take ready to edit."""
-        samples, rate = sf.read(str(path), dtype='float32', always_2d=False)
+        """Copy a recording from anywhere on disk into the speaker's masters, as a take ready to edit. A format soundfile
+        does not read, such as a phone's M4A, is decoded by FFmpeg when it is installed (see audio_import.py)."""
+        samples, rate = audio_import.read_audio(path)
         if samples.size == 0:
             raise ValueError('the file holds no audio')
         if not np.isfinite(samples).all():

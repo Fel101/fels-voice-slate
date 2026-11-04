@@ -31,6 +31,6 @@ jobs:
         run: python -m pyflakes recorder tests tools
 
       - name: Test
-        run: python -m pytest
+        run: python -m pytest -n auto
         env:
           QT_QPA_PLATFORM: offscreen
