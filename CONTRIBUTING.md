@@ -33,6 +33,9 @@ where it is). To watch them as they happen, start the program with `run.bat` or 
 `.venv\Scripts\python -m recorder`, and run `.venv\Scripts\python -m recorder --check` to see what is installed. Please
 remove personal folder names from anything you paste from the log.
 
+**Export diagnostics...** in the gear menu does that for you: it saves a zip with what `--check` says, the settings and the
+end of the log, with your folders, user name and speaker names replaced, for you to read and then attach.
+
 **Do not attach recordings or sidecar files of real people, your `settings.json`, or anything private**, and remove
 personal folder names from anything you paste. To show a problem with audio, describe it, or use generated audio:
 `tools/synthetic.py` makes test takes.
@@ -46,12 +49,14 @@ You need Windows (11 is the tested version) and Python 3.12 or newer.
 ```bash
 python -m venv .venv
 .venv\Scripts\python -m pip install -r requirements-dev.txt
-.venv\Scripts\python -m pytest
+.venv\Scripts\python -m pytest -n auto
 .venv\Scripts\python -m pyflakes recorder tests tools
 ```
 
 The tests need no microphone, speakers or display, and make no network connections. The window tests run on Qt's
-offscreen platform. If a test appears to hang, `faulthandler_timeout` in `pyproject.toml` prints where it is stuck.
+offscreen platform. `-n auto` runs them in parallel; leave it out to run them one after another, which is easier to
+follow when one fails. If a test appears to hang, `faulthandler_timeout` in `pyproject.toml` prints where it is stuck.
+Tests that use a real FFmpeg are skipped when it is not installed.
 
 Start the program with `run.bat` (it keeps a console open to show errors), or `.venv\Scripts\python -m recorder`. The
 desktop icon, which starts it with no console, is made by `.venv\Scripts\python -m recorder --shortcut`.

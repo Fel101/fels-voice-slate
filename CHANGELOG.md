@@ -5,10 +5,32 @@ the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **Phone recordings can be imported.** With FFmpeg installed, Import reads the M4A that phones and Windows' Sound Recorder
+  make, AAC, AMR, WMA and WebM, and the sound of a video (MP4, MOV, 3GP). WAV, FLAC, Ogg, MP3 and AIFF are read as before,
+  and a damaged one is still refused, not handed to FFmpeg. Without FFmpeg, the message says how to get it.
+- **Several recordings can be chosen at once** in the Import dialog, as dragging several onto the window already allowed.
+  One that cannot be read is named, and the rest come in.
+- **Export diagnostics...** in the gear menu saves a zip to attach to a bug report: what `--check` says, the settings and the
+  end of the log. The recordings folder, the home folder, the user name and the speakers' names and folders are replaced
+  in it, however a path is written, and it is saved only where the person chooses.
+
 ### Changed
 
+- **Draft transcripts are quicker after the first.** The speech recognizer is kept running between drafts, so the model
+  loads once: a draft made again after a cut took 0.4 s instead of about 2 s with the tiny model. A recognizer that stops still
+  says why, as before (a Python that cannot start, say), and it stops when the window closes.
 - The release workflow no longer replaces an installer already on the Release, such as one built and tried by hand. Its own
   build is then kept with the run.
+- The release workflow stops when installing its tools fails, instead of building with what it has.
+- The tests run in parallel with `pytest -n auto` (pytest-xdist, for development only).
+
+### Fixed
+
+- Auto-trim, Auto fix and the Check tab find the pauses of a take that is mostly pause, such as one short word in ten
+  seconds. The quiet before and after the word counted as speech, so nothing was trimmed. A take with a quiet voice, and one
+  with no speech at all, are measured as they were.
 
 ## [0.5.0] - 2026-11-02
 

@@ -7,11 +7,11 @@ is also when the meter, the clock, the live waveform and the playhead are update
 import base64
 from pathlib import Path
 
-from PySide6.QtCore import QByteArray, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QByteArray, QSize, QStandardPaths, Qt, QTimer, Signal
 from PySide6.QtGui import QAccessible, QAccessibleAnnouncementEvent, QGuiApplication
 from PySide6.QtWidgets import QApplication, QLabel, QMainWindow, QMenu, QWidget
 
-from .. import asr_setup, dataset, launch, manifest, share, transcript
+from .. import asr_setup, audio_import, dataset, launch, manifest, share, transcript
 from .. import clean, settings
 from ..audio_io import list_outputs
 from ..clean import CleanError
@@ -34,7 +34,7 @@ from .widgets import ElidedLabel, button, format_clock, hbox, label, vbox
 
 MIN_SIZE = QSize(1100, 600)        # 700 did not fit a 1080p screen at 150%, once the title bar and the taskbar were counted
 PREFERRED_SIZE = QSize(1440, 900)
-AUDIO_SUFFIXES = {'.wav', '.flac', '.ogg', '.opus', '.mp3', '.aif', '.aiff'}
+AUDIO_SUFFIXES = set(audio_import.SUFFIXES)
 TICK_MS = 50
 ANALYSIS_DELAY_MS = 200            # how long the measurements wait after the last edit, so a dragged slider measures once
 ALERT_MS = 2000                    # how long the taskbar button flashes when the record key was pressed in another program
@@ -155,6 +155,7 @@ class MainWindow(QMainWindow):
         menu.addAction(a.refresh_devices)
         menu.addSeparator()
         menu.addAction(a.shortcuts)
+        menu.addAction(a.diagnostics)
         menu.addAction(a.about)
         menu.addSeparator()
         menu.addAction(a.quit)
@@ -220,6 +221,7 @@ class MainWindow(QMainWindow):
         a.move_selected.triggered.connect(lambda: self.move_selected())
         a.settings.triggered.connect(self.open_settings)
         a.shortcuts.triggered.connect(self.dialogs.shortcuts)
+        a.diagnostics.triggered.connect(self.export_diagnostics)
         a.about.triggered.connect(self.dialogs.about)
         a.quit.triggered.connect(self.close)
 
@@ -765,9 +767,21 @@ class MainWindow(QMainWindow):
             self.inspector.focus_label()
 
     def import_recording(self):
-        path = self.dialogs.choose_file('Import a recording', self.session.lib.root)
-        if path:
-            self.session.workspace.import_file(path)
+        self.import_files(self.dialogs.choose_files('Import recordings', self.session.lib.root))
+
+    def import_files(self, paths):
+        """Copy recordings in as takes, the last one in front. One that cannot be read is said in a notice, once the
+        rest are in. FFmpeg can take a few seconds over a long M4A, so the cursor shows that the window is busy."""
+        paths = list(paths)
+        if not paths:
+            return
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            imported = sum(1 for path in paths if self.session.workspace.import_file(path) is not None)
+        finally:
+            QApplication.restoreOverrideCursor()
+        if imported > 1:
+            self.session.bus.status(f'Imported {imported} recordings. Edit each one, then Keep.')
 
     def new_speaker(self):
         name = self.dialogs.ask_text('New speaker', 'Name of the voice you are recording:')
@@ -1004,6 +1018,27 @@ class MainWindow(QMainWindow):
         if path:
             self.session.script.load_file(path)
 
+    def export_diagnostics(self):
+        """Save a zip for a bug report, where the person chooses: what is installed, the settings and the end of the log,
+        with their folders, user name and speakers' names replaced (diagnostics.py)."""
+        from datetime import date
+
+        from .. import diagnostics
+
+        desktop = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DesktopLocation) or str(Path.home())
+        start = Path(desktop) / f'voice-slate-diagnostics-{date.today()}.zip'
+        path = self.dialogs.choose_save_file('Export diagnostics', start, 'Zip files (*.zip);;All files (*)')
+        if not path:
+            return
+        try:
+            made = diagnostics.collect(self._with_ending(path, '.zip', set()), root=self.session.lib.root)
+        except OSError as e:
+            self.dialogs.notice('error', 'Could not export diagnostics', str(e))
+            return
+        self.dialogs.notice('info', 'Export diagnostics', tr(
+            'Saved {file}. Your folders, user name and speaker names are replaced in it. Open it and read it before you '
+            'attach it to a bug report.').format(file=made))
+
     def _offer_transcript_setup(self):
         """Suggest from audio was pressed with no recognizer: say so, and offer the one-time setup that gets one."""
         self.session.bus.status(transcript.NOT_SET_UP)
@@ -1178,8 +1213,7 @@ class MainWindow(QMainWindow):
             event.acceptProposedAction()
 
     def dropEvent(self, event):
-        for path in self._dropped_audio(event.mimeData()):
-            self.session.workspace.import_file(path)
+        self.import_files(self._dropped_audio(event.mimeData()))
         event.acceptProposedAction()
 
     # ---- closing -----------------------------------------------------------------------------------------------------

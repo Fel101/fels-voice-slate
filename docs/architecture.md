@@ -21,7 +21,9 @@ recorder/
   capture.py     microphone (sounddevice) and system audio (PyAudioWPatch), behind one interface
   audio_io.py    playback through a sounddevice output stream
   clean.py       noise reduction by running the user's own FFmpeg
-  transcript.py  draft transcripts by running a faster-whisper of the user's (asr_worker.py does the work)
+  audio_import.py reading a recording to import: SoundFile for its own formats, the user's FFmpeg for the rest (M4A)
+  transcript.py  draft transcripts by running a faster-whisper of the user's (asr_worker.py does the work); a session
+                 keeps one worker running (Worker), so the model loads once
   asr_setup.py   setup-transcripts.bat: installs that faster-whisper (.venv-asr, requirements-asr.txt) and a model
                  (models/) when the person runs it and agrees, then fills in the settings. The one code path that goes
                  online, and the program never calls it by itself. It can use another Python than the program's, because
@@ -30,6 +32,7 @@ recorder/
   jobs.py        a small pool of worker threads
   settings.py    settings.json, and where the clips go by default
   __main__.py    starting up: --check, --shortcut, --setup-transcripts, and the window
+  diagnostics.py what is installed (--check), and the zip of Export diagnostics, with names in it replaced
   launch.py      what a windowless start needs: a log file, one copy at a time, and an error window instead of a console
   shortcut.py    the icon in the program folder, on the desktop or in the Start menu (a Windows .lnk file made through the shell's own COM interfaces)
   hotkey.py      F9 while another program is in front: Windows' RegisterHotKey, heard in Qt's event loop

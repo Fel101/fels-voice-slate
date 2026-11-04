@@ -64,7 +64,8 @@ SPEC = {
                          False),
     'move_selected': ('Move selected takes to speaker...', None, [], 'File the takes selected in the list under a different '
                                                                       'speaker', False),
-    'import_recording': ('Import recording...', 'import', ['Ctrl+O'], 'Copy a recording in as a new take', False),
+    'import_recording': ('Import recording...', 'import', ['Ctrl+O'], 'Copy one or more recordings in as new takes',
+                         False),
     'new_speaker': ('New speaker...', 'plus', ['Ctrl+N'], 'Add a speaker', False),
     'rename_speaker': ('Rename speaker...', None, [], 'Change the name this speaker is shown under. Their folder and clips '
                                                        'are not touched', False),
@@ -90,6 +91,8 @@ SPEC = {
     # the program
     'settings': ('Settings...', 'settings', ['Ctrl+,'], 'Output folder, record key, FFmpeg and draft transcripts', False),
     'shortcuts': ('Keyboard shortcuts', None, ['F1'], 'List every shortcut', False),
+    'diagnostics': ('Export diagnostics...', None, [], 'Save a zip to attach to a bug report, with your folders and '
+                                                       'speaker names hidden', False),
     'about': ('About...', None, [], 'Version, licence and credits', False),
     'quit': ('Quit', None, ['Ctrl+Q'], 'Close the recorder', False),
 }

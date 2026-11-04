@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDateEdit, QDialog, QDouble
                                QInputDialog, QKeySequenceEdit, QLabel, QLineEdit, QMessageBox, QPlainTextEdit, QPushButton,
                                QScrollArea, QWidget)
 
-from .. import __version__, clean, dataset, manifest, settings, share, transcript
+from .. import __version__, audio_import, clean, dataset, manifest, settings, share, transcript
 from .. import audio_core as ac
 from ..i18n import LANGUAGES, tr
 from .actions import SPEC, key_problem, shortcut_text
@@ -22,7 +22,7 @@ from .palette import PALETTE
 from .translate import translate_tree
 from .widgets import button, hbox, label, vbox
 
-AUDIO_FILTER = 'Audio files (*.wav *.flac *.ogg *.opus *.mp3 *.aif *.aiff);;All files (*)'
+AUDIO_FILTER = f'Audio files ({" ".join("*" + suffix for suffix in audio_import.SUFFIXES)});;All files (*)'
 THEME_NAMES = {'dark': 'Dark', 'light': 'Light', 'contrast': 'High contrast', 'system': 'As in Windows'}
 PREFERRED_HEIGHT = 820              # of the Settings dialog, when the screen has the room
 LEVEL_ICONS = {'info': QMessageBox.Icon.Information, 'warning': QMessageBox.Icon.Warning,
@@ -64,6 +64,11 @@ class Dialogs:
     def choose_file(self, title, start='', filter=AUDIO_FILTER):
         path, _ = QFileDialog.getOpenFileName(self.parent, tr(title), str(start), tr(filter))
         return path or None
+
+    def choose_files(self, title, start='', filter=AUDIO_FILTER):
+        """The files chosen, in a dialog that lets several be picked at once: an empty list when it is cancelled."""
+        paths, _ = QFileDialog.getOpenFileNames(self.parent, tr(title), str(start), tr(filter))
+        return paths
 
     def choose_save_file(self, title, start='', filter='All files (*)'):
         """A file name to write to. The dialog asks before it replaces a file."""

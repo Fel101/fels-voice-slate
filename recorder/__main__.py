@@ -16,10 +16,6 @@ from pathlib import Path
 
 from . import __version__, launch, settings
 
-REQUIRED = (('PySide6', 'the window'), ('numpy', 'audio maths'), ('scipy', 'filters and resampling'),
-            ('soundfile', 'reading and writing WAV files'), ('sounddevice', 'the microphone and playback'),
-            ('send2trash', 'Discard, which uses the Recycle Bin'))
-OPTIONAL = (('pyaudiowpatch', 'recording what the computer plays'),)
 NEEDS_PYSIDE = (f'{settings.APP_NAME} needs PySide6 and the other requirements. Install them with:\n'
                 '    python -m pip install -r requirements.txt\n'
                 'or run setup.bat in the program folder.')
@@ -43,32 +39,11 @@ def parse(argv):
 
 def check():
     """Print what is installed and what is missing. Returns 0 if the program can run."""
-    from . import clean
+    from . import diagnostics
 
     data = settings.load()
-    missing = False
-    for name, what in REQUIRED + OPTIONAL:
-        required = (name, what) in REQUIRED
-        if importlib.util.find_spec(name) is None:
-            ok, state = False, 'MISSING' if required else 'not installed'
-        else:
-            try:
-                module = importlib.import_module(name)
-            except Exception as e:                      # there, but it will not load: as bad as missing
-                ok, state = False, f'does not load ({e})'
-            else:
-                ok, state = True, f'{name} {getattr(module, "__version__", "")}'.strip()
-        missing = missing or (required and not ok)
-        print(f'  {"ok     " if ok else "PROBLEM" if required else "absent "}  {what:40s} {state}')
-    ffmpeg = clean.locate(data.get('ffmpeg'))
-    print(f'  {"ok     " if ffmpeg else "absent "}  {"noise cleaning (FFmpeg, optional)":40s} {ffmpeg or "not found"}')
-    try:
-        from . import transcript
-        drafts = transcript.available(data.get('asr_python'), data.get('asr_model'))
-    except ImportError:                                 # soundfile is missing, which the lines above already say
-        drafts = False
-    print(f'  {"ok     " if drafts else "absent "}  {"draft transcripts (optional)":40s} '
-          f'{"ready" if drafts else "not set up: run setup-transcripts.bat"}')
+    lines, missing = diagnostics.installed(data)
+    print('\n'.join(lines))
     root = data.get('root') or f'{settings.default_root()}  (the default)'
     print(f'\nClips are saved in: {root}\nSettings file: {settings.settings_path()}\nLog file: {launch.log_path()}')
     print('\n' + ('Everything the program needs is installed.' if not missing else 'Something it needs is missing: see above.'))

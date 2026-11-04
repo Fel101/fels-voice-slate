@@ -167,6 +167,36 @@ def test_auto_trim_does_nothing_when_the_ends_are_already_tight():
     assert analysis.auto_trim_ranges(bursts(10.0, [(0.1, 9.9)]), RATE) == []
 
 
+def test_auto_trim_finds_one_short_word_in_a_long_take():
+    """Under a tenth of this take is speech, so the loudest tenth of it is pause, which once made the pauses count as
+    speech and left the take untrimmed."""
+    (a0, b0), (a1, b1) = analysis.auto_trim_ranges(bursts(10.0, [(4.0, 4.6)]), RATE, margin=0.15)
+    assert a0 == 0.0 and b0 == pytest.approx(4.0 - 0.15, abs=0.1)
+    assert a1 == pytest.approx(4.6 + 0.15, abs=0.1) and b1 == pytest.approx(10.0)
+
+
+def test_a_short_word_is_found_in_a_room_whose_noise_rises_and_falls():
+    seconds = 10.0
+    t = np.arange(int(seconds * RATE)) / RATE
+    room = bursts(seconds, [], noise=0.001) * (10 ** (6.0 / 20 * np.sin(2 * np.pi * 2 * t))).astype(np.float32)
+    lead, tail = analysis.edge_silence(room + bursts(seconds, [(4.0, 4.6)], noise=0.0), RATE)
+    assert lead == pytest.approx(4.0, abs=0.1) and tail == pytest.approx(5.4, abs=0.1)
+
+
+def test_the_pauses_of_a_very_quiet_voice_are_still_found():
+    """A voice near -50 dB: the speech level stays that of the voice, so the take is not all taken for pause."""
+    x = bursts(10.0, SPANS, amp=0.0045, noise=0.00003)
+    assert analysis.edge_silence(x, RATE) == pytest.approx((2.0, 2.0), abs=0.1)
+    assert len(analysis.auto_trim_ranges(x, RATE)) == 2 and len(analysis.shorten_pause_ranges(x, RATE, 0.5)) == 1
+
+
+@pytest.mark.parametrize('x', [np.zeros(5 * RATE, np.float32), bursts(5.0, [], noise=0.0005)],
+                         ids=['digital silence', 'room tone'])
+def test_a_take_with_no_speech_is_never_all_pause_so_nothing_trims_it_away(x):
+    assert analysis.edge_silence(x, RATE) == (0.0, 0.0)
+    assert analysis.auto_trim_ranges(x, RATE) == [] and analysis.shorten_pause_ranges(x, RATE) == []
+
+
 def test_shorten_pauses_cuts_the_middle_of_long_pauses_only():
     x = bursts(12.0, [(0.5, 2.0), (4.0, 6.0), (6.2, 8.0), (11.0, 11.8)])
     (a, b), (c, d) = analysis.shorten_pause_ranges(x, RATE, keep_seconds=0.5)   # 2-4 s and 8-11 s; 6.0-6.2 s is short

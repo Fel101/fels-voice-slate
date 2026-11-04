@@ -145,6 +145,7 @@ class Session:
                 self.bus.status('Could not save your latest changes. Close again to leave without them.')
                 return lost
             self.closed = True
+            self.drafts.close()
             self.jobs.close()
             return []
         except (OSError, RuntimeError) as e:

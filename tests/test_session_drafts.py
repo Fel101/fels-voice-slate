@@ -77,8 +77,8 @@ def test_a_new_take_asks_for_a_draft_when_it_is_set_up(session, recognizer):
 def test_the_drafting_runs_on_the_edited_audio(session, monkeypatch):
     sent = []
     monkeypatch.setattr(transcript, 'available', lambda python, model: True)
-    monkeypatch.setattr(transcript, 'suggest',
-                        lambda audio, python, model, language=None, rate=None: sent.append(len(audio)) or {'text': 'ok'})
+    monkeypatch.setattr(transcript, 'suggest', lambda audio, python, model, language=None, rate=None, worker=None:
+                        sent.append(len(audio)) or {'text': 'ok'})
     take = record(session, 12.0)
     session.drafts.request(take)
     first = sent[-1]
@@ -86,6 +86,24 @@ def test_the_drafting_runs_on_the_edited_audio(session, monkeypatch):
     session.editor.cut_selection()
     session.drafts.request(take)
     assert sent[-1] == pytest.approx(first - 2 * 24000, abs=400)      # less the 10 ms the join overlaps
+
+
+def test_the_drafts_go_to_the_recognizer_the_session_keeps_running(session, monkeypatch):
+    workers = []
+    monkeypatch.setattr(transcript, 'available', lambda python, model: True)
+    monkeypatch.setattr(transcript, 'suggest', lambda audio, python, model, language=None, rate=None, worker=None:
+                        workers.append(worker) or {'text': 'ok'})
+    session.drafts.request(record(session, 8.0))           # each new take is drafted by itself as well
+    session.drafts.request(record(session, 8.0))
+    assert len(workers) == 4 and all(worker is session.drafts.worker for worker in workers)
+    assert isinstance(session.drafts.worker, transcript.Worker)
+
+
+def test_closing_the_session_stops_its_recognizer(session, monkeypatch):
+    stopped = []
+    monkeypatch.setattr(session.drafts.worker, 'close', lambda: stopped.append(True))
+    assert session.close() == []
+    assert stopped == [True]
 
 
 def test_a_replacement_draft_does_not_overwrite_later_typing(make_session, recognizer):
@@ -195,8 +213,8 @@ def test_the_language_setting_reaches_the_recognizer(session, monkeypatch):
     seen = []
     settings.update({'asr_language': ' es '}, session.settings_file)
     monkeypatch.setattr(transcript, 'available', lambda python, model: True)
-    monkeypatch.setattr(transcript, 'suggest',
-                        lambda audio, python, model, language=None, rate=None: seen.append(language) or {'text': 'Hola.'})
+    monkeypatch.setattr(transcript, 'suggest', lambda audio, python, model, language=None, rate=None, worker=None:
+                        seen.append(language) or {'text': 'Hola.'})
     record(session, 8.0)
     session.tick()
     settings.update({'asr_language': None}, session.settings_file)
