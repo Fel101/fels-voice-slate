@@ -1242,6 +1242,8 @@ class MainWindow(QMainWindow):
             event.ignore()
             return
         self.timer.stop()
+        self._analysis_timer.stop()
+        self._announcer.stop()          # a closed window must not read out its last status, 0.4 s on
         if self.hotkey is not None:
             self.hotkey.set_enabled(False)
         self.badge.close()
