@@ -152,7 +152,7 @@ def main():
     parser.add_argument('--work', default=str(ROOT / 'build'), help='the folder to build in')
     parser.add_argument('--no-installer', action='store_true', help='stop after the program folder')
     args = parser.parse_args()
-    work = Path(args.work)
+    work = Path(args.work).resolve()        # in full: Inno Setup reads a relative folder from installer/, beside its script
     if work.exists():
         shutil.rmtree(work)
     (work / 'app').mkdir(parents=True)

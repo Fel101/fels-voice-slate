@@ -5,6 +5,8 @@ the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-04
+
 ### Added
 
 - **Phone recordings can be imported.** With FFmpeg installed, Import reads the M4A that phones and Windows' Sound Recorder
@@ -32,6 +34,8 @@ the project uses [Semantic Versioning](https://semver.org/).
   seconds. The quiet before and after the word counted as speech, so nothing was trimmed. A take with a quiet voice, and one
   with no speech at all, are measured as they were.
 - A window that has closed no longer has its last status line read out by a screen reader a moment later.
+- `tools/build_installer.py --work` takes a relative folder. Inno Setup looked for the program folder beside its own script,
+  so the build stopped at its last step.
 
 ## [0.5.0] - 2026-11-02
 
@@ -330,7 +334,8 @@ The first public release.
 - The limiter's ceiling also holds for the saved 24 kHz file: resampling can push a peak over it, so the limiter runs
   once more after resampling.
 
-[Unreleased]: ../../compare/v0.5.0...HEAD
+[Unreleased]: ../../compare/v0.6.0...HEAD
+[0.6.0]: ../../compare/v0.5.0...v0.6.0
 [0.5.0]: ../../compare/v0.4.0...v0.5.0
 [0.4.0]: ../../compare/v0.3.0...v0.4.0
 [0.3.0]: ../../compare/v0.2.0...v0.3.0
