@@ -146,6 +146,7 @@ class _LoopbackBackend:
         self._out = None
         self._feed = None
         self._stop_feed = threading.Event()
+        self.sample_format = None           # what the loopback was opened with: floating point, or 16-bit if refused
 
     def _feed_output(self):
         """The output endpoint behind this loopback, found by name; the default output when the name does not match."""
@@ -161,21 +162,40 @@ class _LoopbackBackend:
 
     def open(self, on_block):
         pa = self._pa
-        self._out = self._p.open(format=pa.paInt16, channels=self._out_channels, rate=self.rate, output=True,
-                                 output_device_index=self._out_index, frames_per_buffer=1024)
-        self._stop_feed.clear()
-        self._feed = threading.Thread(target=self._keep_fed, name='loopback-feed', daemon=True)
-        self._feed.start()
+        try:
+            self._out = self._p.open(format=pa.paInt16, channels=self._out_channels, rate=self.rate, output=True,
+                                     output_device_index=self._out_index, frames_per_buffer=1024)
+            self._stop_feed.clear()
+            self._feed = threading.Thread(target=self._keep_fed, name='loopback-feed', daemon=True)
+            self._feed.start()
 
-        def callback(in_data, frame_count, time_info, status):
-            x = np.frombuffer(in_data, dtype='<i2').astype(np.float32) / 32768.0
-            on_block(x.reshape(-1, self.channels), bool(status & (pa.paInputOverflow | pa.paInputUnderflow)))
-            return None, pa.paContinue
+            def callback(in_data, frame_count, time_info, status):
+                if self.sample_format == pa.paFloat32:
+                    x = np.frombuffer(in_data, dtype='<f4').copy()
+                else:
+                    x = np.frombuffer(in_data, dtype='<i2').astype(np.float32) / 32768.0
+                on_block(x.reshape(-1, self.channels), bool(status & (pa.paInputOverflow | pa.paInputUnderflow)))
+                return None, pa.paContinue
 
-        self._stream = self._p.open(format=pa.paInt16, channels=self.channels, rate=self.rate, input=True,
-                                    input_device_index=self.device, frames_per_buffer=1024,
-                                    stream_callback=callback)
-        self._stream.start_stream()
+            self._stream = self._open_input(callback)
+            self._stream.start_stream()
+        except Exception:
+            self.close()                    # the silent feed stops with it
+            raise
+
+    def _open_input(self, callback):
+        """The loopback in floating point, which is how Windows mixes what it plays, so nothing is lost before the original
+        is saved in 24 bits. 16-bit was asked for until 0.7, and is the fallback for a device that refuses floating point."""
+        pa = self._pa
+        refused = None
+        for sample_format in (pa.paFloat32, pa.paInt16):
+            self.sample_format = sample_format
+            try:
+                return self._p.open(format=sample_format, channels=self.channels, rate=self.rate, input=True,
+                                    input_device_index=self.device, frames_per_buffer=1024, stream_callback=callback)
+            except OSError as e:            # PortAudio's "Sample format not supported", and the like
+                refused = e
+        raise refused
 
     def _keep_fed(self):
         silence = b'\x00' * (1024 * self._out_channels * 2)

@@ -16,6 +16,9 @@ the project uses [Semantic Versioning](https://semver.org/).
 - **A take is recorded at the rate the microphone runs at.** The microphone chosen at first was MME's sound mapper, which
   reports 44.1 kHz for every microphone, so an Audition from a 48 kHz microphone was recorded and kept at 44.1 kHz after
   Windows had resampled it. It now comes out at 48 kHz, also from a microphone chosen through MME in 0.6.
+- **System audio is recorded at full resolution.** It was asked for in 16 bits, although the original is saved in 24, so
+  everything finer than 16 bits' smallest step, about -90 dBFS, was lost. It is now recorded in floating point, as Windows mixes it, and in 16 bits only from
+  a device that refuses that. A loopback that will not open no longer leaves its silent feed running.
 - A device with more than two inputs is opened with all of them when the first two are mixed, as it already was when one
   input is chosen, because Windows may refuse to open part of them.
 

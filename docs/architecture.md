@@ -162,6 +162,9 @@ remembered name in the list shown now: the same name, else the device's own name
 default rather than guess. A microphone is opened with all its inputs and the callback keeps the ones wanted, because WASAPI
 may refuse to open part of them.
 
+System audio is opened in floating point, which is how Windows mixes what it plays, so nothing is lost before the original
+is saved in 24 bits; a loopback that refuses floating point is opened in 16 bits, as every one was until 0.7.
+
 ## Starting up
 
 The desktop icon runs `pythonw.exe -m recorder`, which has no console, so `launch.py` supplies what a console would have

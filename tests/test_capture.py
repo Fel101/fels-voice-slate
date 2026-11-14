@@ -175,3 +175,102 @@ def test_new_blocks_hands_each_block_over_once_and_starts_with_the_pre_roll():
     backend.on_block(block(0.125))
     assert [float(b[0, 0]) for b in capture.new_blocks()] == [0.125]
     capture.stop()
+
+
+# ---- system audio at full resolution ---------------------------------------------------------------------------------------
+
+def loopback_library(monkeypatch, refuse=()):
+    """A stand-in for PyAudioWPatch with one output and its loopback. Input streams in a format in `refuse` fail to open as
+    PortAudio's do. Returns the streams opened."""
+    import sys
+    import time
+    opened = []
+    devices = [{'index': 0, 'name': 'Speakers (Realtek(R) Audio)', 'hostApi': 0, 'maxOutputChannels': 2,
+                'maxInputChannels': 0, 'defaultSampleRate': 48000.0},
+               {'index': 1, 'name': 'Speakers (Realtek(R) Audio) [Loopback]', 'hostApi': 0, 'maxOutputChannels': 0,
+                'maxInputChannels': 2, 'defaultSampleRate': 48000.0, 'isLoopbackDevice': True}]
+
+    class Stream:
+        def __init__(self, **options):
+            self.options = options
+            self.active = self.closed = False
+
+        def start_stream(self):
+            self.active = True
+
+        def stop_stream(self):
+            self.active = False
+
+        def close(self):
+            self.closed = True
+
+        def is_active(self):
+            return self.active
+
+        def write(self, data):
+            time.sleep(0.005)               # the silent feed, which a sound card would hold up
+
+    class PyAudio:
+        def get_device_info_by_index(self, index):
+            return devices[index]
+
+        def get_host_api_info_by_type(self, kind):
+            return {'index': 0}
+
+        def get_device_count(self):
+            return len(devices)
+
+        def get_default_output_device_info(self):
+            return devices[0]
+
+        def open(self, **options):
+            if options.get('input') and options['format'] in refuse:
+                raise OSError(-9994, 'Sample format not supported')
+            opened.append(Stream(**options))
+            return opened[-1]
+
+        def terminate(self):
+            pass
+
+    monkeypatch.setitem(sys.modules, 'pyaudiowpatch', SimpleNamespace(
+        PyAudio=PyAudio, paFloat32=1, paInt16=8, paWASAPI=13, paContinue=0, paInputOverflow=2, paInputUnderflow=4))
+    return opened
+
+
+def inputs(opened):
+    return [stream for stream in opened if stream.options.get('input')]
+
+
+def test_system_audio_is_recorded_in_floating_point(monkeypatch):
+    """It was asked for in 16 bits, although the original is saved in 24: anything quieter than -96 dB was lost."""
+    opened = loopback_library(monkeypatch)
+    capture = cap.open_capture('system', 1)
+    capture.start()
+    stream = inputs(opened)[0]
+    assert stream.options['format'] == 1
+    quiet = np.full((480, 2), 1e-5, np.float32)                 # -100 dBFS: below 16 bits' smallest step
+    stream.options['stream_callback'](quiet.tobytes(), 480, None, 0)
+    took = capture.stop()
+    capture.close()
+    assert took.shape == (480, 2) and np.allclose(took, 1e-5)
+
+
+def test_a_device_that_refuses_floating_point_is_recorded_in_16_bits(monkeypatch):
+    opened = loopback_library(monkeypatch, refuse=(1,))
+    capture = cap.open_capture('system', 1)
+    capture.start()
+    stream = inputs(opened)[0]
+    assert stream.options['format'] == 8
+    stream.options['stream_callback'](np.full((480, 2), 16384, '<i2').tobytes(), 480, None, 0)
+    took = capture.stop()
+    capture.close()
+    assert np.allclose(took, 0.5)
+
+
+def test_a_loopback_that_will_not_open_leaves_no_silent_feed_playing(monkeypatch):
+    opened = loopback_library(monkeypatch, refuse=(1, 8))
+    backend = cap._LoopbackBackend(1)
+    with pytest.raises(OSError, match='Sample format not supported'):
+        backend.open(lambda block, lost: None)
+    assert backend._feed is None and backend._out is None and opened[0].closed
+    backend.terminate()

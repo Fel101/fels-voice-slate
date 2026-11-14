@@ -71,8 +71,9 @@ The **Clip** tab changes the purpose of one take, beside its label. Changing it 
 1. Choose a **source** at the top.
    - **Microphone** lists each input device once, by its full name, as Windows' Sound settings show it. The one chosen at
      first is Windows' default microphone, and it records at the rate the microphone runs at.
-   - **System audio** records what the computer is playing through the chosen output (WASAPI loopback). Use it only for
-     audio you own or may use; see [Responsible use](responsible-use.md). It records only while something plays.
+   - **System audio** records what the computer is playing through the chosen output (WASAPI loopback), at the full
+     resolution Windows plays it at. Use it only for audio you own or may use; see [Responsible use](responsible-use.md).
+     It records only while something plays.
 2. Click **Arm** (`Ctrl+M`) to open the input before you record. The level meter becomes live, and Voice Slate keeps
    the last half second, so when you press Record the beginning of the first word is already included. It stays armed
    after each take until you click **Arm** again, so every take of a session starts the same way. Arming is optional:
