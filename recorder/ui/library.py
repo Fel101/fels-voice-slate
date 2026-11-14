@@ -25,6 +25,7 @@ SOURCES = {'mic': 'Mic', 'system': 'System', 'import': 'Import'}
 STATUS_COLOURS = {'In review': 'amber', 'Kept': 'green', 'Changed': 'amber', 'Not kept': 'muted', 'Recording': 'red',
                   'Not saved': 'red'}
 EMPTY_TEXT = 'No takes yet.\nPress Record, or import a recording.'
+OUT_OF_REACH_TEXT = 'Your recordings folder cannot be reached, so its takes cannot be shown.'
 ROW_HEIGHT = 74
 ROW_GAP = 4                     # on every side of a row, so 8 pixels between two rows
 ROW_ROLE = Qt.ItemDataRole.UserRole
@@ -485,7 +486,12 @@ class LibraryPanel(QWidget):
         self.model.show(takes, shown, self.model.live is not None)
         self._follow_current()
         self.count.setText(str(len(takes)) if len(shown) == len(takes) else f'{len(shown)} of {len(takes)}')
-        self.empty.setText(tr(EMPTY_TEXT) if not takes else f'{tr("No take has all of these words:")}\n{" ".join(words)}')
+        if takes:
+            self.empty.setText(f'{tr("No take has all of these words:")}\n{" ".join(words)}')
+        elif self.session.workspace.root_problem is not None:
+            self.empty.setText(tr(OUT_OF_REACH_TEXT))
+        else:
+            self.empty.setText(tr(EMPTY_TEXT))
         none = not self.model.items
         self.empty.setVisible(none)
         self.list.setVisible(not none)

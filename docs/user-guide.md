@@ -624,6 +624,12 @@ be set high. The window needs at least 1100 by 600 at its own scale. Choose a sm
 **My recordings seem to have gone after an update.** Since 0.5 a new copy looks in `C:\Users\<you>\Recordings\voice-clips`. If your
 recordings are in a `voice-clips` folder in the old program folder, choose it as the **Output folder** in Settings, or move it.
 
+**It says "Your recordings folder cannot be reached".** The **Output folder** in Settings is on a drive, memory stick or network
+place that is not connected now, or a file stands where the folder should be. Your recordings are not lost: the program has not
+changed anything there, and does not start a new library somewhere else. The window says which folder it is. Connect the drive (or
+move the file) and choose **Try again**, or choose another folder in Settings. Until then Record, Import and New speaker say why they
+cannot work, instead of failing.
+
 **A saved clip is missing from the list.** The program lists a message in the status line when a sidecar cannot be used,
 and does not change the files. Common reasons are a moved or deleted original, or a sidecar edited by hand. The other clips
 load as usual, and the files stay where they are.

@@ -243,4 +243,5 @@ def test_nothing_is_clipped_at_the_smallest_window(window, session, open_fake, q
 
 def test_the_window_has_the_documented_minimum_size(window):
     assert (window.minimumWidth(), window.minimumHeight()) == (1100, 600)
-    assert window.editor_panel.stack.count() == 3 and window.editor_panel.EMPTY == 0 and EditorPanel.LIVE == 2
+    assert window.editor_panel.stack.count() == 4 and window.editor_panel.EMPTY == 0 and EditorPanel.LIVE == 2
+    assert EditorPanel.FOLDER == 3

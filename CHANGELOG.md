@@ -12,6 +12,12 @@ the project uses [Semantic Versioning](https://semver.org/).
   WASAPI device, a take that a device still refuses is converted to the device's own rate, and the playhead stays with the
   sound. If the device chosen will not play at all, the take plays through Windows' default and the status line says so.
   Tried with silent takes from 8 to 96 kHz on every output of a Windows 11 PC.
+- **A recordings folder that cannot be reached no longer looks like an empty one.** With the output folder on a drive that
+  was not connected, the window opened with "Ready." and no takes, and Record, Import and New speaker failed with
+  "Something went wrong: [WinError 3]". Now the window says which folder cannot be reached and why, that the recordings in it
+  are not lost, and what to do, with **Try again** and **Settings...** buttons. Record, Import, New speaker and the Folder
+  button explain instead of failing, and no microphone opens. A file standing where the folder should be is told apart the
+  same way. The program never changes the output folder by itself or starts a library somewhere else.
 
 ## [0.6.0] - 2026-11-04
 

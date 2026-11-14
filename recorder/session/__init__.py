@@ -64,6 +64,7 @@ class Session:
         self.workspace._speaker_changed()
         if self.lib.recovery_note:
             self.bus.status(self.lib.recovery_note)
+        self.workspace._say_out_of_reach()
 
     @property
     def lib(self):

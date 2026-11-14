@@ -23,6 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 STATES = ['edit', 'process', 'check', 'analyze', 'record', 'empty', 'compact', 'reading', 'script', 'light', 'settings', 'about',
           'shortcuts', 'copy', 'manifest', 'dataset', 'speaker', 'keepmany']
 DIALOGS = ('settings', 'about', 'shortcuts', 'copy', 'manifest', 'dataset', 'speaker', 'keepmany')
+CHECKS = ['unreachable']        # drawn only when asked for with --only, to look at a state the documents do not show
 SAMPLE = ('The morning ferry left the harbour just as the fog began to lift from the water, and the gulls followed '
           'it out past the lighthouse.')
 SCRIPT = ('The morning ferry left the harbour just as the fog began to lift.\n'
@@ -38,11 +39,17 @@ def parse():
     parser.add_argument('--size', default='1440x960', help='window size, WIDTHxHEIGHT')
     parser.add_argument('--theme', default='dark', choices=('dark', 'light', 'contrast'), help='the look of the window')
     parser.add_argument('--language', default='en', help='the language of the window, such as de')
-    parser.add_argument('--only', nargs='*', choices=STATES, help='render only these states')
+    parser.add_argument('--only', nargs='*', choices=STATES + CHECKS, help='render only these states')
     return parser.parse_args()
 
 
-def build_session(work):
+def free_drive():
+    """A drive letter with nothing on it, so the picture of a folder that cannot be reached shows no real folder."""
+    import string
+    return next(Path(f'{letter}:/') for letter in reversed(string.ascii_uppercase[3:]) if not Path(f'{letter}:/').exists())
+
+
+def build_session(work, root=None):
     from recorder import capture, settings
     from recorder.jobs import Jobs
     from recorder.session import Session
@@ -55,9 +62,10 @@ def build_session(work):
     capture.default_loopback = lambda: 9
     capture.input_channels = lambda device: 1
     settings_file = work / 'settings.json'
-    settings.update({'root': str(work / 'clips')}, settings_file)
+    root = root or work / 'clips'
+    settings.update({'root': str(root)}, settings_file)
     session = Session(settings_file=settings_file, jobs=Jobs(inline=True), player=synthetic.NullPlayer(),
-                      library=Library(work / 'clips', trash=lambda paths: None))
+                      library=Library(root, trash=lambda paths: None))
     return session
 
 
@@ -237,7 +245,7 @@ def main():
                 continue
             folder = work / state
             folder.mkdir()
-            session = build_session(folder)
+            session = build_session(folder, free_drive() / 'voice-clips' if state == 'unreachable' else None)
             if state in DIALOGS:
                 from types import SimpleNamespace
 
@@ -265,9 +273,9 @@ def main():
                 save_picture(dialog, out / f'{state}.png', args.scale)
                 dialog.close()
                 continue
-            if state == 'empty':
+            if state in ('empty', 'unreachable'):
                 window = make_window(app, session)
-                render(window, app, out / 'empty.png', size, args.scale)
+                render(window, app, out / f'{state}.png', size, args.scale)
                 window.close()
                 continue
             seed(session, rough=state == 'analyze')

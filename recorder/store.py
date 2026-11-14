@@ -450,6 +450,34 @@ class Relocation:
         shutil.rmtree(self.target, ignore_errors=True)
 
 
+@dataclass(frozen=True)
+class OutOfReach:
+    """Why an output folder cannot be used. `kind` is 'drive' when what it is on is not there (a drive, a memory stick or a
+    network place, at `place`), 'file' when a file stands at `place` where a folder must be, and 'error' when Windows
+    refused, in its own words (`detail`)."""
+    kind: str
+    place: Path
+    detail: str = ''
+
+
+def out_of_reach(root):
+    """Why the output folder `root` cannot be used, or None when it can: it is there, or it can be made where it should be,
+    as on the first start. A missing drive shows the same as an empty folder to everything else, so this is asked first.
+    Nothing is made or changed here."""
+    root = Path(root)
+    try:
+        if root.is_dir():
+            with os.scandir(root) as entries:       # a folder that is there but refused shows only when it is read
+                next(entries, None)
+            return None
+        for place in (root, *root.parents):
+            if place.exists():
+                return None if place.is_dir() else OutOfReach('file', place)
+        return OutOfReach('drive', Path(root.anchor) if root.anchor else root)
+    except OSError as e:
+        return OutOfReach('error', root, e.strerror or str(e))
+
+
 class Library:
     def __init__(self, root=None, trash=None):
         self.root = Path(root or default_root())

@@ -14,7 +14,8 @@ from .. import audio_core as ac
 from .. import settings
 from ..core import analysis, reading
 from ..core.edits import words_key
-from ..store import Library, Take, now_iso
+from ..i18n import tr
+from ..store import Library, Take, now_iso, out_of_reach
 
 Step = namedtuple('Step', 'key label done detail')           # a rule that must be met before Keep
 Advice = namedtuple('Advice', 'key text')                     # something worth knowing that does not block Keep
@@ -49,6 +50,7 @@ class Workspace:
         self.on_take_added = None       # called with each new take, once it is listed (the session asks for a draft)
         self._session_takes = {}        # (resolved folder, slug) -> that scope's takes
         self._scope = None
+        self.root_problem = out_of_reach(self.lib.root)     # why the output folder cannot be used, or None
 
     @property
     def current(self):
@@ -63,10 +65,59 @@ class Workspace:
         if take is not None:
             take.in_use = True
 
+    # ---- the output folder --------------------------------------------------------------------------------------------
+
+    def check_root(self):
+        """Look again at whether the output folder can be used. Returns why not, or None. Nothing is made or changed, and the
+        folder in the settings stays the person's choice: a library is never started somewhere else instead."""
+        problem = out_of_reach(self.lib.root)
+        if problem != self.root_problem:
+            self.root_problem = problem
+            self.bus.notify('folder')
+        return problem
+
+    def retry_root(self):
+        """Try again: the drive may have been connected, or the file in the way moved. Returns True when it can be used."""
+        if self.check_root() is not None:
+            self.bus.status(tr('The recordings folder still cannot be reached: {folder}').format(folder=self.lib.root))
+            return False
+        self.refresh_speakers()
+        self._speaker_changed()
+        self.bus.status('The recordings folder can be reached again.')
+        return True
+
+    def out_of_reach_text(self, first=None):
+        """What the person is told about an output folder that cannot be reached: `first`, or which folder it is; why; that
+        the recordings in it are not lost; and what to do. In the person's language, as it is built from values."""
+        problem = self.root_problem
+        if problem is None:
+            return ''
+        if problem.kind == 'drive':
+            why = tr('{place} is not there. The drive, memory stick or network place it is on may not be connected.')
+            do = tr('Connect it and try again, or choose another output folder in Settings.')
+        elif problem.kind == 'file':
+            why = tr('There is a file at {place}, where a folder has to be.')
+            do = tr('Move or rename that file and try again, or choose another output folder in Settings.')
+        else:
+            why = tr('Windows says: {detail}')
+            do = tr('Check the folder in File Explorer and try again, or choose another output folder in Settings.')
+        lost = tr('Your recordings are not lost: nothing in the folder has been changed, and its takes show again once it can '
+                  'be reached.')
+        return '\n\n'.join([first or str(self.lib.root), f'{why.format(place=problem.place, detail=problem.detail)} {lost}', do])
+
+    def _refused(self, first, **fields):
+        """The text of a message about something that could not be done, because the folder cannot be reached. `first` is
+        translated and given the folder and `fields`."""
+        return self.out_of_reach_text(tr(first).format(folder=self.lib.root, **fields))
+
+    def _say_out_of_reach(self):
+        if self.root_problem is not None:
+            self.bus.status(tr('Your recordings folder cannot be reached: {folder}').format(folder=self.lib.root))
+
     # ---- speakers -----------------------------------------------------------------------------------------------------
 
     def refresh_speakers(self, select=None):
-        data = self.lib.speakers()
+        data = self.lib.speakers() if self.root_problem is None else {}
         self.speakers = sorted(((slug, v['name']) for slug, v in data.items()), key=lambda item: item[1])
         slugs = [slug for slug, _ in self.speakers]
         if select in slugs:
@@ -89,7 +140,11 @@ class Workspace:
         return True
 
     def add_speaker(self, name):
-        """Register a speaker by name and select them. Returns the speaker's folder name; raises ValueError if blank."""
+        """Register a speaker by name and select them. Returns the speaker's folder name. Raises ValueError, with what to do,
+        if the name is blank or the output folder cannot be reached."""
+        if self.check_root() is not None:
+            raise ValueError(self._refused('Your recordings folder cannot be reached, so the speaker cannot be added: '
+                                           '{folder}'))
         slug = self.lib.add_speaker(name)
         self.refresh_speakers(select=slug)
         self._speaker_changed()
@@ -147,8 +202,10 @@ class Workspace:
             self.takes, self._scope, self.current = [], None, None
         self.lib = Library(path, trash=self.lib.trash)
         settings.update({'root': str(path)}, self.settings_file)
+        self.check_root()
         self.refresh_speakers()
         self._speaker_changed()
+        self._say_out_of_reach()
         self.bus.notify('settings')
         return True
 
@@ -228,8 +285,12 @@ class Workspace:
 
     def import_file(self, path):
         """Copy a recording from anywhere into the speaker's folder as a take. Returns None, with a notice, on failure."""
-        slug = self.speaker or self.ensure_speaker()
+        if self.check_root() is not None:
+            self.bus.notice('error', 'Could not import', self._refused(
+                'Your recordings folder cannot be reached, so there is nowhere to put {name}: {folder}', name=Path(path).name))
+            return None
         try:
+            slug = self.speaker or self.ensure_speaker()
             take = self.lib.import_file(slug, path, self.purpose.key)
         except Exception as e:                  # unreadable or unsupported file: say so, keep running
             self.bus.notice('error', 'Could not import', f'{Path(path).name}: {e}')

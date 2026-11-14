@@ -12,6 +12,7 @@ import time
 
 from .. import capture as cap
 from .. import settings
+from ..i18n import tr
 
 PRE_ROLL_SECONDS = 0.5
 SPOOL_SYNC_SECONDS = 2.0            # how often the spool is forced to the disk: the most a power cut can cost
@@ -197,10 +198,15 @@ class Capturing:
         if self.recording:
             return False
         self._cancel_stop()
-        if not self.workspace.speaker:
-            self.workspace.ensure_speaker()
+        if self.workspace.check_root() is not None:     # before the microphone opens: there would be nowhere to save the take
+            self.bus.notice('error', 'Could not start recording', self.workspace.out_of_reach_text(
+                tr('Your recordings folder cannot be reached, so there is nowhere to save a take: {folder}').format(
+                    folder=self.workspace.lib.root)))
+            return False
         self._stay_armed = self.armed
         try:
+            if not self.workspace.speaker:
+                self.workspace.ensure_speaker()
             capture = self._ensure_capture()
             self.take_script_line = self.script.current
             self.interrupted = False

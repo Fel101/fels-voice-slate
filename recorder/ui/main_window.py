@@ -242,6 +242,8 @@ class MainWindow(QMainWindow):
         panel = self.editor_panel
         panel.recordRequested.connect(capturing.toggle)
         panel.importRequested.connect(self.import_recording)
+        panel.retryRequested.connect(s.workspace.retry_root)
+        panel.settingsRequested.connect(self.open_settings)
         panel.listen.currentChanged.connect(lambda i: transport.set_listen(('original', 'edited')[i]))
         panel.script.previousRequested.connect(lambda: s.script.step(-1))
         panel.script.nextRequested.connect(lambda: s.script.step(1))
@@ -351,7 +353,7 @@ class MainWindow(QMainWindow):
             self._request_analysis()
             panel.info.refresh()
             panel.listen.set_current(0 if s.transport.listen == 'original' else 1)
-        if topics & {'takes', 'current', 'recording'}:
+        if topics & {'takes', 'current', 'recording', 'folder'}:
             self.library.refresh_takes()
         if 'meta' in topics and 'current' not in topics:
             self.inspector.refresh_meta(self._derived())
@@ -438,6 +440,9 @@ class MainWindow(QMainWindow):
             mode, side = EditorPanel.LIVE, Inspector.RECORDING
         elif s.current is not None:
             mode, side = EditorPanel.EDIT, Inspector.REVIEW
+        elif s.workspace.root_problem is not None:
+            mode, side = EditorPanel.FOLDER, Inspector.IDLE
+            self.editor_panel.out_of_reach.show_problem(s.workspace.out_of_reach_text())
         else:
             mode, side = EditorPanel.EMPTY, Inspector.IDLE
         self.editor_panel.set_mode(mode)
@@ -776,8 +781,13 @@ class MainWindow(QMainWindow):
         if not paths:
             return
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        imported = 0
         try:
-            imported = sum(1 for path in paths if self.session.workspace.import_file(path) is not None)
+            for path in paths:
+                if self.session.workspace.import_file(path) is not None:
+                    imported += 1
+                elif self.session.workspace.root_problem is not None:
+                    break                   # the folder cannot be reached: one message says so, not one for each file
         finally:
             QApplication.restoreOverrideCursor()
         if imported > 1:
@@ -1005,6 +1015,9 @@ class MainWindow(QMainWindow):
 
     def open_folder(self):
         s = self.session
+        if s.workspace.check_root() is not None:
+            self.dialogs.notice('error', 'Could not open the folder', s.workspace.out_of_reach_text())
+            return
         folder = s.lib.folder(s.workspace.speaker) if s.workspace.speaker else s.lib.root
         try:
             folder.mkdir(parents=True, exist_ok=True)

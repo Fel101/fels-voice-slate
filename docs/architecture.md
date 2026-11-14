@@ -173,6 +173,11 @@ It installs per user, so the program folder is writable.
   stand-in error.
 - A sidecar is a text file that can be edited or arrive from elsewhere, so `Library._check_fields` checks the kind of every
   value it uses. One bad value costs that clip, which is reported, and not the whole list.
+- An output folder on a drive that is not connected looks empty to everything that reads it, so `store.out_of_reach` is
+  asked first: at the start, when Settings changes the folder, on *Try again*, and before Record, Import, New speaker and
+  the Folder button. A folder that is there, or that can be made where it should be (as on the first start), is in reach.
+  One that is not is never read or made, the window says which folder it is and what to do, and the `root` setting is
+  never changed by the program.
 - Discard goes through `send2trash`, so it is recoverable. If the Recycle Bin is not available the person is asked
   before anything is deleted for good.
 - Each export's SHA-256 goes in its sidecar.
