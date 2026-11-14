@@ -781,3 +781,33 @@ def test_the_stub_and_the_real_dialogs_answer_the_same_questions(qapp):
     real = {name for name in dir(dialog_mod.Dialogs) if not name.startswith('_')}
     stub = {name for name in dir(ui_helpers.StubDialogs) if not name.startswith('_')}
     assert real <= stub, f'the test double is missing {sorted(real - stub)}'
+
+
+# ---- what Keep writes ------------------------------------------------------------------------------------------------------
+
+@pytest.mark.parametrize('purpose, rate, said', [('reference', 48000, '24 kHz, 16-bit'), ('sentence', 48000, '24 kHz, 16-bit'),
+                                                 ('audition', 48000, '48 kHz, 24-bit'), ('audition', 44100, '44.1 kHz, 24-bit')])
+def test_the_keep_tooltips_say_what_keep_writes_for_the_take_in_front(window, session, purpose, rate, said):
+    session.workspace.set_purpose(purpose)
+    session.workspace.add_take(speech(14.0, rate=rate), rate, 'mic', {})
+    fill(session)
+    window.flush()
+    settle(window, session)
+    assert window.inspector.ready.keep.isEnabled()
+    assert window.inspector.ready.keep.toolTip() == f'Writes the {said} WAV and its sidecar'
+    assert window.actions.keep.toolTip() == f'Write the {said} WAV and its sidecar (Ctrl+S)'
+    assert window.actions.keep.statusTip() == f'Write the {said} WAV and its sidecar'
+
+
+def test_the_keep_tooltip_follows_the_purpose_of_the_take_and_of_new_takes(window, session):
+    record(session, 14.0)
+    window.flush()
+    assert window.actions.keep.statusTip() == 'Write the 24 kHz, 16-bit WAV and its sidecar'
+    session.workspace.set_meta(purpose='audition')
+    window.flush()
+    assert window.actions.keep.statusTip() == 'Write the 48 kHz, 24-bit WAV and its sidecar'
+    session.workspace.current = None
+    session.bus.notify('current')
+    session.workspace.set_purpose('audition')
+    window.flush()
+    assert window.actions.keep.statusTip() == 'Write the 48 kHz, 24-bit WAV and its sidecar'

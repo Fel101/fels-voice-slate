@@ -22,7 +22,7 @@ from ..i18n import tr
 from ..session import Session
 from ..session.measure import take_key
 from ..store import KeepBlocked, Relocation, TrashUnavailable, clean_label
-from .actions import SPEC, Actions
+from .actions import SPEC, Actions, shortcut_text
 from .badge import RecordingBadge
 from .dialogs import Dialogs
 from .editor_panel import EditorPanel
@@ -430,11 +430,15 @@ class MainWindow(QMainWindow):
         panel.minimap.update()
 
     def _refresh_export_item(self):
-        """What Keep writes for the open take, or for a new one when none is open."""
+        """What Keep writes for the open take, or for a new one when none is open: at the bottom of the window, and in the
+        Keep command's tooltip. An Audition is kept at its own rate up to 48 kHz, and in 24 bits."""
         take = self.session.current
         rules = take.purpose if take is not None else self.session.workspace.purpose
         rate = take.export_rate if take is not None else rules.export_rate
         self.status_export.setText(f'{tr(rules.name)}: {rate / 1000:g} kHz · {rules.bit_depth}-bit · mono')
+        tip = tr('Write the {rate} kHz, {bits}-bit WAV and its sidecar').format(rate=f'{rate / 1000:g}', bits=rules.bit_depth)
+        self.actions.keep.setToolTip(f'{tip} ({shortcut_text(SPEC["keep"][2])})')
+        self.actions.keep.setStatusTip(tip)
 
     def _refresh_status_items(self):
         self._drafts_ready = self.session.drafts.available()

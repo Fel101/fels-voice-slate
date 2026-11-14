@@ -32,6 +32,9 @@ the project uses [Semantic Versioning](https://semver.org/).
   0.36 s to 0.03 s, and each edit of a 10-minute take from 0.3 s to under 0.01 s. A recording too long for this computer's memory is refused before anything is copied, with its
   length, what it would need and how short its parts should be. One over an hour, or that would use more than a third of the
   memory, is asked about first. A stopped import leaves nothing behind.
+- **The Keep tooltips say what Keep writes for the take in front.** The Keep command said "Write the 24 kHz WAV" for every
+  take, and the Keep button gave the rate but not the bit depth. An Audition is kept at its own rate up to 48 kHz and in 24
+  bits; both now say so ("Write the 48 kHz, 24-bit WAV and its sidecar"), as the bottom of the window does.
 - `tools/strings.py` writes its list as UTF-8 when it is piped or redirected (`python tools/strings.py | more`). Windows gave
   such an output its old code page, which has no "✓", and the list stopped half way with `UnicodeEncodeError`.
 

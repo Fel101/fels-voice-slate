@@ -747,7 +747,8 @@ class ReadyCard(QFrame):
 
     @staticmethod
     def _keep_tip(take):
-        return tr('Writes the {rate} kHz WAV and its sidecar').format(rate=f'{take.export_rate / 1000:g}')
+        return tr('Writes the {rate} kHz, {bits}-bit WAV and its sidecar').format(rate=f'{take.export_rate / 1000:g}',
+                                                                                  bits=take.purpose.bit_depth)
 
     def _line(self, state, text, action=None):
         row = hbox(spacing=9)

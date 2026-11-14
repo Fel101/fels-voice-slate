@@ -52,7 +52,7 @@ SPEC = {
     'fit': ('Fit', 'fit', ['0', 'Ctrl+0'], 'Show the whole clip', False),
     'zoom_selection': ('Zoom to selection', None, ['Z'], 'Fill the view with the selection', False),
     # takes and files
-    'keep': ('Keep clip', None, ['Ctrl+S'], 'Write the 24 kHz WAV and its sidecar', False),
+    'keep': ('Keep clip', None, ['Ctrl+S'], 'Write the WAV and its sidecar', False),     # the window names the format
     'discard': ('Discard take...', 'trash', [], 'Move this take to the Recycle Bin', False),
     'rerecord': ('Re-record', None, [], 'Move this take to the Recycle Bin and record again', False),
     'rename': ('Rename take', None, ['F2'], 'Give this take a label to find it by', False),
