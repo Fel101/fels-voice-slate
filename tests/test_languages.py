@@ -102,6 +102,21 @@ def test_every_text_the_program_says_has_a_translation(code):
     assert missing == []
 
 
+@pytest.mark.parametrize('ask', [[], ['--missing', 'de'], ['--stale', 'de']])
+def test_the_list_can_be_piped_whatever_the_console(ask):
+    """Through a pipe, Windows gives the output its old code page, which has no "✓"; the list is UTF-8 all the same."""
+    import os
+    import subprocess
+    tool = Path(strings.__file__)
+    env = {key: value for key, value in os.environ.items() if key not in ('PYTHONIOENCODING', 'PYTHONUTF8')}
+    done = subprocess.run([sys.executable, str(tool), *ask], stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env,
+                          timeout=120, check=False)
+    assert done.returncode == 0, done.stderr.decode('utf-8', 'replace')
+    listed = json.loads(done.stdout.decode('utf-8'))
+    if not ask:
+        assert listed == strings.texts() and any('✓' in text for text in listed)
+
+
 @pytest.mark.parametrize('code', LANGUAGES)
 def test_the_statement_of_permission_is_translated(code):
     from recorder.ui.inspector import ReadyCard

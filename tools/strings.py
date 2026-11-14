@@ -75,6 +75,8 @@ def texts():
 
 
 def main():
+    # Piped or redirected, Windows gives the output its old code page, which has no "✓" and stopped the list half way.
+    sys.stdout.reconfigure(encoding='utf-8')
     parser = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     parser.add_argument('--missing', metavar='LANGUAGE')
     parser.add_argument('--stale', metavar='LANGUAGE')
