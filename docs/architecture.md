@@ -122,6 +122,10 @@ made for (a result for an older recipe is dropped), follows the clip as it is ed
 - **Worker threads** (`jobs.py`) do the slow work: measuring, rendering for playback, FFmpeg, and the speech recognizer. A
   job's result waits in a queue until `tick()` hands it to the main thread, so no code outside `jobs.py` needs a lock.
   Jobs are given a frozen copy of the recipe, so edits made while they run cannot change what they render.
+- **Lanes.** Draft transcripts run in a lane of their own, one at a time, because there is one recognizer and a draft takes
+  seconds; measuring, the spectrogram, the outlines in the list and Auto analyze share the `work` lane. In each lane the
+  jobs for the take in front (`Jobs.front`) go first. A draft is dropped before it starts if its take has been discarded or
+  a newer draft asked for (`wanted`), and closing drops everything queued, so it waits for nothing.
 - **The clock** is injected, so the recording state machine and the stop tail run in tests without sleeping.
 
 ## Starting up

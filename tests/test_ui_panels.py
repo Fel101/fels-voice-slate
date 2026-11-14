@@ -296,7 +296,7 @@ def test_suggest_does_not_ask_before_replacing_the_recognizers_own_text_or_nothi
 def test_the_clip_page_shows_a_draft_on_its_way_and_waits_for_it(window, session, monkeypatch):
     held = []
     monkeypatch.setattr(transcript, 'available', lambda python, model: True)
-    monkeypatch.setattr(session.jobs, 'submit', lambda fn, done, error=None: held.append((fn, done, error)))
+    monkeypatch.setattr(session.jobs, 'submit', lambda fn, done, error=None, **where: held.append((fn, done, error)))
     monkeypatch.setattr(transcript, 'suggest', lambda *a: {'text': 'Words from the audio.'})
     take = record(session, 12.0)
     window.flush()

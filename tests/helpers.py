@@ -215,18 +215,29 @@ class HeldJobs:
 
     def __init__(self):
         self.queue = []
+        self.lanes = []                         # (lane, about, wanted) of each job, as Jobs.submit takes them
+        self.ran = set()
         self.on_unhandled = None
+        self.front = lambda: None
 
     @property
     def pending(self):
         return len(self.queue)
 
-    def submit(self, fn, on_done, on_error=None):
+    def waiting(self, lane):
+        return sum(1 for index, (named, _, _) in enumerate(self.lanes) if named == lane and index not in self.ran)
+
+    def submit(self, fn, on_done, on_error=None, lane='work', about=None, wanted=None):
         self.queue.append((fn, on_done, on_error))
+        self.lanes.append((lane, about, wanted))
 
     def run(self, index):
-        """Run one held job and deliver its result straight away."""
+        """Run one held job and deliver its result straight away. One no longer wanted is dropped, as Jobs drops it."""
         fn, on_done, on_error = self.queue[index]
+        self.ran.add(index)
+        wanted = self.lanes[index][2]
+        if wanted is not None and not wanted():
+            return
         try:
             result = fn()
         except Exception as e:

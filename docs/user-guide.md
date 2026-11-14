@@ -388,7 +388,9 @@ The **Ready to keep?** card lists what is still needed, with a count of the prob
   take is added and its transcript is empty (the Clip tab says *Drafting...* while it is made), and **Suggest from
   audio** asks again from the edited clip. While the text is still exactly the recognizer's own, it follows your cuts:
   a moment after you stop cutting, a new draft of the edited clip replaces it. Text you typed or corrected is never
-  replaced that way. A draft is a guess: listen and correct it;
+  replaced that way. Drafts are made one at a time, the take in front first, and nothing else waits for them: after a
+  big import the bottom of the window says how many are still waiting, and closing the window does not wait for them. A
+  draft is a guess: listen and correct it;
 - the **origin** (where the recording came from) is entered;
 - the **allowed use** (what the voice may be used for) is entered;
 - you ticked **the permission box**, right above the Keep button: you have the right to use this voice for the allowed use

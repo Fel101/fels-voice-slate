@@ -44,6 +44,7 @@ class Session:
         self.jobs.on_unhandled = lambda error: self.bus.status(f'A background task failed: {error}')
         self.workspace = Workspace(self.bus, library or Library(data.get('root') or settings.default_root()),
                                    self.settings_file, is_recording=lambda: self.capturing.recording)
+        self.jobs.front = lambda: self.workspace.current        # its measurements and its draft go first
         self.script = Script(self.bus, Path(self.settings_file).with_name(FILE_NAME))
         self.capturing = Capturing(self.bus, self.workspace, self.script, self.settings_file, clock)
         self.editor = Editor(self.bus, self.workspace)

@@ -64,7 +64,7 @@ class Measurements:
                     take.cache['derived'] = Derived(key, None, None, str(error))
                     self.bus.notify('analysis')
 
-            self.jobs.submit(work, done, failed)
+            self.jobs.submit(work, done, failed, about=take)
         return None
 
     def spectrogram(self, take):
@@ -81,7 +81,7 @@ class Measurements:
                 self.bus.notify('analysis')
 
             self.jobs.submit(lambda: analysis.spectrogram(take.mono, take.rate), done,
-                             lambda error: take.cache.update(spectrogram_requested=False))
+                             lambda error: take.cache.update(spectrogram_requested=False), about=take)
         return None
 
     def pyramid(self, take):
@@ -107,5 +107,5 @@ class Measurements:
                 take.cache['thumb'] = result
                 self.bus.notify('thumb', take)
 
-            self.jobs.submit(work, done, lambda error: None)        # no outline is no harm: the file says so when it is opened
+            self.jobs.submit(work, done, lambda error: None, about=take)    # no outline is no harm: opening the file says why
         return outline

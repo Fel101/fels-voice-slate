@@ -139,6 +139,7 @@ class MainWindow(QMainWindow):
         self.status_export = label('', 'dim')
         self.status_clean = label('', 'dim')
         self.status_drafts = label('', 'dim')
+        self._drafts_ready = False
         for item in (self.status_export, self.status_clean, self.status_drafts):
             item.setStyleSheet('padding-right: 14px;')
             bar.addPermanentWidget(item)
@@ -396,6 +397,8 @@ class MainWindow(QMainWindow):
             self.status_stop.setVisible(s.batch.running)
         if 'settings' in topics:
             self._refresh_status_items()
+        elif 'drafts' in topics:
+            self._refresh_drafts_item()
         if topics & {'settings', 'current', 'meta'}:
             self._refresh_export_item()
             self.library.refresh_purpose()
@@ -427,8 +430,18 @@ class MainWindow(QMainWindow):
         self.status_export.setText(f'{tr(rules.name)}: {rate / 1000:g} kHz · {rules.bit_depth}-bit · mono')
 
     def _refresh_status_items(self):
-        ready = self.session.drafts.available()
+        self._drafts_ready = self.session.drafts.available()
         self.status_clean.setText(tr('Cleaning: FFmpeg ready' if clean.available() else 'Cleaning: FFmpeg not found'))
+        self._refresh_drafts_item()
+
+    def _refresh_drafts_item(self):
+        """Whether drafts can be made, or, while several are waiting, how many: they are made one at a time."""
+        ready, waiting = self._drafts_ready, self.session.drafts.waiting
+        if waiting > 1:
+            self.status_drafts.setText(tr('Draft transcripts: {count} waiting').format(count=waiting))
+            self.status_drafts.setToolTip(tr('Drafts are made one at a time, the take in front first. Everything else goes on '
+                                             'meanwhile, and closing the window does not wait for them.'))
+            return
         self.status_drafts.setText(tr('Draft transcripts: ready' if ready else 'Draft transcripts: not set up'))
         self.status_drafts.setToolTip(tr('The speech recognizer chosen in Settings is ready.') if ready else
                                       f'{tr("Choose a speech recognizer in Settings (Ctrl+,). Settings file:")} '

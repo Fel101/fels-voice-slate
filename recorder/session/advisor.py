@@ -124,7 +124,7 @@ class Advisor:
         def failed(error):
             arrived(Advice(key, None, str(error)))
 
-        self.jobs.submit(work, arrived, failed)
+        self.jobs.submit(work, arrived, failed, about=take)
 
     def _fix_if_asked(self, take, advice):
         """Auto fix was pressed before the plan was known: apply it now, unless the clip has been changed since."""

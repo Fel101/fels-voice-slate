@@ -565,6 +565,7 @@ class Workspace:
     def discard_take(self, take, permanent=False):
         """Move a take's files to the Recycle Bin (or delete them) and drop it. Raises TrashUnavailable."""
         self.lib.discard(take, permanent=permanent)
+        take.draft_request = None       # a draft still waiting for it is dropped, not made
         if take in self.takes:
             self.takes.remove(take)
         was_open = take is self.current

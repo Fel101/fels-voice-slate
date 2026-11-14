@@ -18,6 +18,11 @@ the project uses [Semantic Versioning](https://semver.org/).
   are not lost, and what to do, with **Try again** and **Settings...** buttons. Record, Import, New speaker and the Folder
   button explain instead of failing, and no microphone opens. A file standing where the folder should be is told apart the
   same way. The program never changes the output folder by itself or starts a library somewhere else.
+- **Draft transcripts no longer hold up everything else.** Drafts shared one queue with measuring and drawing, so after
+  importing ten 14-second files, with a recognizer taking 2 s a draft, the Check tab and the spectrogram of the take in front
+  came after 18.2 s. Drafts now have a lane of their own and the take in front goes first: the same import showed them after
+  0.4 s. A draft for a take discarded meanwhile is not made, the bottom of the window says how many drafts are waiting, and
+  closing the window does not wait for them. The audio for a draft is now prepared in the background too.
 
 ## [0.6.0] - 2026-11-04
 

@@ -23,8 +23,8 @@ CALLS = {'label', 'caption', 'button', 'chip', 'set_chip', 'setToolTip', 'setPla
          'addMenu', 'setAccessibleName', 'setAccessibleDescription', 'set_tooltips', 'Segmented', 'status', 'tr', 'Step',
          'setStatusTip', 'StepCard', 'choose_file', 'choose_files', 'choose_folder', 'choose_save_file', 'add_note', '_field',
          'PathRow', 'say', 'get', 'format', '_refused'}
-NAMES = {'STATEMENT', 'EMPTY_TEXT', 'OUT_OF_REACH_TEXT', 'INTRO', 'SPEC', 'TABS', 'THEME_NAMES', 'MOUSE_ROWS', 'SHORTCUT_GROUPS', 'STATES', 'SOURCES',
-         'STATUS_WORDS', 'GLYPH_WORDS'}
+NAMES = {'STATEMENT', 'EMPTY_TEXT', 'OUT_OF_REACH_TEXT', 'INTRO', 'SPEC', 'TABS', 'THEME_NAMES', 'MOUSE_ROWS', 'SHORTCUT_GROUPS',
+         'STATES', 'SOURCES', 'STATUS_WORDS', 'GLYPH_WORDS'}
 SKIP = {'F9', 'muted', 'dim', 'ghost', 'primary', 'link', 'danger', 'amber', 'violet', 'green', 'red', 'gray', 'text',
         'Record      F9', 'Reading check: {count} place differ'}
 # Texts the search below does not find, because the code holds them in a variable or in the rules of a purpose.
