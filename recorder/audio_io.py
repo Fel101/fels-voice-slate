@@ -11,6 +11,7 @@ import threading
 
 import numpy as np
 
+from . import devices
 from .audio_core import resample
 
 
@@ -30,26 +31,21 @@ def _own_rate(device):
     return int(sd.query_devices(device, 'output')['default_samplerate'])
 
 
-def list_outputs():
-    """The names of the output devices, with their Windows audio interface, as the input list shows them."""
-    import sounddevice as sd
-    apis = sd.query_hostapis()
-    return [f"{d['name']}  [{apis[d['hostapi']]['name']}]" for d in sd.query_devices() if d['max_output_channels'] > 0]
+def list_outputs(every=False):
+    """The names of the output devices as the microphone list shows them: each once, or with `every` through every Windows
+    audio interface (see devices.py)."""
+    return [shown for _, shown in devices.entries('output', every)]
 
 
-def find_output(name):
-    """The number of the output device called `name`, or None for Windows' default, also when that device has gone."""
+def find_output(name, every=False):
+    """The number of the output device called `name` in the list Settings shows, or None for Windows' default, also when
+    that device has gone. A name kept by 0.6, with its interface after it, finds the same device (devices.match)."""
     if not name:
         return None
     try:
-        import sounddevice as sd
-        apis = sd.query_hostapis()
-        for index, d in enumerate(sd.query_devices()):
-            if d['max_output_channels'] > 0 and f"{d['name']}  [{apis[d['hostapi']]['name']}]" == name:
-                return index
+        return devices.match(name, devices.entries('output', every))
     except Exception:                       # no sound library, no devices: playing says so when it is tried
-        pass
-    return None
+        return None
 
 
 class Player:

@@ -68,8 +68,8 @@ The **Clip** tab changes the purpose of one take, beside its label. Changing it 
 ## Recording
 
 1. Choose a **source** at the top.
-   - **Microphone** lists the input devices Windows reports. The same microphone can appear more than once, once for each
-     Windows audio interface (WASAPI, MME, DirectSound, WDM-KS); if one entry gives no sound, try another.
+   - **Microphone** lists each input device once, by its full name, as Windows' Sound settings show it. The one chosen at
+     first is Windows' default microphone, and it records at the rate the microphone runs at.
    - **System audio** records what the computer is playing through the chosen output (WASAPI loopback). Use it only for
      audio you own or may use; see [Responsible use](responsible-use.md). It records only while something plays.
 2. Click **Arm** (`Ctrl+M`) to open the input before you record. The level meter becomes live, and Voice Slate keeps
@@ -520,6 +520,7 @@ Open them with the gear at the top right, or `Ctrl+,`.
 | **Stop tail** | How long recording carries on after you press Stop, 0 to 1 second. |
 | **Look** | The theme (dark, light, high contrast, or as in Windows), the size of the whole window from 100% to 200%, and the language. They are used the next time the program starts. Without a size chosen it follows Windows' own *Text size* setting, and without a language it follows Windows, if there is a translation. |
 | **Playback device** | Where takes are played. Windows' default, unless you choose one. Any take plays on any device in the list: one that will not take the take's own sample rate gets it converted. A device that is not connected stays in the list, and playback goes to the default until it is back. If the device chosen will not play at all, the take plays through Windows' default and the status line says so. |
+| **Devices** | Each microphone and output is listed once, by its full name. **List every Windows audio interface** shows each of them once for each way Windows offers it (MME, DirectSound, WASAPI and WDM-KS), with the interface after the name, for the rare computer where a device is missing otherwise. A device chosen before 0.7 is found again in either list. |
 | **Record key** | The key that starts and stops recording: a function key, or a letter or number held with Ctrl or Alt, so that it cannot be typed by accident. The box below it lets it work while another program is in front, which is off until you turn it on. Windows tells Voice Slate when that one key is pressed; it is not a keyboard hook, and no other key is seen. While it is on, other programs do not receive the key. If another program already holds it, the status line says so at start-up and it works only in this window. |
 | **FFmpeg** | Path of `ffmpeg.exe`. Leave it empty to search `PATH` and the WinGet folders. |
 | **Speech recognizer: Python** and **model** | The optional draft-transcript setup: a `python.exe` that has [faster-whisper](https://github.com/SYSTRAN/faster-whisper) installed, and a faster-whisper model folder. Both are needed. `setup-transcripts.bat` installs both and fills these in for you (see the README); you only type them here to use a recognizer you already have. |
@@ -588,7 +589,10 @@ Move the whole folder somewhere short, such as `C:\VoiceSlate`, delete its `.ven
 
 **My microphone is not listed, or the meter does not move.** In Windows, open *Settings > Privacy & security >
 Microphone* and make sure access is on, including *Let desktop apps access your microphone*. Then choose **Refresh
-devices** in the gear menu. If the device is listed under several names, try the others.
+devices** in the gear menu. If it is still missing, or a device that is listed gives no sound, turn on **List every
+Windows audio interface** in Settings: each device then appears once for each way Windows offers it (MME, DirectSound,
+WASAPI and WDM-KS), and one of the others may work. In a remote desktop session the lists show every interface by
+themselves, because the usual one offers no microphone there.
 
 **System audio says "Nothing captured", or lists no device.** Something has to be playing on the chosen output while you
 record. Some setups, such as a remote desktop session, may not offer a loopback device at all.

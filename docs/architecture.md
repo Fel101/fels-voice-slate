@@ -18,6 +18,7 @@ recorder/
   dataset.py     the kept clips gathered in one new folder, as clips with sidecars or in the LJSpeech layout
   audio_core.py  small pure helpers, the purposes, and the rules for what can be kept
   i18n.py        the window in other languages: tr() and the tables in resources/lang
+  devices.py     the lists of microphones and outputs: each device once, as WASAPI names it, and a remembered name found again
   capture.py     microphone (sounddevice) and system audio (PyAudioWPatch), behind one interface
   audio_io.py    playback through a sounddevice output stream
   clean.py       noise reduction by running the user's own FFmpeg
@@ -146,6 +147,20 @@ is being drawn until they arrive.
   jobs for the take in front (`Jobs.front`) go first. A draft is dropped before it starts if its take has been discarded or
   a newer draft asked for (`wanted`), and closing drops everything queued, so it waits for nothing.
 - **The clock** is injected, so the recording state machine and the stop tail run in tests without sleeping.
+
+## Devices
+
+Windows offers each device through four audio interfaces, and the sound library lists all of them: MME, which cuts names
+at 31 letters and reports 44.1 kHz for everything; DirectSound; WASAPI; and WDM-KS. `devices.py` lists WASAPI's entries
+only, which is one for each device with its full name and the rate it runs at, and starts on WASAPI's default, which is the
+device Windows' Sound settings name. The `all_interfaces` setting lists every interface, with the interface after the name,
+and when WASAPI has no device of a kind (no microphone in a remote desktop session) every interface is listed anyway.
+
+The microphone, the input of a several-input device and the output are remembered by the name shown. `devices.match` finds a
+remembered name in the list shown now: the same name, else the device's own name without the interface (0.6 kept
+`Microphone  [MME]`), else a name cut at 31 letters, but only when it fits one device. Anything else falls back to the
+default rather than guess. A microphone is opened with all its inputs and the callback keeps the ones wanted, because WASAPI
+may refuse to open part of them.
 
 ## Starting up
 

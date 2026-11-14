@@ -564,7 +564,7 @@ def test_while_recording_the_inspector_says_where_the_take_comes_from(window, se
 def test_the_top_bar_lists_the_devices_and_explains_when_there_are_none(window, session, monkeypatch):
     from recorder import capture as cap
     assert window.topbar.device.count() == 1 and window.topbar.device.itemText(0) == 'Test microphone'
-    monkeypatch.setattr(cap, 'list_microphones', lambda: [])
+    monkeypatch.setattr(cap, 'list_microphones', lambda every=False: [])
     monkeypatch.setattr(cap, 'default_microphone', lambda: None)
     session.capturing.refresh_devices()
     window.flush()
@@ -657,7 +657,8 @@ def test_the_settings_dialog_returns_what_was_typed_and_none_for_what_was_cleare
     dialog = dialog_mod.SettingsDialog({'root': 'C:/clips', 'tail_seconds': 0.3, 'ffmpeg': 'C:/tools/ffmpeg.exe'})
     assert dialog.values() == {'root': 'C:/clips', 'tail_seconds': 0.3, 'ffmpeg': 'C:/tools/ffmpeg.exe', 'asr_python': None,
                                'asr_model': None, 'asr_language': None, 'global_hotkey': False, 'output_device': None,
-                               'record_key': None, 'theme': 'dark', 'text_scale': None, 'language': None}
+                               'all_interfaces': False, 'record_key': None, 'theme': 'dark', 'text_scale': None,
+                               'language': None}
     dialog.ffmpeg.edit.setText('')
     dialog.root.edit.setText('D:/voice')
     dialog.tail.setValue(1.5)

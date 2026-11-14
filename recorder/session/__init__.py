@@ -49,7 +49,7 @@ class Session:
         self.capturing = Capturing(self.bus, self.workspace, self.script, self.settings_file, clock)
         self.editor = Editor(self.bus, self.workspace)
         self.transport = Transport(self.bus, self.workspace, self.editor, player, clock)
-        self.transport.set_output(data.get('output_device'))
+        self.transport.set_output(data.get('output_device'), settings.every_interface(data))
         self.drafts = Drafts(self.bus, self.workspace, self.jobs, self.settings_file, clock)
         self.autosave = Autosave(self.bus, self.workspace, clock)
         self.measure = Measurements(self.bus, self.workspace, self.jobs)

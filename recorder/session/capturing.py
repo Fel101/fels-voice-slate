@@ -11,7 +11,7 @@ toolkit and no sleeping.
 import time
 
 from .. import capture as cap
-from .. import settings
+from .. import devices, settings
 from ..i18n import tr
 
 PRE_ROLL_SECONDS = 0.5
@@ -95,7 +95,8 @@ class Capturing:
     def refresh_devices(self):
         try:
             if self.source == 'mic':
-                options, default = cap.list_microphones(), cap.default_microphone()
+                every = settings.every_interface(settings.load(self.settings_file))
+                options, default = cap.list_microphones(every=every), cap.default_microphone()
             else:
                 options, default = cap.list_loopbacks(), cap.default_loopback()
         except Exception as e:                  # a device library error is shown, not raised
@@ -104,7 +105,7 @@ class Capturing:
         self.devices = list(options)
         indexes = [index for index, _ in self.devices]
         chosen = self._remembered('input_device').get(self.source)      # by name: the numbers change as devices come and go
-        named = next((index for index, label in self.devices if label == chosen), None)
+        named = devices.match(chosen, self.devices) if isinstance(chosen, str) else None
         self.device = named if named is not None else default if default in indexes else (indexes[0] if indexes else None)
         self._read_inputs()
         self.bus.notify('devices')
@@ -119,7 +120,9 @@ class Capturing:
             self.inputs = cap.input_channels(self.device)
         except Exception:                       # the device has gone since the list was made: its own error comes at Record
             return
-        chosen = self._remembered('input_channels').get(self.device_label())
+        remembered = self._remembered('input_channels')
+        chosen = remembered.get(self.device_label(), next((value for name, value in remembered.items()
+                                                           if self._names_this_device(name)), None))
         self.channel = chosen if isinstance(chosen, int) and not isinstance(chosen, bool) and 0 <= chosen < self.inputs else None
 
     def select_device(self, index):
@@ -135,11 +138,15 @@ class Capturing:
         """Record one input of the device (from 0), or mix the first two (None). Remembered for this device."""
         self.channel = channel
         self._release_idle()
-        chosen = {name: value for name, value in self._remembered('input_channels').items() if name != self.device_label()}
+        chosen = {name: value for name, value in self._remembered('input_channels').items() if not self._names_this_device(name)}
         if channel is not None:
             chosen[self.device_label()] = channel
         settings.update({'input_channels': chosen or None}, self.settings_file)
         self.bus.notify('devices')
+
+    def _names_this_device(self, name):
+        """Whether a remembered name is the chosen device's, such as one kept by 0.6 with its interface after it."""
+        return self.device is not None and devices.match(name, self.devices) == self.device
 
     def _release_idle(self):
         if self.capture is not None and not self.recording:

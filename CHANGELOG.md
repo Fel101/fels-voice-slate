@@ -5,6 +5,17 @@ the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- **Each microphone and output is listed once, by its full name.** The lists showed every device through each of Windows'
+  four audio interfaces, so one microphone came up four times, MME's entry cut at 31 letters, and the user guide said to try
+  another entry if one gave no sound. Now each device is there once, as Windows' Sound settings name it, and the microphone
+  chosen at first is Windows' default instead of MME's sound mapper. **List every Windows audio interface** in Settings
+  brings the full lists back, and they come back by themselves when the usual interface has no device, as in a remote
+  desktop session. A microphone, input or output chosen in 0.6 is found again, or the default is used.
+- A device with more than two inputs is opened with all of them when the first two are mixed, as it already was when one
+  input is chosen, because Windows may refuse to open part of them.
+
 ### Fixed
 
 - **Every playback device plays every take.** A WASAPI device chosen in Settings refused any take that was not at the rate

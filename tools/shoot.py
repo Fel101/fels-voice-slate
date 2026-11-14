@@ -56,7 +56,8 @@ def build_session(work, root=None):
     from recorder.store import Library
     import synthetic
 
-    capture.list_microphones = lambda: [(1, 'Studio Microphone  [Windows WASAPI]'), (2, 'Headset Microphone  [MME]')]
+    capture.list_microphones = lambda every=False: [(1, 'Microphone (Studio USB Microphone)'),
+                                                    (2, 'Headset Microphone (Realtek(R) Audio)')]
     capture.default_microphone = lambda: 1
     capture.list_loopbacks = lambda: [(9, 'Speakers [Loopback]')]
     capture.default_loopback = lambda: 9
@@ -255,7 +256,7 @@ def main():
                 from recorder.ui import dialogs
                 clean.locate = lambda configured=None: Path(r'C:\Tools\ffmpeg\bin\ffmpeg.exe')   # no real paths in pictures
                 fake = {'root': r'C:\Users\you\Recordings\voice-clips', 'asr_language': 'en', 'tail_seconds': 0.5,
-                        'outputs': ['Speakers  [Windows WASAPI]']}
+                        'outputs': ['Speakers (Realtek(R) Audio)'], 'output_device': 'Speakers (Realtek(R) Audio)'}
                 said = {'origin': 'Recorded by me, in my room, microphone only', 'allowed_use': 'Personal voice projects'}
                 release = {'file': 'signed-release.pdf', 'signed': '2026-09-02', 'expires': '2027-09-02',
                            'notes': 'Covers the narrator of the game, and nothing else.'}

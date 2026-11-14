@@ -141,7 +141,7 @@ def test_the_meter_follows_an_armed_device(window, session, open_fake):
 
 def test_picking_a_device_from_the_list_keeps_the_choice(window, session, monkeypatch):
     from recorder import capture as cap
-    monkeypatch.setattr(cap, 'list_microphones', lambda: [(1, 'First'), (5, 'Second')])
+    monkeypatch.setattr(cap, 'list_microphones', lambda every=False: [(1, 'First'), (5, 'Second')])
     session.capturing.refresh_devices()
     window.flush()
     assert window.topbar.device.count() == 2

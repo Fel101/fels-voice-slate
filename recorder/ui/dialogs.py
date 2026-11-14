@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDateEdit, QDialog, QDouble
                                QInputDialog, QKeySequenceEdit, QLabel, QLineEdit, QMessageBox, QPlainTextEdit, QPushButton,
                                QScrollArea, QWidget)
 
-from .. import __version__, audio_import, clean, dataset, manifest, settings, share, transcript
+from .. import __version__, audio_import, clean, dataset, devices, manifest, settings, share, transcript
 from .. import audio_core as ac
 from ..i18n import LANGUAGES, tr
 from .actions import SPEC, key_problem, shortcut_text
@@ -172,6 +172,7 @@ class SettingsDialog(QDialog):
         layout = vbox(rows, (0, 0, 10, 0), 14)
         area.setWidget(rows)
         outer.addWidget(area, 1)
+        self._area = area
         form = QFormLayout()
         form.setSpacing(12)
         form.setLabelAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
@@ -219,17 +220,24 @@ class SettingsDialog(QDialog):
         form.addRow('', label('Used the next time the program starts. The translations are new and have not been checked by '
                               'native speakers: corrections are welcome.', 'dim', size=11, wrap=True))
 
+        # Each output once by default; the switch below swaps in every Windows audio interface, keeping the device chosen.
+        self.outputs = {False: list(values.get('outputs') or ()),
+                        True: list(values.get('outputs_every') or values.get('outputs') or ())}
         self.output = QComboBox()
         self.output.setAccessibleName('Playback device')
-        self.output.addItem("Windows' default", None)
-        for name in values.get('outputs') or ():
-            self.output.addItem(name, name)
-        wanted = values.get('output_device')
-        if wanted and self.output.findData(wanted) < 0:
-            self.output.addItem(f'{wanted} (not connected now)', wanted)
-        self.output.setCurrentIndex(max(self.output.findData(wanted), 0))
         self.output.setToolTip('Where takes are played')
+        self.every = QCheckBox('List every Windows audio interface')
+        self.every.setChecked(settings.every_interface(values))
+        self.every.setToolTip('MME, DirectSound, WASAPI and WDM-KS: each device then appears once for each of them')
+        self._fill_outputs(values.get('output_device'))
+        self.every.toggled.connect(lambda: self._fill_outputs(self.output.currentData()))
         form.addRow('Playback device', self.output)
+        every = QWidget()
+        every_layout = vbox(every, spacing=4)
+        every_layout.addWidget(self.every)
+        every_layout.addWidget(label('Each microphone and output is listed once, by its full name. Turn this on only if a '
+                                     'device is missing from the lists.', 'dim', size=11, wrap=True))
+        form.addRow('Devices', every)
 
         keys = QWidget()
         keys_layout = vbox(keys, spacing=4)
@@ -303,6 +311,32 @@ class SettingsDialog(QDialog):
         self._check_recognizer()
         self._check_key()
 
+    def showEvent(self, event):
+        super().showEvent(event)
+        # The rows do not narrow below the widest of them, and the scroll bar of a short screen takes room beside them:
+        # widen the dialog rather than cut off the right edge of the Browse buttons and the notes.
+        margins = self.layout().contentsMargins()
+        needed = (self._area.widget().minimumSizeHint().width() + self._area.verticalScrollBar().sizeHint().width()
+                  + 2 * self._area.frameWidth() + margins.left() + margins.right())
+        if self.width() < needed:
+            self.resize(needed, self.height())
+
+    def _fill_outputs(self, wanted):
+        """The outputs of the list chosen, with `wanted` chosen again: found by its name, or shown as not connected."""
+        listed = self.outputs[self.every.isChecked()]
+        self.output.blockSignals(True)
+        self.output.clear()
+        self.output.addItem(tr("Windows' default"), None)
+        for name in listed:
+            self.output.addItem(name, name)
+        found = devices.match(wanted, list(enumerate(listed))) if wanted else None
+        if found is not None:
+            self.output.setCurrentIndex(found + 1)
+        elif wanted:
+            self.output.addItem(tr('{device} (not connected now)').format(device=wanted), wanted)
+            self.output.setCurrentIndex(self.output.count() - 1)
+        self.output.blockSignals(False)
+
     def _check_key(self):
         problem = key_problem(self._key_text())
         self.key_note.setText(problem)
@@ -344,6 +378,7 @@ class SettingsDialog(QDialog):
         """The settings as typed. An empty optional text removes that setting."""
         return {'root': self.root.text() or None, 'tail_seconds': round(self.tail.value(), 2),
                 'global_hotkey': self.hotkey.isChecked(), 'output_device': self.output.currentData(),
+                'all_interfaces': self.every.isChecked(),
                 'theme': self.theme.currentData(), 'text_scale': self.text_scale.currentData(),
                 'language': self.language_choice.currentData(),
                 'record_key': None if self._key_text() == settings.DEFAULT_RECORD_KEY else self._key_text(),

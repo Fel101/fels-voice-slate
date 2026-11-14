@@ -20,6 +20,8 @@ Keys, all optional:
 - `input_channels`: which input of a device to record, by the device's name in the list, counted from 0. Without an entry
   the first two inputs are mixed.
 - `output_device`: the device to play through, by the name shown in Settings. Without it, Windows' default.
+- `all_interfaces`: `true` lists each microphone and output through every Windows audio interface (MME, DirectSound,
+  WASAPI, WDM-KS). Without it each device is listed once (see devices.py).
 - `theme`: `dark`, `light`, `contrast` or `system` (the mode Windows is in).
 - `text_scale`: the size of the whole window, from 1 to 2. Without it, Windows' own Text size setting.
 - `language`: the language of the window, such as `de`. Without it, the one Windows is in, if there is a translation.
@@ -178,6 +180,11 @@ def global_hotkey(data=None):
     """Whether the record key also works while another program is in front. Off, unless the settings say `true`: while it is
     on no other program gets the key, and a stray press would open the microphone."""
     return (data if data is not None else load()).get('global_hotkey') is True
+
+
+def every_interface(data=None):
+    """Whether the device lists show every Windows audio interface. Off, unless the settings say `true`."""
+    return (data if data is not None else load()).get('all_interfaces') is True
 
 
 def theme(data=None):

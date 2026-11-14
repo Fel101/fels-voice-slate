@@ -37,9 +37,10 @@ class Transport:
         elif topic == 'edits' and self.mode == 'edited' and self.player.active and self._stale_since is None:
             self._stale_since = self.clock()
 
-    def set_output(self, name):
-        """Play through the output device called `name` from the next Play on. An empty name is Windows' default."""
-        self.player.device = find_output(name)
+    def set_output(self, name, every=False):
+        """Play through the output device called `name` from the next Play on. An empty name is Windows' default. `every`
+        says which list the name was chosen from: each device once, or every Windows audio interface."""
+        self.player.device = find_output(name, every)
 
     # ---- state --------------------------------------------------------------------------------------------------------
 

@@ -12,6 +12,8 @@ import time
 
 import numpy as np
 
+from . import devices
+
 # A device that has sent nothing for this long has stopped. Before its first block we allow more time,
 # because a cold start can take a moment.
 STALL_SECONDS = 2.0
@@ -36,21 +38,15 @@ def _span(x):
 
 # ---- device lists ---------------------------------------------------------------------------------------------------
 
-def list_microphones():
-    """[(index, label)] for input devices, host API included (the Windows device names repeat across APIs)."""
-    import sounddevice as sd
-    apis = sd.query_hostapis()
-    out = []
-    for i, d in enumerate(sd.query_devices()):
-        if d['max_input_channels'] > 0:
-            out.append((i, f"{d['name']}  [{apis[d['hostapi']]['name']}]"))
-    return out
+def list_microphones(every=False):
+    """[(index, label)] for input devices: each once by its full name, or with `every` through every Windows audio
+    interface (see devices.py)."""
+    return devices.entries('input', every)
 
 
 def default_microphone():
-    import sounddevice as sd
-    index = sd.default.device[0]
-    return index if isinstance(index, int) and index >= 0 else None
+    """The microphone Windows' Sound settings name as the default, or None."""
+    return devices.default('input')
 
 
 def input_channels(device):
@@ -82,8 +78,9 @@ def default_loopback():
 
 class _MicBackend:
     """One microphone. With `channel`, one input of the device (from 0) is recorded as a mono take: mixing a voice on input 1
-    with a silent input 2 halves it, which is 6 dB. The device is opened with all its inputs for that, because not every
-    Windows audio interface can open a part of them."""
+    with a silent input 2 halves it, which is 6 dB. Without, the first two inputs are recorded and mixed later. Either way
+    the device is opened with all its inputs and the callback takes what is wanted, because not every Windows audio
+    interface can open a part of them: WASAPI may refuse two inputs of a device that has eight."""
 
     kind = 'mic'
 
@@ -97,15 +94,16 @@ class _MicBackend:
         self.rate = int(info['default_samplerate'])
         self.channel = channel if channel is not None and 0 <= channel < inputs else None
         self.channels = 1 if self.channel is not None else max(1, min(2, inputs))
-        self._opened = inputs if self.channel is not None else self.channels
+        self._opened = max(1, inputs)
         self.hostapi = sd.query_hostapis(info['hostapi'])['name']
         self._stream = None
 
     def open(self, on_block):
-        picked = self.channel
+        picked = [self.channel] if self.channel is not None else list(range(self.channels))
+        whole = picked == list(range(self._opened))
 
         def callback(indata, frames, time_info, status):
-            block = indata if picked is None else indata[:, [picked]]
+            block = indata if whole else indata[:, picked]
             on_block(np.array(block, dtype=np.float32), bool(status.input_overflow or status.input_underflow))
 
         self._stream = self._sd.InputStream(device=self.device, samplerate=self.rate, channels=self._opened,

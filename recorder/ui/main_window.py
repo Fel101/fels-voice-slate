@@ -1187,9 +1187,9 @@ class MainWindow(QMainWindow):
         current.setdefault('root', str(s.lib.root))
         current['tail_seconds'] = s.capturing.tail_seconds
         try:
-            current['outputs'] = list_outputs()
+            current['outputs'], current['outputs_every'] = list_outputs(), list_outputs(every=True)
         except Exception:                           # no sound library, no devices: only Windows' default is offered
-            current['outputs'] = []
+            current['outputs'] = current['outputs_every'] = []
         answer = self.dialogs.settings(current)
         if answer is None:
             return
@@ -1198,12 +1198,16 @@ class MainWindow(QMainWindow):
         changes['global_hotkey'] = True if answer.get('global_hotkey') else None             # off is the default: no entry
         changes['record_key'] = answer.get('record_key')
         changes['output_device'] = answer.get('output_device')
+        every = bool(answer.get('all_interfaces'))
+        changes['all_interfaces'] = True if every else None                                    # off is the default: no entry
         changes['theme'] = None if answer.get('theme') in (None, settings.THEMES[0]) else answer['theme']
         changes['text_scale'] = answer.get('text_scale')
         changes['language'] = answer.get('language')
         settings.update(changes, s.settings_file)
         clean.set_ffmpeg_path(answer['ffmpeg'])
-        s.transport.set_output(answer.get('output_device'))
+        s.transport.set_output(answer.get('output_device'), every)
+        if every != settings.every_interface(current):
+            s.capturing.refresh_devices()
         self._apply_record_key()
         s.capturing.set_tail(answer['tail_seconds'])
         if answer['root'] and Path(answer['root']) != s.lib.root:
