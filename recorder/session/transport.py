@@ -112,6 +112,7 @@ class Transport:
             return False
         self.bus.status('Playing the edited clip from the playhead. The playhead follows it.' if mode == 'edited'
                         else 'Playing the original from the playhead.')
+        self._say_where_it_plays()
         self.bus.notify('transport')
         return True
 
@@ -126,6 +127,13 @@ class Transport:
             self.bus.notify('transport')
             return False
         return True
+
+    def _say_where_it_plays(self):
+        """When the output chosen in Settings would not play and Windows' default does, say so, so that the sound coming
+        out of other speakers is not a surprise. It replaces the line about what is playing."""
+        if getattr(self.player, 'fallback', None) is not None:
+            self.bus.status("The output chosen in Settings would not play this, so it is playing through Windows' default. "
+                            'Choose another output in Settings if this is not the one you want.')
 
     def toggle(self):
         """Space: pause what is playing, resume what is paused, otherwise play the edited clip from the playhead."""
@@ -239,6 +247,7 @@ class Transport:
         if not self._start(np.concatenate(pieces), take.rate, 0.0):
             return False
         self.bus.status('Playing 1 s either side of each join.')
+        self._say_where_it_plays()
         self.bus.notify('transport')
         return True
 

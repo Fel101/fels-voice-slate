@@ -35,7 +35,7 @@ class FakeStream:
         pass
 
 
-def sound_library(monkeypatch, inputs=2, outputs=('Speakers', 'Headphones')):
+def sound_library(monkeypatch, inputs=2, outputs=('Speakers', 'Headphones'), api='WASAPI'):
     """A stand-in for sounddevice with one input device and some outputs. Returns the streams it was asked for."""
     streams = []
     devices = [{'name': 'Interface', 'hostapi': 0, 'max_input_channels': inputs, 'max_output_channels': 0,
@@ -48,10 +48,13 @@ def sound_library(monkeypatch, inputs=2, outputs=('Speakers', 'Headphones')):
         return streams[-1]
 
     def query_devices(device=None, kind=None):
+        if device is None and kind:         # Windows' default of that kind: here the first device that has one
+            return next(d for d in devices if d[f'max_{kind}_channels'] > 0)
         return devices if device is None else devices[device]
 
     fake = SimpleNamespace(query_devices=query_devices, InputStream=stream, OutputStream=stream,
-                           query_hostapis=lambda index=None: [{'name': 'WASAPI'}] if index is None else {'name': 'WASAPI'})
+                           WasapiSettings=lambda **options: SimpleNamespace(**options),
+                           query_hostapis=lambda index=None: [{'name': api}] if index is None else {'name': api})
     monkeypatch.setitem(__import__('sys').modules, 'sounddevice', fake)
     return streams
 
@@ -262,6 +265,27 @@ def test_the_default_needs_no_choice(monkeypatch):
     player.load(np.zeros(4800, np.float32), 48000)
     player.play()
     assert streams[0].options['device'] is None
+    player.stop()
+
+
+def test_windows_is_asked_to_convert_for_a_wasapi_output(monkeypatch):
+    """Without it a WASAPI output opens only at the rate the device runs at, and a 24 kHz take would not play."""
+    streams = sound_library(monkeypatch)
+    player = audio_io.Player()
+    player.device = 2
+    player.load(np.zeros(2400, np.float32), 24000)
+    player.play()
+    assert streams[0].options['extra_settings'].auto_convert is True and streams[0].options['samplerate'] == 24000
+    player.stop()
+
+
+def test_other_interfaces_are_not_given_wasapi_settings(monkeypatch):
+    """The sound library refuses settings meant for another interface."""
+    streams = sound_library(monkeypatch, api='MME')
+    player = audio_io.Player()
+    player.load(np.zeros(2400, np.float32), 24000)
+    player.play()
+    assert streams[0].options['extra_settings'] is None
     player.stop()
 
 

@@ -5,6 +5,14 @@ the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Every playback device plays every take.** A WASAPI device chosen in Settings refused any take that was not at the rate
+  the device runs at ("Invalid sample rate"), and some WDM-KS devices refused 24 kHz and below. Windows now converts for a
+  WASAPI device, a take that a device still refuses is converted to the device's own rate, and the playhead stays with the
+  sound. If the device chosen will not play at all, the take plays through Windows' default and the status line says so.
+  Tried with silent takes from 8 to 96 kHz on every output of a Windows 11 PC.
+
 ## [0.6.0] - 2026-11-04
 
 ### Added

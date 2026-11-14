@@ -470,6 +470,7 @@
 "The name to show this voice under:": "El nombre con el que aparece esta voz:",
 "The original recordings": "Las grabaciones originales",
 "The originals keep detail that a 24 kHz clip no longer has. The kept clips are quicker": "Los originales conservan detalles que un clip de 24 kHz ya no tiene. Los clips conservados son más rápidos",
+"The output chosen in Settings would not play this, so it is playing through Windows' default. Choose another output in Settings if this is not the one you want.": "La salida elegida en Ajustes no pudo reproducir esto, así que suena por la salida predeterminada de Windows. Elija otra salida en Ajustes si no es la que quiere.",
 "The permission applies to what is written there, so tick the box again for the new wording.": "El permiso se aplica a lo que está escrito, así que marque la casilla de nuevo para el texto nuevo.",
 "The recording so far": "La grabación hasta ahora",
 "The signed release": "La autorización firmada",

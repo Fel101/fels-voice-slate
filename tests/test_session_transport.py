@@ -2,6 +2,7 @@
 import pytest
 
 from helpers import RATE, record
+from recorder.audio_io import Player
 
 
 @pytest.fixture
@@ -57,6 +58,40 @@ def test_a_device_that_will_not_play_says_so(session, player, cut_take, monkeypa
     notice = session.bus.notices[-1]
     assert notice.level == 'error' and notice.title == 'Could not play' and 'Invalid device' in notice.text
     assert session.transport.mode is None and not session.transport.active
+
+
+class Stream:
+    def start(self):
+        pass
+
+    def stop(self):
+        pass
+
+    def close(self):
+        pass
+
+
+def test_an_output_that_will_not_play_gives_way_to_the_default_and_says_so(make_session):
+    """The real player, on a sound card where the output chosen in Settings opens at no rate at all."""
+    tried = []
+
+    def sound_card(rate, callback, device):
+        tried.append((rate, device))
+        if device == 5:
+            raise OSError('Error opening OutputStream: Invalid device')
+        return Stream()
+
+    player = Player(stream_factory=sound_card, own_rate=lambda device: 44100)
+    session = make_session(player=player)
+    session.workspace.add_speaker('Smoke Speaker')
+    player.device = 5
+    record(session, 2.0)
+    assert session.transport.play() and session.transport.playing
+    assert tried == [(RATE, 5), (44100, 5), (RATE, None)]
+    assert "Windows' default" in session.status_text and 'Settings' in session.status_text
+    session.transport.stop()
+    player.device = None
+    assert session.transport.play() and session.status_text.startswith('Playing the edited clip')
 
 
 def test_a_device_that_cannot_be_loaded_says_so_too(session, player, cut_take, monkeypatch):

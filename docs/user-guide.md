@@ -504,7 +504,7 @@ Open them with the gear at the top right, or `Ctrl+,`.
 | **Output folder** | Where speakers, originals and kept clips are stored. By default `C:\Users\<you>\Recordings\voice-clips`. A copy from before 0.5 goes on using the `voice-clips` folder in its program folder if it has recordings in it. Choose another folder and, if the old one has recordings and the new one is empty, it offers to move them: each file is copied and checked, and the old ones go only when all of them have arrived. Keep it out of synced folders unless you want a cloud copy of the recordings. |
 | **Stop tail** | How long recording carries on after you press Stop, 0 to 1 second. |
 | **Look** | The theme (dark, light, high contrast, or as in Windows), the size of the whole window from 100% to 200%, and the language. They are used the next time the program starts. Without a size chosen it follows Windows' own *Text size* setting, and without a language it follows Windows, if there is a translation. |
-| **Playback device** | Where takes are played. Windows' default, unless you choose one. A device that is not connected stays in the list, and playback goes to the default until it is back. |
+| **Playback device** | Where takes are played. Windows' default, unless you choose one. Any take plays on any device in the list: one that will not take the take's own sample rate gets it converted. A device that is not connected stays in the list, and playback goes to the default until it is back. If the device chosen will not play at all, the take plays through Windows' default and the status line says so. |
 | **Record key** | The key that starts and stops recording: a function key, or a letter or number held with Ctrl or Alt, so that it cannot be typed by accident. The box below it lets it work while another program is in front, which is off until you turn it on. Windows tells Voice Slate when that one key is pressed; it is not a keyboard hook, and no other key is seen. While it is on, other programs do not receive the key. If another program already holds it, the status line says so at start-up and it works only in this window. |
 | **FFmpeg** | Path of `ffmpeg.exe`. Leave it empty to search `PATH` and the WinGet folders. |
 | **Speech recognizer: Python** and **model** | The optional draft-transcript setup: a `python.exe` that has [faster-whisper](https://github.com/SYSTRAN/faster-whisper) installed, and a faster-whisper model folder. Both are needed. `setup-transcripts.bat` installs both and fills these in for you (see the README); you only type them here to use a recognizer you already have. |
@@ -632,8 +632,11 @@ load as usual, and the files stay where they are.
 the reason, usually a full disk or a clip open in another program. Your work on the take goes on being saved. Fix the
 problem and press Keep again.
 
-**It says "Could not play".** The sound could not reach an output device. Check that one is connected and chosen as the
-default in Windows' sound settings.
+**It says "Could not play".** The sound could not reach any output device, not even Windows' default. Check that one is
+connected and chosen as the default in Windows' sound settings.
+
+**It says it is playing through Windows' default.** The playback device chosen in Settings would not play the take, so it
+went to Windows' default instead. Choose another device under **Playback device** in Settings, or Windows' default.
 
 **A message says "Something went wrong".** The program ran into something it did not expect. It says what, and the details
 are in `voice-slate.log`. Your recordings are not affected, but the last thing you did may not have finished, so check it.
