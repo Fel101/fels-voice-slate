@@ -14,7 +14,7 @@ from pathlib import Path
 import soundfile as sf
 
 from . import audio_core as ac
-from .store import KNOWN_SCHEMAS, Library, SidecarProblem, clean_label, file_sha256
+from .store import KNOWN_SCHEMAS, Library, SidecarProblem, clean_label, file_sha256, kept_length
 
 FORMATS = {'jsonl': ('JSON Lines', '.jsonl'), 'csv': ('CSV', '.csv')}
 COLUMNS = ('audio_filepath', 'text', 'duration', 'speaker', 'speaker_id', 'label', 'sample_rate', 'source', 'created', 'id',
@@ -41,7 +41,8 @@ def _path_text(wav, base):
     return Path(wav).resolve().as_posix()
 
 
-def _row(library, folder, data, slug, speaker, base):
+def _wav_of(library, folder, data, slug):
+    """The WAV of a kept clip after every check that needs none of its audio, or SidecarProblem with the reason."""
     export = data.get('export')
     if not isinstance(export, dict) or not isinstance(data.get('transcript'), str):
         raise SidecarProblem('it is incomplete')
@@ -54,9 +55,47 @@ def _row(library, folder, data, slug, speaker, base):
         raise SidecarProblem('its WAV is not next to it')
     if not wav.is_file():
         raise SidecarProblem('its WAV file is missing')
-    recorded = export.get('sha256')
-    if not isinstance(recorded, str):
+    if not isinstance(export.get('sha256'), str):
         raise SidecarProblem('it holds no SHA-256 of its WAV')
+    return wav
+
+
+def _sidecars(library, slugs):
+    """(slug, folder, sidecar path, its data or None when it cannot be read) for each sidecar of the speakers given (all of
+    them when None), in the order of the speakers' folder names. Other JSON files in the folders are passed over."""
+    speakers = library.speakers()
+    for slug in sorted(speakers) if slugs is None else [slug for slug in slugs if slug in speakers]:
+        folder = library.folder(slug)
+        for sidecar in sorted(folder.glob('*.json')) if folder.is_dir() else []:
+            try:
+                data = json.loads(sidecar.read_text(encoding='utf-8'))
+            except (OSError, ValueError):
+                yield slug, folder, sidecar, None
+                continue
+            if isinstance(data, dict) and data.get('schema') in KNOWN_SCHEMAS:
+                yield slug, folder, sidecar, data
+
+
+def tally(library, slugs=None):
+    """(how many kept clips, their length in seconds) that a manifest or dataset of these speakers would hold, from their
+    sidecars alone: no WAV is read, so a clip whose WAV has changed since it was kept still counts here, and is left out
+    when it is exported."""
+    count, seconds = 0, 0.0
+    for slug, folder, sidecar, data in _sidecars(library, slugs):
+        if data is None:
+            continue
+        try:
+            wav = _wav_of(library, folder, data, slug)
+        except (SidecarProblem, OSError, TypeError, ValueError):
+            continue
+        count += 1
+        seconds += kept_length(data['export'], wav) or 0.0
+    return count, seconds
+
+
+def _row(library, folder, data, slug, speaker, base):
+    wav = _wav_of(library, folder, data, slug)
+    recorded = data['export']['sha256']
     try:
         actual = file_sha256(wav)
         info = sf.info(str(wav))
@@ -93,24 +132,17 @@ def collect(library, slugs=None, base=None):
     of the speakers' names, then of when the clips were made.
     """
     speakers = library.speakers()
-    chosen = sorted(speakers) if slugs is None else [slug for slug in slugs if slug in speakers]
     rows, left_out = [], []
-    for slug in chosen:
-        folder = library.folder(slug)
-        for sidecar in sorted(folder.glob('*.json')) if folder.is_dir() else []:
-            try:
-                data = json.loads(sidecar.read_text(encoding='utf-8'))
-            except (OSError, ValueError):
-                left_out.append((sidecar.name, 'it could not be read'))
-                continue
-            if not isinstance(data, dict) or data.get('schema') not in KNOWN_SCHEMAS:
-                continue                             # some other JSON file that happens to sit there
-            try:
-                rows.append(_row(library, folder, data, slug, speakers[slug]['name'], base))
-            except SidecarProblem as e:
-                left_out.append((sidecar.name, str(e)))
-            except (OSError, TypeError, ValueError):
-                left_out.append((sidecar.name, 'it holds a value that cannot be read'))
+    for slug, folder, sidecar, data in _sidecars(library, slugs):
+        if data is None:
+            left_out.append((sidecar.name, 'it could not be read'))
+            continue
+        try:
+            rows.append(_row(library, folder, data, slug, speakers[slug]['name'], base))
+        except SidecarProblem as e:
+            left_out.append((sidecar.name, str(e)))
+        except (OSError, TypeError, ValueError):
+            left_out.append((sidecar.name, 'it holds a value that cannot be read'))
     rows.sort(key=lambda row: (row['speaker'].casefold(), row['speaker_id'], row['created'], row['id']))
     return rows, left_out
 

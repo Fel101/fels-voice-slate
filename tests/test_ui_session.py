@@ -88,7 +88,7 @@ def test_the_script_tab_lists_each_line_and_how_far_it_has_got(window, session):
     page = window.inspector.script
     rows = [page.lines.item(i).text() for i in range(page.lines.count())]
     assert rows[0].startswith('✓') and rows[1].startswith('○') and 'gulls' in rows[1]
-    assert page.summary.text().startswith('1 of 3 lines have a kept clip')
+    assert page.summary.text().startswith('1 of 3 lines (33%) have a kept clip, 12 s in all, for this speaker.')
     assert page.lines.currentRow() == 1
 
 

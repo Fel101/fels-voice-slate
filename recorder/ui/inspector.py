@@ -11,12 +11,13 @@ from .. import clean
 from ..core import chain as chain_mod
 from ..core import reading
 from ..i18n import tr
-from ..session.workspace import reading_of
+from ..session.workspace import kept_total, reading_of
 from ..store import LABEL_MAX
 from . import theme
 from .library import reading_said
 from .palette import PALETTE, color
-from .widgets import Segmented, Switch, button, caption, card, chip, clear_layout, hbox, label, set_chip, vbox
+from .widgets import (Segmented, Switch, button, caption, card, chip, clear_layout, format_total, hbox, label, set_chip,
+                      vbox)
 
 
 # ---- the Clip page ----------------------------------------------------------------------------------------------------
@@ -655,9 +656,12 @@ class ScriptPage(QWidget):
             self.lines.setCurrentRow(script.index)
             self.lines.scrollToItem(self.lines.currentItem())
         self.lines.blockSignals(False)
-        self.summary.setText(tr('{done} of {total} lines have a kept clip, for this speaker. ✓ kept, ● recorded, ○ not yet; '
-                                '3× has three takes.')
-                             .format(done=done, total=len(progress)) if progress else
+        lines = set(script.lines)
+        seconds = kept_total([take for take in session.workspace.takes if take.meta.get('script_line') in lines])[1]
+        self.summary.setText(tr('{done} of {total} lines ({percent}%) have a kept clip, {time} in all, for this speaker. '
+                                '✓ kept, ● recorded, ○ not yet; 3× has three takes.')
+                             .format(done=done, total=len(progress), percent=int(100 * done / len(progress)),
+                                     time=format_total(seconds)) if progress else
                              tr('A script is a text file with one prompt on each line. Each take then gets a line as its '
                                 'transcript, and this list shows how far you have got. Your place is remembered when you '
                                 'close the program.'))

@@ -1117,6 +1117,16 @@ class MainWindow(QMainWindow):
             return
         s.bus.status(f'Saved a copy ({share.rate_text(rate)}) to {path}')
 
+    def _export_totals(self, slug):
+        """(clips, seconds) a manifest or dataset of this speaker, and of all speakers, would hold, from the sidecars."""
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            return {'speaker': manifest.tally(self.session.lib, [slug]), 'all': manifest.tally(self.session.lib)}
+        except OSError:
+            return None
+        finally:
+            QApplication.restoreOverrideCursor()
+
     def export_manifest(self):
         """List the kept clips of this speaker, or of everyone, in a CSV or JSON Lines file."""
         s = self.session
@@ -1124,7 +1134,7 @@ class MainWindow(QMainWindow):
         slug = workspace.speaker
         if slug is None or s.capturing.recording:
             return
-        choice = self.dialogs.manifest_options(workspace.name_of(slug))
+        choice = self.dialogs.manifest_options(workspace.name_of(slug), self._export_totals(slug))
         if choice is None:
             return
         scope, kind = choice
@@ -1168,7 +1178,7 @@ class MainWindow(QMainWindow):
         slug = workspace.speaker
         if slug is None or s.capturing.recording or s.batch.running:
             return
-        choice = self.dialogs.dataset_options(workspace.name_of(slug))
+        choice = self.dialogs.dataset_options(workspace.name_of(slug), self._export_totals(slug))
         if choice is None:
             return
         scope, layout, rate, originals = choice

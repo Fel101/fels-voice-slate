@@ -19,6 +19,10 @@ the project uses [Semantic Versioning](https://semver.org/).
   tab lists the takes of the line in front, each line there says how many takes it has, and each take of a script line
   shows its reading check in the list. **Discard the other takes of this line...** sends the takes not chosen to the
   Recycle Bin after one question, and leaves the take open and any kept clip.
+- **Totals.** Beside **Takes**, the list says how many clips the speaker has kept and how long they are in all, or, while
+  several takes are selected, how long those are. The Script tab says what share of the lines have a kept clip and how
+  long those clips are, and the manifest and dataset dialogs say how many clips the choice holds and how long they are.
+  The totals come from the sidecars and from what the takes hold: no audio is read to add them up.
 
 ### Changed
 

@@ -17,11 +17,11 @@ from .. import audio_core as ac
 from ..core import reading
 from ..i18n import tr
 from ..session.measure import THUMB_COLUMNS
-from ..session.workspace import reading_of
+from ..session.workspace import kept_total, length_total, reading_of
 from ..store import clean_label
 from . import theme
 from .palette import color
-from .widgets import ElidedCombo, button, caption, chip, hbox, label, set_chip, vbox
+from .widgets import ElidedCombo, button, caption, chip, format_total, hbox, label, set_chip, vbox
 
 SOURCES = {'mic': 'Mic', 'system': 'System', 'import': 'Import'}
 STATUS_COLOURS = {'In review': 'amber', 'Kept': 'green', 'Changed': 'amber', 'Not kept': 'muted', 'Recording': 'red',
@@ -373,6 +373,8 @@ class LibraryPanel(QWidget):
         head = hbox(spacing=8)
         head.addWidget(caption('Takes'))
         head.addStretch(1)
+        self.totals = label('', 'dim', size=11)
+        head.addWidget(self.totals)
         self.count = chip('0', 'gray')
         head.addWidget(self.count)
         layout.addLayout(head)
@@ -487,7 +489,25 @@ class LibraryPanel(QWidget):
         places = sorted(index.row() for index in self.list.selectionModel().selectedRows())
         return [self.model.items[place] for place in places if self.model.items[place] is not None]
 
+    def refresh_totals(self):
+        """How much the speaker has kept, or, while several takes are selected, how long they are: from what the takes
+        hold, with no audio read."""
+        chosen = self.selected_takes()
+        if len(chosen) > 1:
+            count, seconds = length_total(chosen)
+            text = tr('{count} selected · {time}')
+            tip = tr('The takes selected and how long they are in all, after their cuts')
+        else:
+            count, seconds = kept_total(self.session.workspace.takes)
+            text = tr('{count} kept · {time}')
+            tip = tr('The kept clips of this speaker and how long they are in all')
+        self.totals.setText(text.format(count=count, time=format_total(seconds)) if count else '')
+        self.totals.setToolTip(tip)
+        self.totals.setAccessibleName(self.totals.text())
+        self.totals.setVisible(bool(count))
+
     def _selection_changed(self):
+        self.refresh_totals()
         self.selectionChanged.emit()
         if self._syncing:
             return
@@ -589,6 +609,7 @@ class LibraryPanel(QWidget):
         self.model.show(takes, shown, self.model.live is not None)
         self._follow_current()
         self.count.setText(str(len(takes)) if len(shown) == len(takes) else f'{len(shown)} of {len(takes)}')
+        self.refresh_totals()
         if takes and words:
             self.empty.setText(f'{tr("No take has all of these words:")}\n{" ".join(words)}')
         elif takes:

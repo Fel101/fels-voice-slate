@@ -194,6 +194,25 @@ def format_clock(seconds):
     return f'{int(seconds // 60):02d}:{seconds % 60:06.3f}'
 
 
+def format_total(seconds):
+    """A total length in words, to the second under an hour and to the minute after: 41 s, 4 min 05 s, 1 h 02 min."""
+    whole = int(max(0.0, float(seconds)) + 0.5)               # a half rounds up, as people round it
+    if whole < 60:
+        return tr('{seconds} s').format(seconds=whole)
+    if whole < 3600:
+        return tr('{minutes} min {seconds} s').format(minutes=whole // 60, seconds=f'{whole % 60:02d}')
+    minutes = int(whole / 60 + 0.5)
+    return tr('{hours} h {minutes} min').format(hours=minutes // 60, minutes=f'{minutes % 60:02d}')
+
+
+def clips_text(count, seconds):
+    """How many kept clips and how long they are in all."""
+    if not count:
+        return tr('No kept clips yet')
+    return (tr('1 clip, {time}') if count == 1 else tr('{count} clips, {time}')).format(count=count,
+                                                                                      time=format_total(seconds))
+
+
 # ---- the level meter --------------------------------------------------------------------------------------------------
 
 class Meter(QWidget):

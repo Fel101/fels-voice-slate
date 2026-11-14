@@ -129,6 +129,21 @@ def audio_shape(path):
     return int(info.frames), int(info.samplerate), int(info.channels)
 
 
+def kept_length(export, path=None):
+    """How long a kept clip is, in seconds: what its sidecar says (`export` is the sidecar's "export" entry), or else what
+    the header of its WAV at `path` says. None when neither can be read. No audio is read either way."""
+    seconds = export.get('duration_seconds') if isinstance(export, dict) else None
+    if isinstance(seconds, (int, float)) and not isinstance(seconds, bool) and math.isfinite(seconds) and seconds >= 0:
+        return float(seconds)
+    if path is None:
+        return None
+    try:
+        frames, rate, channels = audio_shape(path)
+    except (OSError, RuntimeError):
+        return None
+    return frames / rate if rate else None
+
+
 def _remove(path):
     """Delete a leftover if it is there. Failing to is not worth reporting: it is not anybody's work."""
     try:
@@ -256,6 +271,7 @@ class Take:
     confirmed_words: str = field(default=None, repr=False)     # the cuts and silences the transcript was checked against
     kept_work: dict = field(default=None, repr=False)          # what the sidecar holds, to tell when a kept take has changed
     kept_sha256: str = field(default=None, repr=False)         # the kept WAV's SHA-256, which names the Keep it came from
+    kept_seconds: float = field(default=None, repr=False)      # how long the kept clip is, as its sidecar says
     spool: Path = field(default=None, repr=False)              # the recording on disk, until its original is written
     frames: int = 0                   # how long the original is, known without reading it
     channels: int = 1
@@ -280,6 +296,16 @@ class Take:
     @property
     def seconds(self):
         return self.frames / self.rate if self.rate else 0.0
+
+    @property
+    def clip_seconds(self):
+        """How long the clip is: the kept clip while the take is as it was kept, else the original less its cuts. Worked out
+        from what the take holds, with no audio read, so the cuts are not snapped to zero crossings: it can be a few
+        milliseconds out, which a total in seconds does not show."""
+        if self.kept and self.kept_seconds is not None and not self.changed:
+            return self.kept_seconds
+        cut = sum(b - a for a, b in ac.cut_ranges(self.history.edits, self.rate, self.frames)) if self.rate else 0
+        return (self.frames - cut) / self.rate if self.rate else 0.0
 
     @property
     def purpose(self):
@@ -1103,6 +1129,7 @@ class Library:
         take.sidecar_path = sidecar
         take.moves = _moves_of(data)
         take.kept_sha256 = data['export'].get('sha256')
+        take.kept_seconds = kept_length(data['export'], export_path)
         take.kept_work = _work_of(take)
         take.confirmed_words = words_key(history)
         return take
@@ -1266,6 +1293,7 @@ class Library:
             _remove(sidecar_tmp)
         take.export_path, take.sidecar_path = export_path, sidecar_path
         take.kept_sha256 = sidecar['export']['sha256']
+        take.kept_seconds = sidecar['export']['duration_seconds']
         take.kept_work = _work_of(take)
         take.confirmed_words = words_key(take.history)
         take.meta['saved_label'] = clean_label(take.meta.get('label'))
@@ -1496,7 +1524,7 @@ class Library:
         sidecar = Path(take.sidecar_path)
         kept = self._take_from_sidecar(sidecar.parent, sidecar, json.loads(sidecar.read_text(encoding='utf-8')))
         take.history, take.meta = kept.history, kept.meta
-        take.kept_work, take.kept_sha256 = kept.kept_work, kept.kept_sha256
+        take.kept_work, take.kept_sha256, take.kept_seconds = kept.kept_work, kept.kept_sha256, kept.kept_seconds
         take.needs_transcript_review, take.confirmed_words = False, kept.confirmed_words
         take.draft_key = take.draft_request = None
         take.restored = False

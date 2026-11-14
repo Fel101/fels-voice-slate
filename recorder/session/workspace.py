@@ -26,6 +26,18 @@ STATED_FIELDS = ('origin', 'allowed_use')                     # what the permiss
 KEPT_THROUGH_A_SPLIT = ('interrupted', 'dropouts')            # facts about the recording, which each part shares
 
 
+def kept_total(takes):
+    """(how many of `takes` are kept, how long their kept clips are in seconds), as their sidecars say: no audio is read."""
+    kept = [take for take in takes if take.kept]
+    return len(kept), sum(take.kept_seconds or 0.0 for take in kept)
+
+
+def length_total(takes):
+    """(how many takes, how long their clips are in seconds), each as it is now, from what the takes hold: no audio is
+    read."""
+    return len(takes), sum(take.clip_seconds for take in takes)
+
+
 def reading_of(take):
     """How the take compares with the script line it was read from, or None when there is nothing to compare: no script
     line, no draft yet, or a draft of the clip as it was before the latest cuts."""

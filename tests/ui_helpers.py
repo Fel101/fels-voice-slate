@@ -107,8 +107,8 @@ class StubDialogs:
         self.asked.append(('copy', SimpleNamespace(name=name, kept_rate=kept_rate)))
         return self.copy_answer
 
-    def manifest_options(self, speaker_name):
-        self.asked.append(('manifest', SimpleNamespace(speaker=speaker_name)))
+    def manifest_options(self, speaker_name, totals=None):
+        self.asked.append(('manifest', SimpleNamespace(speaker=speaker_name, totals=totals)))
         return self.manifest_answer
 
     def keep_many(self, speaker_name, takes, defaults):
@@ -119,8 +119,8 @@ class StubDialogs:
         self.asked.append(('speaker', SimpleNamespace(name=name, record=record, has_file=has_file)))
         return self.speaker_answer
 
-    def dataset_options(self, speaker_name):
-        self.asked.append(('dataset', SimpleNamespace(speaker=speaker_name)))
+    def dataset_options(self, speaker_name, totals=None):
+        self.asked.append(('dataset', SimpleNamespace(speaker=speaker_name, totals=totals)))
         return self.dataset_answer
 
     def settings(self, values):

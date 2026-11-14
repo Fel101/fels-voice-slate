@@ -137,7 +137,8 @@ Script mode shows one prompt per take, which is handy for reading a list of sent
    Updating a kept clip, or keeping an older take of another line, leaves the script where it is.
 
 The **Script** tab lists every line with a mark: ✓ has a kept clip, ● has a take, ○ not yet. A line read more than once
-says how many takes it has, as *3×*. It is worked out from the takes of the speaker in front, so the same script can be read
+says how many takes it has, as *3×*. Above the list, it says how far the script has got: how many lines have a kept clip,
+as a share of all of them, and how long those clips are in all. It is worked out from the takes of the speaker in front, so the same script can be read
 by several people. Click a line to go to it. **Next line to record** (`Ctrl+Shift+Down`) goes to the next line with no kept
 clip.
 
@@ -278,6 +279,11 @@ Takes are numbered *Take 1*, *Take 2* and so on from the oldest. To give one a n
 field at the top of the **Clip** tab, press `F2`, or right-click the take and choose **Rename**. The label (one line, up to
 80 characters) replaces the number in the list. It is saved with the take: in its autosave file until the clip is kept,
 and then in the sidecar. Changing the label of a kept clip is saved at once, without pressing Keep.
+
+Beside **Takes**, the list says how many kept clips the speaker has and how long they are in all, as *12 kept ·
+4 min 05 s*. While several takes are selected it says how many and how long they are instead, as each is now, after its
+cuts. These totals come from what the takes already hold, and from the sidecars of the kept clips: no audio is read to
+add them up, so they are there at once however long the list.
 
 The box above the list filters the current speaker's takes. Type some words, and only the takes whose label, transcript or
 notes contain all of them are shown, in any order and whatever the capitals; the counter beside **Takes** says how many of
@@ -522,7 +528,9 @@ before it replaces a file.
 A manifest is one file that lists the kept clips with their transcripts, so that a program that trains or tests on speech
 can read the whole set instead of walking the folders. Choose **Export manifest...** in the gear menu, say whether it
 should list the open speaker's clips or everyone's, and choose **JSON Lines** (`.jsonl`, one JSON object per line) or
-**CSV** (`.csv`, for spreadsheets and data tools), then the file name.
+**CSV** (`.csv`, for spreadsheets and data tools), then the file name. **Holds** says how many clips the choice lists and
+how long they are in all, read from their sidecars. A clip whose WAV has changed is still counted there, as that takes
+reading the WAV, and is left out when the manifest is written.
 
 ![The Export manifest dialog](images/manifest.png)
 
@@ -546,7 +554,7 @@ A manifest holds transcripts and notes about where each voice came from. Treat i
 
 A dataset is the kept clips gathered in one new folder, for a tool that trains or tests on speech. Choose **Export dataset...** in
 the gear menu, say whose clips, the layout, the sample rate and what to make the audio from, then choose an empty folder outside
-the output folder.
+the output folder. **Holds** says how many clips go in and how long they are, as for a manifest.
 
 ![The Export dataset dialog](images/dataset.png)
 

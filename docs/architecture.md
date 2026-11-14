@@ -110,6 +110,9 @@ The list of takes (`ui/library.py`) is a `QListView` over a model, drawn by a de
 `Measurements.thumbnail` works out the outline of a row in the background the first time it is drawn. What it shows is
 `library.arrange`: the takes, newest first as the workspace holds them, narrowed by the filter words and by the choice above
 the list, in the order chosen there. It reads only what the takes already hold, never their audio.
+The totals beside **Takes** work the same way: `take.kept_seconds` is the kept clip's length as its sidecar says (read
+when the list loads and set at Keep), and `take.clip_seconds` is the original less its cuts, from the recipe and the
+frame count. `manifest.tally` adds up what an export would hold from the sidecars alone, without the SHA-256 check.
 
 `session/advisor.py` runs it. It works out the advice on a worker thread, caches it per take under the recipe it was
 made for (a result for an older recipe is dropped), follows the clip as it is edited, and applies a fix through

@@ -20,7 +20,7 @@ from ..i18n import LANGUAGES, tr
 from .actions import SPEC, key_problem, shortcut_text
 from .palette import PALETTE
 from .translate import translate_tree
-from .widgets import button, hbox, label, vbox
+from .widgets import button, clips_text, hbox, label, vbox
 
 AUDIO_FILTER = f'Audio files ({" ".join("*" + suffix for suffix in audio_import.SUFFIXES)});;All files (*)'
 THEME_NAMES = {'dark': 'Dark', 'light': 'Light', 'contrast': 'High contrast', 'system': 'As in Windows'}
@@ -84,9 +84,9 @@ class Dialogs:
         """(format, sample rate) for a copy of a kept clip, or None."""
         return self._ask(CopyDialog(name, self.parent, kept_rate))
 
-    def manifest_options(self, speaker_name):
-        """('speaker' or 'all', 'jsonl' or 'csv') for a manifest, or None."""
-        return self._ask(ManifestDialog(speaker_name, self.parent))
+    def manifest_options(self, speaker_name, totals=None):
+        """('speaker' or 'all', 'jsonl' or 'csv') for a manifest, or None. `totals` holds (clips, seconds) for each."""
+        return self._ask(ManifestDialog(speaker_name, totals, self.parent))
 
     def settings(self, values):
         return self._ask(SettingsDialog(values, self.parent))
@@ -102,9 +102,10 @@ class Dialogs:
         """What is typed in the Speaker details dialog, as a dict for Library.set_release, or None."""
         return self._ask(SpeakerDialog(name, record, has_file, self.parent))
 
-    def dataset_options(self, speaker_name):
-        """('speaker' or 'all', layout, sample rate, from the originals?) for a dataset, or None."""
-        return self._ask(DatasetDialog(speaker_name, self.parent))
+    def dataset_options(self, speaker_name, totals=None):
+        """('speaker' or 'all', layout, sample rate, from the originals?) for a dataset, or None. `totals` holds (clips,
+        seconds) for each."""
+        return self._ask(DatasetDialog(speaker_name, totals, self.parent))
 
     def keep_many(self, speaker_name, takes, defaults):
         """(origin, allowed use) for the takes that have none, once the person has made the statement for all of `takes`,
@@ -512,10 +513,29 @@ class CopyDialog(QDialog):
         return self.kind.currentData(), self.rate.currentData()
 
 
+def scope_choice(speaker_name, totals, form, title):
+    """The choice of whose kept clips, with how many there are and how long they are below it, as their sidecars say."""
+    scope = QComboBox()
+    scope.addItem(tr('Kept clips of {name}').format(name=speaker_name), 'speaker')
+    scope.addItem('Kept clips of all speakers', 'all')
+    form.addRow(title, scope)
+    if totals:
+        amount = label('', 'muted')
+        amount.setAccessibleName('How many clips go in')
+
+        def show():
+            amount.setText(clips_text(*totals.get(scope.currentData(), (0, 0.0))))
+        scope.currentIndexChanged.connect(show)
+        show()
+        form.addRow('Holds', amount)
+        scope.amount = amount
+    return scope
+
+
 class ManifestDialog(QDialog):
     """Whose clips a manifest lists, and in which file format. Choosing the file comes next."""
 
-    def __init__(self, speaker_name, parent=None):
+    def __init__(self, speaker_name, totals=None, parent=None):
         super().__init__(parent)
         self.setWindowTitle('Export manifest')
         self.setMinimumWidth(480)
@@ -525,10 +545,7 @@ class ManifestDialog(QDialog):
                                'instead of walking the folders.', wrap=True))
         form = QFormLayout()
         form.setSpacing(10)
-        self.scope = QComboBox()
-        self.scope.addItem(f'Kept clips of {speaker_name}', 'speaker')
-        self.scope.addItem('Kept clips of all speakers', 'all')
-        form.addRow('List', self.scope)
+        self.scope = scope_choice(speaker_name, totals, form, tr('List'))
         self.kind = QComboBox()
         for key, (text, ending) in manifest.FORMATS.items():
             self.kind.addItem(f'{text} ({ending})', key)
@@ -555,7 +572,7 @@ class ManifestDialog(QDialog):
 class DatasetDialog(QDialog):
     """Whose clips a dataset holds, its layout, its sample rate, and what the audio is made from. The folder comes next."""
 
-    def __init__(self, speaker_name, parent=None):
+    def __init__(self, speaker_name, totals=None, parent=None):
         super().__init__(parent)
         self.setWindowTitle('Export dataset')
         self.setMinimumWidth(520)
@@ -564,10 +581,7 @@ class DatasetDialog(QDialog):
                                'trains or tests on speech. The clips in the library do not change.', wrap=True))
         form = QFormLayout()
         form.setSpacing(10)
-        self.scope = QComboBox()
-        self.scope.addItem(f'Kept clips of {speaker_name}', 'speaker')
-        self.scope.addItem('Kept clips of all speakers', 'all')
-        form.addRow('Clips', self.scope)
+        self.scope = scope_choice(speaker_name, totals, form, tr('Clips'))
         self.layout_choice = QComboBox()
         for key, text in dataset.LAYOUTS.items():
             self.layout_choice.addItem(text, key)

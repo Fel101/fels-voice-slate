@@ -290,13 +290,14 @@ def main():
                 fake = {'root': r'C:\Users\you\Recordings\voice-clips', 'asr_language': 'en', 'tail_seconds': 0.5,
                         'outputs': ['Speakers (Realtek(R) Audio)'], 'output_device': 'Speakers (Realtek(R) Audio)'}
                 said = {'origin': 'Recorded by me, in my room, microphone only', 'allowed_use': 'Personal voice projects'}
+                totals = {'speaker': (48, 1234.5), 'all': (112, 3001.0)}
                 release = {'file': 'signed-release.pdf', 'signed': '2026-09-02', 'expires': '2027-09-02',
                            'notes': 'Covers the narrator of the game, and nothing else.'}
                 dialog = {'settings': lambda: dialogs.SettingsDialog(fake),
                           'about': dialogs.AboutDialog, 'shortcuts': dialogs.ShortcutsDialog,
                           'copy': lambda: dialogs.CopyDialog('Welcome back, take two'),
-                          'manifest': lambda: dialogs.ManifestDialog('My voice'),
-                          'dataset': lambda: dialogs.DatasetDialog('My voice'),
+                          'manifest': lambda: dialogs.ManifestDialog('My voice', totals),
+                          'dataset': lambda: dialogs.DatasetDialog('My voice', totals),
                           'speaker': lambda: dialogs.SpeakerDialog('Sam Rivera', release, True),
                           'keepmany': lambda: dialogs.KeepManyDialog('My voice', [SimpleNamespace(meta=said)] * 12, said),
                           'handsfree': lambda: dialogs.HandsFreeDialog({**run.OPTIONS, 'next_line': True, 'stop_after_pause': True,
