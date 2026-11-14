@@ -357,6 +357,28 @@ def speech_threshold_db(x, rate, energy=None):
     return min(max(noise + 6.0, speech - 25.0, ac.SILENCE_FRAME_DB - 15.0), speech - 10.0)
 
 
+LIVE_ABOVE_ROOM_DB = 12.0       # while recording, a block this far above the room is the voice
+LIVE_FLOOR_DB = -55.0           # and never below this, so that hiss on a silent input is not taken for a voice
+LIVE_SPEECH_SECONDS = 0.3       # this much voice before a pause can end a take: the click of the record key is not speech
+
+
+def live_pause(rows):
+    """Whether a voice has been heard in a take being recorded, and for how many seconds it has not been since.
+
+    `rows` are (end second, RMS dBFS) per block, as Capture.loudness gives them. The room is the quietest tenth of the
+    blocks, which the half second kept before Record makes sure of; the voice is well above it. Short sounds do not count
+    until 0.3 s of them have been heard, so a click or a bump cannot end a take before the line has been read."""
+    rows = np.asarray(rows, dtype=np.float64).reshape(-1, 2)
+    if not len(rows):
+        return False, 0.0
+    ends, db = rows[:, 0], rows[:, 1]
+    lengths = np.diff(ends, prepend=0.0)
+    loud = db >= max(float(np.percentile(db, 10)) + LIVE_ABOVE_ROOM_DB, LIVE_FLOOR_DB)
+    if lengths[loud].sum() < LIVE_SPEECH_SECONDS:
+        return False, 0.0
+    return True, float(ends[-1] - ends[np.nonzero(loud)[0][-1]])
+
+
 def silent_runs(x, rate, min_seconds=0.0, energy=None):
     """Runs of pause frames as (start, end) seconds on the signal's own timeline. Includes the ends of the clip."""
     energy = ac.frame_energy(x, rate) if energy is None else energy

@@ -145,6 +145,37 @@ several sittings. **Clear script** in the gear menu stops using it.
 
 ![The Script tab](images/script.png)
 
+### Reading a script hands-free
+
+For a long list of lines, the program can move on by itself, so your hands can stay off the mouse. Choose
+**Hands-free reading...** beside the line, or in the gear menu (`Ctrl+Shift+H`), and turn on what you want. Each choice is
+remembered, and each is off until you turn it on.
+
+- **Go to the next line when a take ends**, and not only after Keep.
+- **End a take by itself after a pause** (1.5 seconds unless you choose otherwise). It waits until your voice has been heard,
+  so a take never ends before you have read the line, and a click or a bump does not count as your voice. The stop tail is
+  added after the pause, as after Stop.
+- **Start the next take by itself after a count-in** (3 seconds unless you choose otherwise). With this on, the record key
+  (`F9`) starts a **run**: the line is counted in on the screen, recorded, ended by the pause after it, and the next line is
+  counted in, until the script ends. The count-in is shown, never heard: the program makes no sound, so nothing of it gets
+  into the recording.
+
+`Esc` or the record key ends a run at once. A take being recorded then stops as Stop stops it and is saved as a take, and the
+microphone closes, unless you had armed it before the run began. `F8` (**Read the line again**) records the line you have just
+read once more, whether you are in the middle of it or it is being counted in: the take you had stays, so you can choose
+between them afterwards. (If your record key is `F8`, this is `F7`.)
+
+![Counting in the next line of a script run](images/countin.png)
+
+While a run goes on, the large line above the waveform says what is happening: *Next line in 3*, *Recording: read the line*, and
+once your voice has been heard, *Recording: it ends after 1.5 s of quiet*. The status line says the same for a screen reader,
+and the sign on top of other windows shows the run between takes too.
+
+**A run only records.** It never keeps a clip and never ticks the permission box. When you have read the script, select the
+takes you want in the list and use **Keep selected takes**, where you make the statement of permission for them.
+
+![The Hands-free reading options](images/handsfree.png)
+
 ### The reading check
 
 ![The reading check on the Clip tab, and the words under the waveform](images/reading.png)
@@ -543,7 +574,8 @@ the tooltip of *Draft transcripts* at the bottom of the window.
 Everything can be reached with `Tab`. In the list of takes, `Up` and `Down` open a take, `Shift` with them selects several, and the
 key for a context menu (or `Shift+F10`) opens the menu of the row. On the waveform, `Left` and `Right` move the playhead, `[` and `]`
 set the start and end of a selection, and `Delete` cuts it. `Alt+Down` and `Alt+Up` walk the takes from anywhere. The words under
-the waveform are links: `Tab` moves between them, and `Enter` selects one.
+the waveform are links: `Tab` moves between them, and `Enter` selects one. A script can be read with no mouse at all: see
+[Reading a script hands-free](#reading-a-script-hands-free).
 
 Every control has a name a screen reader can read, the rows of the list say what each take is, and what the status line says
 is read out as it changes: *Recording*, *Take saved*, *Kept*. The marks in the checklist and the script are read as words,

@@ -12,7 +12,7 @@ from PySide6.QtCore import QDate, QRegularExpression, Qt, QUrl, qVersion
 from PySide6.QtGui import QDesktopServices, QFont, QGuiApplication, QKeySequence, QRegularExpressionValidator
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDateEdit, QDialog, QDoubleSpinBox, QFileDialog, QFormLayout, QFrame,
                                QInputDialog, QKeySequenceEdit, QLabel, QLineEdit, QMessageBox, QPlainTextEdit, QPushButton,
-                               QScrollArea, QWidget)
+                               QScrollArea, QSpinBox, QWidget)
 
 from .. import __version__, audio_import, clean, dataset, devices, manifest, settings, share, transcript
 from .. import audio_core as ac
@@ -90,6 +90,9 @@ class Dialogs:
 
     def settings(self, values):
         return self._ask(SettingsDialog(values, self.parent))
+
+    def hands_free(self, values, record_key):
+        return self._ask(HandsFreeDialog(values, record_key, self.parent))
 
     @staticmethod
     def _ask(dialog):
@@ -384,6 +387,87 @@ class SettingsDialog(QDialog):
                 'record_key': None if self._key_text() == settings.DEFAULT_RECORD_KEY else self._key_text(),
                 'ffmpeg': self.ffmpeg.text() or None, 'asr_python': self.python.text() or None,
                 'asr_model': self.model.text() or None, 'asr_language': self.language.text().strip().lower() or None}
+
+
+class HandsFreeDialog(QDialog):
+    """The options for reading a script hands-free. Each is off until the person turns it on, and each is remembered."""
+
+    def __init__(self, values, record_key, parent=None):
+        super().__init__(parent)
+        from ..session import run
+        self.setWindowTitle('Hands-free reading')
+        self.setMinimumWidth(560)
+        layout = vbox(self, (22, 20, 22, 18), 12)
+        layout.addWidget(label('Read a script line after line with your hands off the mouse. These apply to takes of a script '
+                               'line, and are remembered.', 'muted', wrap=True))
+        self.next_line = QCheckBox('Go to the next line when a take ends')
+        self.next_line.setChecked(values['next_line'])
+        layout.addWidget(self.next_line)
+
+        row = hbox(spacing=8)
+        self.stop_after_pause = QCheckBox('End a take by itself after a pause of')
+        self.stop_after_pause.setChecked(values['stop_after_pause'])
+        row.addWidget(self.stop_after_pause)
+        self.pause = QDoubleSpinBox()
+        self.pause.setRange(*run.PAUSE_RANGE)
+        self.pause.setSingleStep(0.5)
+        self.pause.setDecimals(1)
+        self.pause.setSuffix(' s')
+        self.pause.setValue(values['pause_seconds'])
+        self.pause.setAccessibleName('Pause that ends a take, in seconds')
+        row.addWidget(self.pause)
+        row.addStretch(1)
+        layout.addLayout(row)
+        layout.addWidget(label('Only once your voice has been heard, so a take never ends before you have read the line. The '
+                               'stop tail is added after the pause, as it is after Stop.', 'dim', size=11, wrap=True))
+
+        row = hbox(spacing=8)
+        self.auto_start = QCheckBox('Start the next take by itself after a count-in of')
+        self.auto_start.setChecked(values['auto_start'])
+        row.addWidget(self.auto_start)
+        self.count_in = QSpinBox()
+        self.count_in.setRange(*run.COUNT_IN_RANGE)
+        self.count_in.setSuffix(' s')
+        self.count_in.setValue(values['count_in'])
+        self.count_in.setAccessibleName('Count-in before each take, in seconds')
+        row.addWidget(self.count_in)
+        row.addStretch(1)
+        layout.addLayout(row)
+        layout.addWidget(label(tr('Then {key} starts a run through the script, and Esc or {key} ends it. The count-in is shown '
+                                  'on the screen and never heard: the program makes no sound, so none of it reaches the '
+                                  'recording. A run needs takes that end after a pause.').format(key=record_key),
+                               'dim', size=11, wrap=True))
+        layout.addWidget(label(tr('{key} records the line just read once more. Its take stays, so you can choose between '
+                                  'them.').format(key=run.again_key(record_key)), 'dim', size=11, wrap=True))
+        layout.addWidget(label('Hands-free reading only records. It keeps nothing and never ticks the permission box: keep the '
+                               'takes afterwards with Keep selected takes, where you make the statement for them.',
+                               'muted', wrap=True))
+        self.stop_after_pause.toggled.connect(self._enable)
+        self._enable()
+
+        buttons = hbox(spacing=8)
+        buttons.addStretch(1)
+        cancel = QPushButton('Cancel')
+        cancel.clicked.connect(self.reject)
+        ok = QPushButton('OK')
+        ok.setDefault(True)
+        ok.setProperty('kind', 'primary')
+        ok.clicked.connect(self.accept)
+        buttons.addWidget(cancel)
+        buttons.addWidget(ok)
+        layout.addLayout(buttons)
+
+    def _enable(self):
+        pause = self.stop_after_pause.isChecked()
+        self.pause.setEnabled(pause)
+        self.auto_start.setEnabled(pause)
+        self.count_in.setEnabled(pause)
+
+    def values(self):
+        return {'next_line': self.next_line.isChecked(), 'stop_after_pause': self.stop_after_pause.isChecked(),
+                'pause_seconds': round(self.pause.value(), 1),
+                'auto_start': self.auto_start.isChecked() and self.stop_after_pause.isChecked(),
+                'count_in': self.count_in.value()}
 
 
 # ---- sharing ----------------------------------------------------------------------------------------------------------
@@ -711,7 +795,7 @@ class AboutDialog(QDialog):
 
 
 SHORTCUT_GROUPS = (
-    ('Record and listen', ('record', 'arm', 'play', 'loop', 'ab', 'escape')),
+    ('Record and listen', ('record', 'arm', 'play', 'loop', 'ab', 'escape', 'again', 'hands_free')),
     ('Edit', ('undo', 'redo', 'cut', 'trim', 'silence', 'select_all', 'set_in', 'set_out')),
     ('Check and repair', ('auto_analyze', 'auto_fix')),
     ('View', ('zoom_in', 'zoom_out', 'fit', 'zoom_selection')),
@@ -741,9 +825,11 @@ class ShortcutsDialog(QDialog):
         self.setWindowTitle('Keyboard shortcuts')
         layout = vbox(self, (26, 14, 26, 18), 10)
         def keys(name):
-            """The record key can be changed, so the window is asked what it is."""
+            """The record key can be changed, and the key of Read the line again moves out of its way, so the window is
+            asked what they are."""
             actions = getattr(parent, 'actions', None)
-            return actions[name].shortcut().toString() if name == 'record' and actions else shortcut_text(SPEC[name][2])
+            moves = name in ('record', 'again') and actions
+            return actions[name].shortcut().toString() if moves else shortcut_text(SPEC[name][2])
 
         sections = [(tr(title), [(tr(SPEC[name][0]).rstrip('.'), keys(name)) for name in names])
                     for title, names in SHORTCUT_GROUPS]

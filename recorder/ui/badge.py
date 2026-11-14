@@ -33,8 +33,10 @@ class RecordingBadge(QWidget):
         self.text = label('Recording', size=13, weight=QFont.Weight.DemiBold)
         layout.addWidget(self.text)
 
-    def show_for(self, seconds, key):
-        self.text.setText(f'Recording  {format_clock(seconds)[:5]}  ·  {key} stops')
+    def show_for(self, seconds, key, text=None):
+        """Show how long the take has run, or `text`: what a script run is doing, between its takes too."""
+        self.text.setText(text or f'Recording  {format_clock(seconds)[:5]}  ·  {key} stops')
+        self.setAccessibleName(self.text.text())
         if not self.isVisible():
             self.adjustSize()
             screen = QGuiApplication.primaryScreen()

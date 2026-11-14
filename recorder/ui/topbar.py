@@ -104,22 +104,32 @@ class TopBar(QWidget):
     # ---- state ----
 
     def refresh_recording(self):
-        capturing = self.session.capturing
+        capturing, run = self.session.capturing, self.session.run
         recording = capturing.recording
         stopping = capturing.finishing
-        if recording:
+        if run.active:                          # the record key ends a run, whatever it is doing
+            self.record.setText(f'{tr("End run")}      {self.record_key}')
+            self.record.setAccessibleName(tr('End the script run'))
+            self.record.setIcon(icons.icon('stop', 'red'))
+            tagged(self.record, kind='recording')
+        elif recording:
             self.record.setText(tr('Stopping...') if stopping else f'{tr("Stop")}      {self.record_key}')
             self.record.setAccessibleName(tr('Stop'))
             self.record.setIcon(icons.icon('stop', 'red'))
             tagged(self.record, kind='recording')
+        elif run.would_run:
+            self.record.setText(f'{tr("Start run")}      {self.record_key}')
+            self.record.setAccessibleName(tr('Start a script run'))
+            self.record.setIcon(icons.icon('record', 'red_ink'))
+            tagged(self.record, kind='record')
         else:
             self.record.setText(f'{tr("Record")}      {self.record_key}')
             self.record.setAccessibleName(tr('Record'))
             self.record.setIcon(icons.icon('record', 'red_ink'))
             tagged(self.record, kind='record')
         for widget in (self.source, self.device, self.channel):
-            widget.setEnabled(not recording)
-        self.arm.setEnabled(not recording)
+            widget.setEnabled(not recording and not run.active)
+        self.arm.setEnabled(not recording and not run.active)
         self.arm.setChecked(capturing.armed)
         self.clock.setStyleSheet(f'color: {PALETTE["red"]};' if recording else '')
 

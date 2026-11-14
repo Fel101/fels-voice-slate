@@ -147,6 +147,11 @@ is being drawn until they arrive.
   jobs for the take in front (`Jobs.front`) go first. A draft is dropped before it starts if its take has been discarded or
   a newer draft asked for (`wanted`), and closing drops everything queued, so it waits for nothing.
 - **The clock** is injected, so the recording state machine and the stop tail run in tests without sleeping.
+- **A script run** (`session/run.py`) is ticked right after the recording. It watches each take of a script line: once
+  `analysis.live_pause` has heard the voice in the loudness the capture keeps of each block, and the room has been quiet for
+  the pause chosen, it stops the take as Stop does. When the take ends it moves to the next line, counts in the next take
+  against the clock, or records the line again. It never keeps and never touches the permission: that stays with Keep
+  selected takes.
 
 ## Devices
 
@@ -289,7 +294,7 @@ None of these changes a kept clip, and none goes online.
 ## The window
 
 - **`session/bus.py`** carries topics (`takes`, `current`, `meta` (with the take whose text changed, when that is worth
-  saving), `edits`, `selection`, `playhead`, `recording`, `analysis` and so on). The window marks the parts that heard a
+  saving), `edits`, `selection`, `playhead`, `recording`, `run`, `analysis` and so on). The window marks the parts that heard a
   topic and redraws them once per event-loop turn (`MainWindow.flush`).
 - **`ui/actions.py`** defines every command once (`SPEC`: name, icon, shortcuts, tooltip). Toolbar buttons, menus and
   shortcuts all use the same `QAction`, so a command is enabled, disabled and described in one place.

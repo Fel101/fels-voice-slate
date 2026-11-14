@@ -246,6 +246,7 @@ class Capture:
         self._recording = False
         self._frames = 0
         self._columns = []                     # (frames so far, lowest, highest) per recorded block: the live waveform
+        self._loudness = []                    # (frames so far, RMS dBFS) per recorded block: when the voice was last heard
         self._spooled = 0                      # how many of the blocks new_blocks has handed out
         self.dropouts = 0                      # how many times the device said it lost audio during this take
         self._loudest = np.zeros(2)            # the highest peak so far on each of two inputs
@@ -282,6 +283,16 @@ class Capture:
         out[:, 0] /= self.rate
         return out.astype(np.float32)
 
+    def loudness(self):
+        """How loud what has been recorded is, pre-roll included: rows of (end second, RMS dBFS), one per block."""
+        with self._lock:
+            rows = list(self._loudness)
+        if not rows or not self.rate:
+            return np.zeros((0, 2))
+        out = np.array(rows, dtype=np.float64)
+        out[:, 0] /= self.rate
+        return out
+
     def _on_block(self, x, lost=False):
         """A block from the device. `lost` says the device lost audio just before it. The first block of a stream can say
         that about nothing but the stream starting, so it is not counted."""
@@ -300,6 +311,7 @@ class Capture:
                 self._frames += len(x)
                 if len(x):
                     self._columns.append((self._frames, *_span(x)))
+                    self._loudness.append((self._frames, levels[1]))
             elif self.pre_roll > 0:
                 self._ring.append(x)
                 self._ring_frames += len(x)
@@ -315,11 +327,12 @@ class Capture:
         with self._lock:
             self._blocks = list(self._ring)
             self._frames = self._ring_frames
-            self._columns, frames = [], 0
+            self._columns, self._loudness, frames = [], [], 0
             for block in self._blocks:                    # the pre-roll is part of the take, so it is drawn too
                 frames += len(block)
                 if len(block):
                     self._columns.append((frames, *_span(block)))
+                    self._loudness.append((frames, _mono_levels(block)[1]))
             self._ring.clear()
             self._ring_frames = 0
             self._spooled = 0

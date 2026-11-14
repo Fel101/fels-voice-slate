@@ -395,8 +395,8 @@ def test_a_key_of_another_command_is_refused_in_settings(qapp):
     dialog = dialog_mod.SettingsDialog({})
     dialog.record_key.setKeySequence(QKeySequence('Ctrl+Z'))
     assert 'Undo' in dialog.key_note.text() and not dialog.ok.isEnabled()
-    dialog.record_key.setKeySequence(QKeySequence('F8'))
-    assert dialog.ok.isEnabled() and dialog.values()['record_key'] == 'F8'
+    dialog.record_key.setKeySequence(QKeySequence('F7'))
+    assert dialog.ok.isEnabled() and dialog.values()['record_key'] == 'F7'
 
 
 def test_a_key_that_could_be_typed_is_refused_in_settings(qapp):

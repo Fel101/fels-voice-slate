@@ -5,6 +5,16 @@ the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **Reading a script hands-free.** Three options, each off until turned on and each remembered, under **Hands-free
+  reading...** (`Ctrl+Shift+H`): go to the next line when a take ends; end a take after a pause once the voice has been heard
+  (1.5 s by default); and start the next take by itself after a count-in shown on the screen (3 s by default). With the
+  count-in on, the record key starts a run through the script, and `Esc` or the record key ends it. `F8` records the line
+  just read once more, and keeps the take of it that was there. The program makes no sound, so nothing of the count-in
+  reaches a recording. A run only records: it never keeps a clip or ticks the permission box, and the microphone closes when
+  it ends unless it was armed before. The sign on top of other windows shows a run between its takes too.
+
 ### Changed
 
 - **Each microphone and output is listed once, by its full name.** The lists showed every device through each of Windows'

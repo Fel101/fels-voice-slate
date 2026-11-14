@@ -20,10 +20,12 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-STATES = ['edit', 'process', 'check', 'analyze', 'record', 'empty', 'compact', 'reading', 'script', 'light', 'settings', 'about',
-          'shortcuts', 'copy', 'manifest', 'dataset', 'speaker', 'keepmany']
-DIALOGS = ('settings', 'about', 'shortcuts', 'copy', 'manifest', 'dataset', 'speaker', 'keepmany')
-CHECKS = ['unreachable']        # drawn only when asked for with --only, to look at a state the documents do not show
+STATES = ['edit', 'process', 'check', 'analyze', 'record', 'empty', 'compact', 'reading', 'script', 'countin', 'light',
+          'settings', 'about', 'shortcuts', 'copy', 'manifest', 'dataset', 'speaker', 'keepmany', 'handsfree']
+DIALOGS = ('settings', 'about', 'shortcuts', 'copy', 'manifest', 'dataset', 'speaker', 'keepmany', 'handsfree')
+RUN = ('countin', 'runlisten', 'runheard')
+# drawn only when asked for with --only, to look at a state the documents do not show
+CHECKS = ['unreachable', 'runlisten', 'runheard']
 SAMPLE = ('The morning ferry left the harbour just as the fog began to lift from the water, and the gulls followed '
           'it out past the lighthouse.')
 SCRIPT = ('The morning ferry left the harbour just as the fog began to lift.\n'
@@ -201,6 +203,32 @@ def script_take(app, window):
     window.inspector.show_tab(window.inspector.SCRIPT_TAB)
 
 
+def run_take(app, window, state):
+    """A hands-free run through the script: the next line counted in, then recorded, before and after the voice is heard."""
+    import synthetic
+    from recorder import capture
+    session = window.session
+    seconds = {'countin': 0.1, 'runlisten': 0.7, 'runheard': 3.6}[state]
+
+    def opened(source, device, pre_roll, channel=None):
+        made = synthetic.SyntheticCapture(seconds)
+        made.recording = False                  # armed for the count-in, recording once it is over
+        return made
+
+    capture.open_capture = opened
+    session.script.load_text(SCRIPT)
+    session.script.step(1)
+    session.run.set_options(next_line=True, stop_after_pause=True, pause_seconds=1.5, auto_start=True, count_in=3)
+    session.record_pressed()
+    if state != 'countin':
+        session.run._deadline = 0.0             # the count-in is over
+        session.tick()
+        session.run.heard = state == 'runheard'
+    window.flush()
+    window._tick()
+    window._refresh_run()
+
+
 def save_picture(widget, path, scale):
     """Save a picture of the widget, `scale` times its size in logical pixels whatever the display's own scaling is."""
     from PySide6.QtCore import Qt
@@ -253,6 +281,7 @@ def main():
                 from PySide6.QtCore import Qt
 
                 from recorder import clean
+                from recorder.session import run
                 from recorder.ui import dialogs
                 clean.locate = lambda configured=None: Path(r'C:\Tools\ffmpeg\bin\ffmpeg.exe')   # no real paths in pictures
                 fake = {'root': r'C:\Users\you\Recordings\voice-clips', 'asr_language': 'en', 'tail_seconds': 0.5,
@@ -266,7 +295,9 @@ def main():
                           'manifest': lambda: dialogs.ManifestDialog('My voice'),
                           'dataset': lambda: dialogs.DatasetDialog('My voice'),
                           'speaker': lambda: dialogs.SpeakerDialog('Sam Rivera', release, True),
-                          'keepmany': lambda: dialogs.KeepManyDialog('My voice', [SimpleNamespace(meta=said)] * 12, said)}[state]()
+                          'keepmany': lambda: dialogs.KeepManyDialog('My voice', [SimpleNamespace(meta=said)] * 12, said),
+                          'handsfree': lambda: dialogs.HandsFreeDialog({**run.OPTIONS, 'next_line': True, 'stop_after_pause': True,
+                                                                        'auto_start': True}, 'F9')}[state]()
                 dialog.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)        # drawn, but never on the person's screen
                 dialog.show()
                 for _ in range(4):
@@ -295,6 +326,9 @@ def main():
                 window.timer.stop()
                 window._show_status('Recording. Press F9 or Stop when finished.')
                 render(window, app, out / 'record.png', size, args.scale)
+            elif state in RUN:
+                run_take(app, window, state)
+                render(window, app, out / f'{state}.png', size, args.scale)
             elif state == 'analyze':
                 analyze_take(app, window)
                 render(window, app, out / 'analyze.png', size, args.scale)

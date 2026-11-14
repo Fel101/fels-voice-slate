@@ -88,6 +88,10 @@ SPEC = {
     'next_line': ('Next script line', 'chevron_right', ['Ctrl+Down'], 'Go to the next line of the script', False),
     'next_open': ('Next line to record', None, ['Ctrl+Shift+Down'], 'Go to the next line of the script that has no kept clip',
                   False),
+    'again': ('Read the line again', None, ['F8'], 'Record the script line just read once more. Its take stays, so you can '
+                                                    'choose between them', False),
+    'hands_free': ('Hands-free reading...', None, ['Ctrl+Shift+H'], 'Go to the next line, end a take after a pause, and '
+                                                                     'count in the next take, by themselves', False),
     # the program
     'settings': ('Settings...', 'settings', ['Ctrl+,'], 'Output folder, record key, FFmpeg and draft transcripts', False),
     'shortcuts': ('Keyboard shortcuts', None, ['F1'], 'List every shortcut', False),

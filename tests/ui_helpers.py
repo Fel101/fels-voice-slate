@@ -67,6 +67,7 @@ class StubDialogs:
         self.dataset_answer = None               # (scope, layout, rate, from originals)
         self.settings_answer = None
         self.settings_seen = None
+        self.hands_free_answer = None             # the hands-free options chosen, or None to back out
 
     def notice(self, level, title, text):
         # `busy`: a wait cursor was still showing when the dialog opened, so it would sit over the dialog
@@ -125,6 +126,10 @@ class StubDialogs:
     def settings(self, values):
         self.settings_seen = dict(values)
         return self.settings_answer
+
+    def hands_free(self, values, record_key):
+        self.asked.append(('hands_free', SimpleNamespace(values=dict(values), record_key=record_key)))
+        return self.hands_free_answer
 
     def about(self):
         self.shown.append('about')

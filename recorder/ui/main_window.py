@@ -9,7 +9,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from PySide6.QtCore import QByteArray, QSize, QStandardPaths, Qt, QTimer, Signal
-from PySide6.QtGui import QAccessible, QAccessibleAnnouncementEvent, QGuiApplication
+from PySide6.QtGui import QAccessible, QAccessibleAnnouncementEvent, QGuiApplication, QKeySequence
 from PySide6.QtWidgets import QApplication, QLabel, QMainWindow, QMenu, QWidget
 
 from .. import asr_setup, audio_import, dataset, launch, manifest, share, transcript
@@ -19,7 +19,7 @@ from ..clean import CleanError
 from ..core import render
 from ..core.edits import describe
 from ..i18n import tr
-from ..session import Session
+from ..session import Session, run
 from ..session.measure import take_key
 from ..store import KeepBlocked, Relocation, TrashUnavailable, clean_label
 from .actions import SPEC, Actions, shortcut_text
@@ -88,7 +88,7 @@ class MainWindow(QMainWindow):
         self._connect()
         self._restore_geometry()
         self.badge = RecordingBadge(self)
-        self.badge.stopRequested.connect(self.session.capturing.stop)
+        self.badge.stopRequested.connect(self.session.record_pressed)          # stops a take, or ends a script run
         self._apply_record_key()
         translate_tree(self)
 
@@ -152,7 +152,7 @@ class MainWindow(QMainWindow):
         for group in (('settings', 'import_recording', 'new_speaker', 'rename_speaker', 'speaker_details', 'delete_speaker'),
                       ('move_take', 'save_copy', 'export_manifest', 'export_dataset', 'split_take'),
                       ('keep_selected', 'discard_selected', 'move_selected'),
-                      ('load_script', 'clear_script', 'open_folder')):
+                      ('load_script', 'hands_free', 'clear_script', 'open_folder')):
             for name in group:
                 menu.addAction(a[name])
             menu.addSeparator()
@@ -167,7 +167,7 @@ class MainWindow(QMainWindow):
     def _connect(self):
         s, a = self.session, self.actions
         capturing, editor, transport, workspace = s.capturing, s.editor, s.transport, s.workspace
-        a.record.triggered.connect(capturing.toggle)
+        a.record.triggered.connect(s.record_pressed)
         a.arm.triggered.connect(lambda: capturing.toggle_arm())
         a.play.triggered.connect(self.toggle_play)
         a.stop.triggered.connect(transport.stop)
@@ -217,6 +217,8 @@ class MainWindow(QMainWindow):
         a.prev_line.triggered.connect(lambda: s.script.step(-1))
         a.next_line.triggered.connect(lambda: s.script.step(1))
         a.next_open.triggered.connect(self.inspector.script._next)
+        a.again.triggered.connect(s.run.again)
+        a.hands_free.triggered.connect(self.hands_free)
         a.next_take.triggered.connect(lambda: self.step_take(1))
         a.prev_take.triggered.connect(lambda: self.step_take(-1))
         a.split_take.triggered.connect(self.split_take)
@@ -251,6 +253,7 @@ class MainWindow(QMainWindow):
         panel.listen.currentChanged.connect(lambda i: transport.set_listen(('original', 'edited')[i]))
         panel.script.previousRequested.connect(lambda: s.script.step(-1))
         panel.script.nextRequested.connect(lambda: s.script.step(1))
+        panel.script.handsFreeRequested.connect(self.hands_free)
         panel.words.wordsPicked.connect(editor.select_words)
         panel.words.wordRestored.connect(editor.restore_word)
         for timeline in (panel.waveform, panel.spectrogram):
@@ -343,7 +346,7 @@ class MainWindow(QMainWindow):
         panel = self.editor_panel
         if 'speakers' in topics:
             self.library.refresh_speakers()
-        elif 'recording' in topics:
+        elif topics & {'recording', 'run'}:
             self.library.refresh_enabled()
         if 'devices' in topics:
             self.topbar.refresh_devices()
@@ -391,8 +394,10 @@ class MainWindow(QMainWindow):
         if 'transport' in topics:
             self.topbar.refresh_transport()
             panel.listen.set_current(0 if s.transport.listen == 'original' else 1)
-        if topics & {'script', 'current', 'recording', 'takes'}:
+        if topics & {'script', 'current', 'recording', 'takes', 'run', 'settings'}:
             panel.script.refresh()
+        if topics & {'run', 'recording', 'script', 'settings'}:
+            self._refresh_run()
         if topics & {'script', 'takes'}:
             self.inspector.refresh_script()
         if topics & {'current', 'edits', 'selection', 'meta', 'recording'}:
@@ -458,9 +463,19 @@ class MainWindow(QMainWindow):
                                       f'{tr("Choose a speech recognizer in Settings (Ctrl+,). Settings file:")} '
                                       f'{self.session.settings_file}')
 
+    def _refresh_run(self):
+        """The record button, the large state of hands-free reading, and an empty live view while a run counts in."""
+        s = self.session
+        self.topbar.refresh_recording()
+        live = self.editor_panel.live
+        live.banner.show_state(s.run.state(), s.run.active, self._record_key())
+        live.set_counting(s.run.phase == 'counting')
+        if s.run.phase == 'counting':
+            live.set_state(None, 0.0, s.workspace.purpose)
+
     def _update_mode(self):
         s = self.session
-        if s.capturing.recording:
+        if s.capturing.recording or s.run.active:
             mode, side = EditorPanel.LIVE, Inspector.RECORDING
         elif s.current is not None:
             mode, side = EditorPanel.EDIT, Inspector.REVIEW
@@ -475,7 +490,7 @@ class MainWindow(QMainWindow):
     def _update_actions(self):
         s, a = self.session, self.actions
         take, editor = s.current, s.editor
-        idle = not s.capturing.recording and not s.batch.running
+        idle = not s.capturing.recording and not s.batch.running and not s.run.active
         has_take = take is not None and idle
         chosen = self.library.selected_takes()
         has_sel = has_take and editor.sel is not None
@@ -501,10 +516,11 @@ class MainWindow(QMainWindow):
             'move_take': has_take and not take.unsaved and len(s.workspace.speakers) > 1,
             'save_copy': has_take and take.kept,
             'export_manifest': idle and s.workspace.speaker is not None,
-            'prev_line': bool(s.script.lines) and s.script.index > 0,
-            'next_line': bool(s.script.lines) and s.script.index < len(s.script.lines) - 1,
-            'next_open': bool(s.script.lines),
-            'clear_script': bool(s.script.lines),
+            'prev_line': idle and bool(s.script.lines) and s.script.index > 0,
+            'next_line': idle and bool(s.script.lines) and s.script.index < len(s.script.lines) - 1,
+            'next_open': idle and bool(s.script.lines),
+            'clear_script': bool(s.script.lines) and not s.run.active,
+            'again': bool(s.script.lines) and not s.batch.running, 'hands_free': idle,
         }
         for name, value in enabled.items():
             a[name].setEnabled(bool(value))
@@ -516,6 +532,9 @@ class MainWindow(QMainWindow):
         s = self.session
         take = s.current
         if s.capturing.recording:
+            return
+        if s.run.active:
+            self.topbar.set_time(0.0, tr('script run'))
             return
         if take is None:
             self.topbar.set_time(0.0, tr('no take'))
@@ -543,7 +562,9 @@ class MainWindow(QMainWindow):
             self.topbar.meter.set_levels(*capturing.level)
             self._refresh_badge()
             return
-        if self.badge.isVisible():
+        if s.run.active:                            # between the takes of a run the microphone is open: the sign stays
+            self._refresh_badge()
+        elif self.badge.isVisible():
             self.badge.hide()
         if capturing.armed:
             self.topbar.meter.set_levels(*capturing.level)
@@ -562,16 +583,27 @@ class MainWindow(QMainWindow):
         return settings.record_key(settings.load(self.session.settings_file))
 
     def _refresh_badge(self):
-        """A recording that runs while this window is not the one in front has a sign of its own on top of everything."""
+        """A recording that runs while this window is not the one in front has a sign of its own on top of everything, and
+        so does a script run, whose microphone is open between its takes too."""
         if self.isActiveWindow():
             self.badge.hide()
-        else:
-            self.badge.show_for(self.session.capturing.elapsed, self._record_key())
+            return
+        s, key = self.session, self._record_key()
+        text = None
+        if s.run.phase == 'counting':
+            text = tr('Script run  ·  next line in {seconds}  ·  {key} ends').format(seconds=s.run.count_left, key=key)
+        elif s.run.active:
+            text = tr('Recording line {line}  {time}  ·  {key} ends the run').format(
+                line=s.script.index + 1, time=format_clock(s.capturing.elapsed)[:5], key=key)
+        self.badge.show_for(s.capturing.elapsed, key, text)
 
     def _apply_record_key(self):
         """Put the record key from the settings on the Record command and everything that names it."""
         key = self._record_key()
         self.actions.set_record_key(key)
+        again = run.again_key(key)
+        self.actions.again.setShortcut(QKeySequence(again))
+        self.actions.again.setToolTip(f'{tr(SPEC["again"][3])} ({again})')
         self.topbar.record_key = key
         self.topbar.record.setToolTip(self.actions.record.toolTip())
         self.topbar.refresh_recording()
@@ -605,10 +637,18 @@ class MainWindow(QMainWindow):
     # ---- commands ----------------------------------------------------------------------------------------------------
 
     def _escape(self):
-        if self.session.transport.active:
+        if self.session.run.active:
+            self.session.run.end()
+        elif self.session.transport.active:
             self.session.transport.stop()
         else:
             self.session.editor.clear_selection()
+
+    def hands_free(self):
+        s = self.session
+        answer = self.dialogs.hands_free(dict(s.run.options), self._record_key())
+        if answer is not None:
+            s.run.set_options(**answer)
 
     def _clicked(self, t):
         self.session.editor.clear_selection()
@@ -648,6 +688,9 @@ class MainWindow(QMainWindow):
             self.session.editor.gain_selection(value)
 
     def _take_picked(self, take):
+        if self.session.run.active:
+            self.session.bus.status('End the script run before opening another take.')
+            return
         if self.session.capturing.recording:
             self.session.bus.status('Stop the recording before opening another take.')
             return
@@ -840,6 +883,9 @@ class MainWindow(QMainWindow):
         said in a notice."""
         s = self.session
         paths = list(paths)
+        if paths and s.run.active:
+            s.bus.status('End the script run before importing.')
+            return
         if not paths or s.capturing.recording:
             return
         if s.batch.running:                         # dropped on the window while something else is under way

@@ -24,8 +24,9 @@ what is in it and whether you had the right to record it.
   several inputs you choose which one.
 - **Import** recordings, several at once, with **Import** or by dragging them onto the window: WAV, FLAC, Ogg, MP3 and AIFF,
   and with FFmpeg also the M4A that phones and Windows' Sound Recorder make, and the sound of a video.
-- **Long sessions.** A script shows one prompt per take, remembers your place, and shows which lines have a kept clip. Keys
-  walk the takes, and several takes can be kept, discarded or moved together.
+- **Long sessions.** A script shows one prompt per take, remembers your place, and shows which lines have a kept clip. It can
+  be read hands-free: the next line comes when a take ends, a take ends after a pause, and the next one starts after a count-in
+  on the screen. Keys walk the takes, and several takes can be kept, discarded or moved together.
 - **Reading check** (needs draft transcripts). A take read from a script is compared with what the recognizer heard, and the
   places that differ are shown.
 - **Never loses a take.** A take is written to disk while you record it, and the original recording is written the moment

@@ -43,6 +43,7 @@ class Capturing:
         self.channel = None                 # which input to record, from 0; None mixes the first two
         self.interrupted = False
         self.finishing = False
+        self.ended_by = None                # how the last take ended: 'stop', 'limit' or 'device'; None if it was not saved
         self.state = 'idle'
         self.level = (-120.0, -120.0)       # peak and RMS in dBFS, from the last tick
         self.elapsed = 0.0
@@ -148,6 +149,14 @@ class Capturing:
         """Whether a remembered name is the chosen device's, such as one kept by 0.6 with its interface after it."""
         return self.device is not None and devices.match(name, self.devices) == self.device
 
+    def keep_armed_after_take(self, armed):
+        """Whether the input stays open after the take being recorded: a script run that opened it lets it go at its end."""
+        self._stay_armed = armed
+
+    def release_input(self):
+        """Close an input that is open but not recording."""
+        self._release_idle()
+
     def _release_idle(self):
         if self.capture is not None and not self.recording:
             self.close_capture()
@@ -201,14 +210,21 @@ class Capturing:
             return
         self._set_state('armed')
 
+    def nowhere_to_save(self):
+        """Say so and return True when the recordings folder cannot be reached: before the microphone opens, since there
+        would be nowhere to save a take."""
+        if self.workspace.check_root() is None:
+            return False
+        self.bus.notice('error', 'Could not start recording', self.workspace.out_of_reach_text(
+            tr('Your recordings folder cannot be reached, so there is nowhere to save a take: {folder}').format(
+                folder=self.workspace.lib.root)))
+        return True
+
     def start(self):
         if self.recording:
             return False
         self._cancel_stop()
-        if self.workspace.check_root() is not None:     # before the microphone opens: there would be nowhere to save the take
-            self.bus.notice('error', 'Could not start recording', self.workspace.out_of_reach_text(
-                tr('Your recordings folder cannot be reached, so there is nowhere to save a take: {folder}').format(
-                    folder=self.workspace.lib.root)))
+        if self.nowhere_to_save():
             return False
         self._stay_armed = self.armed
         try:
@@ -257,7 +273,7 @@ class Capturing:
         elif self.elapsed >= self.workspace.purpose.record_limit:
             rules = self.workspace.purpose
             self.finish_take(message=f'Stopped at {rules.record_limit:g} s, the longest recording for {rules.a_name}. '
-                                     'Trim the take or split it at its pauses.')
+                                     'Trim the take or split it at its pauses.', reason='limit')
         elif self._stop is not None:
             pending, deadline = self._stop
             if pending is not capture:
@@ -295,11 +311,12 @@ class Capturing:
             self._set_state('error')
             self.bus.status(f'Capture error: {error}. The take could not be saved: {e}')
 
-    def finish_take(self, message=None):
+    def finish_take(self, message=None, reason='stop'):
         self._cancel_stop()
         capture = self.capture
         if capture is None or not capture.recording:
             return None
+        self.ended_by = None
         self._write_spool(capture)
         samples = capture.stop()
         close_error = capture.close_error
@@ -315,6 +332,7 @@ class Capturing:
         if take is None:
             self._set_state('idle')
             return None
+        self.ended_by = 'device' if self.interrupted else reason
         self._set_state('interrupted' if self.interrupted else 'stopped')
         if take.unsaved:
             self.bus.status(f'The original could not be written to disk ({take.save_error}). The take is still in '

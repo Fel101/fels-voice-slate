@@ -17,8 +17,9 @@ ROOT = Path(__file__).resolve().parent.parent
 FILES = [*sorted((ROOT / 'recorder' / 'ui').glob('*.py')), ROOT / 'recorder' / 'session' / 'capturing.py',
          ROOT / 'recorder' / 'session' / 'workspace.py', ROOT / 'recorder' / 'session' / 'editor.py',
          ROOT / 'recorder' / 'session' / 'transport.py', ROOT / 'recorder' / 'session' / 'drafts.py',
-         ROOT / 'recorder' / 'session' / 'advisor.py', ROOT / 'recorder' / 'session' / 'script.py']
-CALLS = {'label', 'caption', 'button', 'chip', 'set_chip', 'setToolTip', 'setPlaceholderText', 'setText', 'setWindowTitle',
+         ROOT / 'recorder' / 'session' / 'advisor.py', ROOT / 'recorder' / 'session' / 'script.py',
+         ROOT / 'recorder' / 'session' / 'run.py']
+CALLS = {'end', 'label', 'caption', 'button', 'chip', 'set_chip', 'setToolTip', 'setPlaceholderText', 'setText', 'setWindowTitle',
          'addRow', 'addItem', 'QCheckBox', 'QPushButton', 'QLabel', 'notice', 'confirm', 'ask_text', 'choose_item', 'addAction',
          'addMenu', 'setAccessibleName', 'setAccessibleDescription', 'set_tooltips', 'Segmented', 'status', 'tr', 'Step',
          'setStatusTip', 'StepCard', 'choose_file', 'choose_files', 'choose_folder', 'choose_save_file', 'add_note', '_field',
