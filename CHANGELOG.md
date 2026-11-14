@@ -23,6 +23,10 @@ the project uses [Semantic Versioning](https://semver.org/).
   several takes are selected, how long those are. The Script tab says what share of the lines have a kept clip and how
   long those clips are, and the manifest and dataset dialogs say how many clips the choice holds and how long they are.
   The totals come from the sidecars and from what the takes hold: no audio is read to add them up.
+- **A check of the room and the level before a session.** **Check the room and level...** in the gear menu listens to
+  three seconds of quiet and then one spoken sentence, and says in plain words whether the room is quiet enough and whether
+  the microphone is set too low or too high, with what to change, by the Check tab's own measures and limits. Nothing it
+  hears is written to disk, and the sound is let go once it is measured.
 
 ### Changed
 

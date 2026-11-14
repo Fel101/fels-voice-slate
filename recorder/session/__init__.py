@@ -30,6 +30,7 @@ from .capturing import Capturing
 from .drafts import Drafts
 from .editor import Editor
 from .measure import Measurements
+from .roomcheck import RoomCheck
 from .run import ScriptRun
 from .script import FILE_NAME, Script
 from .transport import Transport
@@ -52,6 +53,7 @@ class Session:
         self.editor = Editor(self.bus, self.workspace)
         self.transport = Transport(self.bus, self.workspace, self.editor, player, clock)
         self.run = ScriptRun(self.bus, self.workspace, self.script, self.capturing, self.settings_file, clock)
+        self.room = RoomCheck(self.bus, self.workspace, self.capturing, clock)
         self.transport.set_output(data.get('output_device'), settings.every_interface(data))
         self.drafts = Drafts(self.bus, self.workspace, self.jobs, self.settings_file, clock)
         self.autosave = Autosave(self.bus, self.workspace, clock)
@@ -98,6 +100,10 @@ class Session:
             self.run.tick()
         except Exception as e:                  # a fault in the run ends it; the take going on is the recording's own
             self.run.end(f'The script run has ended: {e}')
+        try:
+            self.room.tick()
+        except Exception as e:                  # a fault in the room check ends it, and lets what it heard go
+            self.room.end(f'The room check has stopped: {e}')
         for name, step in (('Playback', self.transport.tick), ('Draft transcript', self.drafts.tick),
                            ('Autosave', self.autosave.tick), ('Background task', self.jobs.drain),
                            ('Batch', self.batch.tick)):
@@ -124,8 +130,10 @@ class Session:
 
     def record_pressed(self):
         """The record key: start or stop a take. With the count-in on and a script loaded it starts a script run, and
-        during a run it ends the run."""
-        if self.run.active:
+        during a run it ends the run. During a room check it ends the check, which has the microphone."""
+        if self.room.active:
+            self.room.end()
+        elif self.run.active:
             self.run.end()
         elif self.run.would_run and not self.capturing.recording:
             self.run.start()
@@ -152,6 +160,7 @@ class Session:
         try:
             self.batch.cancel()
             self.run.end()
+            self.room.end()
             self.transport.stop()
             self.capturing.finish_take()
             self.capturing.close_capture()

@@ -157,6 +157,12 @@ is being drawn until they arrive.
   the pause chosen, it stops the take as Stop does. When the take ends it moves to the next line, counts in the next take
   against the clock, or records the line again. It never keeps and never touches the permission: that stays with Keep
   selected takes.
+- **The room check** (`session/roomcheck.py`) is ticked after the script run. It opens the microphone with a Capture of its
+  own, not through the recording, so no spool is written and no take is made, and hands the recording's input back armed if
+  it was. It moves on by the audio that arrives (three seconds of room, then the sentence until `live_pause` hears it end)
+  and judges both parts with `analysis.room_check`, which measures them as the Check tab measures a take and ranks them by
+  the same named limits (`rank_speech`, `rank_noise`, `PEAK_OK_DBFS`, `CLIPPED_MAX`). Only that result is kept: the samples
+  and the Capture are let go as soon as it is worked out, and a test holds the Capture by a weak reference to prove it.
 
 ## Devices
 
@@ -299,7 +305,7 @@ None of these changes a kept clip, and none goes online.
 ## The window
 
 - **`session/bus.py`** carries topics (`takes`, `current`, `meta` (with the take whose text changed, when that is worth
-  saving), `edits`, `selection`, `playhead`, `recording`, `run`, `analysis` and so on). The window marks the parts that heard a
+  saving), `edits`, `selection`, `playhead`, `recording`, `run`, `room`, `analysis` and so on). The window marks the parts that heard a
   topic and redraws them once per event-loop turn (`MainWindow.flush`).
 - **`ui/actions.py`** defines every command once (`SPEC`: name, icon, shortcuts, tooltip). Toolbar buttons, menus and
   shortcuts all use the same `QAction`, so a command is enabled, disabled and described in one place.

@@ -29,6 +29,7 @@ from .editor_panel import EditorPanel
 from .inspector import Inspector
 from .library import LibraryPanel
 from .palette import PALETTE
+from .roomcheck import RoomCheckDialog
 from .topbar import TopBar
 from .translate import translate_tree
 from .widgets import ElidedLabel, button, format_clock, hbox, label, vbox
@@ -63,6 +64,7 @@ class MainWindow(QMainWindow):
         self._shut = False                  # set when the window has closed for good
         self._last_head = None
         self._edited_seconds = 0.0
+        self.room_dialog = None                 # the room and level check, made the first time it is asked for
         self._errors_shown = set()
         self.setWindowTitle(settings.APP_NAME)
         self.setMinimumSize(MIN_SIZE)
@@ -157,6 +159,7 @@ class MainWindow(QMainWindow):
                 menu.addAction(a[name])
             menu.addSeparator()
         menu.addAction(a.refresh_devices)
+        menu.addAction(a.room_check)
         menu.addSeparator()
         menu.addAction(a.shortcuts)
         menu.addAction(a.diagnostics)
@@ -168,6 +171,7 @@ class MainWindow(QMainWindow):
         s, a = self.session, self.actions
         capturing, editor, transport, workspace = s.capturing, s.editor, s.transport, s.workspace
         a.record.triggered.connect(s.record_pressed)
+        a.room_check.triggered.connect(self.room_check)
         a.arm.triggered.connect(lambda: capturing.toggle_arm())
         a.play.triggered.connect(self.toggle_play)
         a.stop.triggered.connect(transport.stop)
@@ -348,8 +352,12 @@ class MainWindow(QMainWindow):
         panel = self.editor_panel
         if 'speakers' in topics:
             self.library.refresh_speakers()
-        elif topics & {'recording', 'run'}:
+        elif topics & {'recording', 'run', 'room'}:
             self.library.refresh_enabled()
+        if 'room' in topics:
+            self.topbar.refresh_recording()
+        if topics & {'room', 'recording', 'devices'} and self.room_dialog is not None:
+            self.room_dialog.refresh()          # whether it can start follows the recording and the source
         if 'devices' in topics:
             self.topbar.refresh_devices()
         if 'current' in topics:
@@ -494,7 +502,7 @@ class MainWindow(QMainWindow):
     def _update_actions(self):
         s, a = self.session, self.actions
         take, editor = s.current, s.editor
-        idle = not s.capturing.recording and not s.batch.running and not s.run.active
+        idle = not s.capturing.recording and not s.batch.running and not s.run.active and not s.room.active
         has_take = take is not None and idle
         chosen = self.library.selected_takes()
         has_sel = has_take and editor.sel is not None
@@ -525,7 +533,8 @@ class MainWindow(QMainWindow):
             'next_line': idle and bool(s.script.lines) and s.script.index < len(s.script.lines) - 1,
             'next_open': idle and bool(s.script.lines),
             'clear_script': bool(s.script.lines) and not s.run.active,
-            'again': bool(s.script.lines) and not s.batch.running, 'hands_free': idle,
+            'again': bool(s.script.lines) and not s.batch.running and not s.room.active, 'hands_free': idle,
+            'room_check': idle or s.room.active,
         }
         for name, value in enabled.items():
             a[name].setEnabled(bool(value))
@@ -567,6 +576,10 @@ class MainWindow(QMainWindow):
             self.topbar.meter.set_levels(*capturing.level)
             self._refresh_badge()
             return
+        if s.room.active:                           # the check has the microphone: its meter is live
+            self.topbar.meter.set_levels(*capturing.level)
+            if self.room_dialog is not None:
+                self.room_dialog.tick()
         if s.run.active:                            # between the takes of a run the microphone is open: the sign stays
             self._refresh_badge()
         elif self.badge.isVisible():
@@ -642,12 +655,23 @@ class MainWindow(QMainWindow):
     # ---- commands ----------------------------------------------------------------------------------------------------
 
     def _escape(self):
-        if self.session.run.active:
+        if self.session.room.active:
+            self.session.room.end()
+        elif self.session.run.active:
             self.session.run.end()
         elif self.session.transport.active:
             self.session.transport.stop()
         else:
             self.session.editor.clear_selection()
+
+    def room_check(self):
+        """Show the room and level check, which does not block the window. It starts when the person presses Start."""
+        if self.room_dialog is None:
+            self.room_dialog = RoomCheckDialog(self.session, self)
+        self.room_dialog.refresh()
+        self.room_dialog.show()
+        self.room_dialog.raise_()
+        self.room_dialog.activateWindow()
 
     def hands_free(self):
         s = self.session

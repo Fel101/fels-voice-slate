@@ -123,6 +123,31 @@ sidecar.
 
 Use **Re-record** to throw a take away (it goes to the Recycle Bin) and start another straight away.
 
+### Checking the room and the level
+
+Before a session, **Check the room and level...** in the gear menu tells you whether the room is quiet enough and whether
+the microphone is set right, before you have recorded anything to find out. Press **Start**, stay quiet for three seconds
+while it listens to the room, then read the sentence it shows, at your usual distance and loudness. It stops by itself a
+second after you finish.
+
+![The room and level check](images/roomcheck.png)
+
+It says, in plain words and with what to change:
+
+- **The microphone level**: how loud your voice was against the target of -20 dB. Too low, and Normalize has to raise it
+  later, which raises the noise of the room with it; too high, and the loudest words come close to clipping. The input level
+  is in Windows Settings > System > Sound, under Input.
+- **The room**: how loud the room will measure once your voice is at the target level. A quiet voice in a quiet room can still
+  leave the room too loud, once the voice is raised.
+- **The loudest words**: whether they clipped, or came close to full scale.
+- **Mains hum**, when it hears it in the quiet.
+
+It judges by the measures and limits of the [Check tab](#check), so what it says is what the Check tab would say of a take
+recorded just then. It uses the microphone chosen beside Record, and closes it when it is done, or opens it again if it was
+armed. **Nothing it hears is saved**: no file is written and no take is made, and once it has worked out the measures, the
+sound is let go. `Esc`, **Stop**, closing its window or the record key stop it at any time. It needs the **Microphone**
+source, and waits while a recording runs.
+
 ## Script mode
 
 Script mode shows one prompt per take, which is handy for reading a list of sentences.

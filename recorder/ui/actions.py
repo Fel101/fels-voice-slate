@@ -84,6 +84,9 @@ SPEC = {
     'export_dataset': ('Export dataset...', None, [], 'Gather the kept clips in one new folder, as clips with their sidecars or '
                                                       'in the LJSpeech layout, at the sample rate you choose', False),
     'refresh_devices': ('Refresh devices', None, [], 'Look for microphones and outputs again', False),
+    'room_check': ('Check the room and level...', None, [], 'Listen to the room and to your voice for a few seconds, and say '
+                                                            'whether the room is quiet enough and the microphone level '
+                                                            'right. Nothing it hears is kept', False),
     'open_folder': ('Open output folder', 'folder', ['Ctrl+Shift+O'], 'Show the output folder in Explorer', False),
     'load_script': ('Load script...', None, ['Ctrl+Shift+L'], 'Read prompts from a text file, one line per take', False),
     'clear_script': ('Clear script', None, [], 'Stop using the script', False),

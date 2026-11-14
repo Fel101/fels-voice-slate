@@ -472,6 +472,26 @@ def split_ranges(x, rate, shortest, keep_min, keep_max, energy=None):
 Check = namedtuple('Check', 'key label value status hint')     # status: ok, warn, bad or info
 
 
+# The limits of the Check tab, which the room check uses too, so that the two never disagree.
+SPEECH_OK_DB = 3.0              # the voiced level this close to ac.TARGET_VOICED_DB is right
+SPEECH_WARN_DB = 8.0            # and this close is worth a note
+PEAK_OK_DBFS = -1.0             # a peak above this leaves no headroom
+CLIPPED_MAX = 0.001             # more of the samples than this at full scale is clipping
+NOISE_OK_DB = -55.0             # a noise floor at or below this is quiet
+NOISE_WARN_DB = -45.0           # and at or below this is worth a note
+
+
+def rank_speech(speech_db):
+    """'ok', 'warn' or 'bad' for a voiced level, by its distance from the target."""
+    off = abs(speech_db - ac.TARGET_VOICED_DB)
+    return 'ok' if off <= SPEECH_OK_DB else 'warn' if off <= SPEECH_WARN_DB else 'bad'
+
+
+def rank_noise(floor_db):
+    """'ok', 'warn' or 'bad' for a noise floor."""
+    return 'ok' if floor_db <= NOISE_OK_DB else 'warn' if floor_db <= NOISE_WARN_DB else 'bad'
+
+
 def quality_report(x, rate=ac.EXPORT_RATE, recorded_clipped=0.0, purpose=None):
     """The measurements of a finished clip, each with a status, in the order the Check tab shows them.
 
@@ -498,19 +518,17 @@ def quality_report(x, rate=ac.EXPORT_RATE, recorded_clipped=0.0, purpose=None):
                    lambda v: rules.min_seconds <= v <= rules.max_seconds),
               f'Between {rules.min_seconds:g} and {rules.max_seconds:g} s can be kept; {rules.best_from:g} to '
               f'{rules.best_to:g} s works best.'),
-        Check('speech', 'Speech level', f'{speech:.1f} dB',
-              rank(abs(speech - ac.TARGET_VOICED_DB), lambda v: v <= 3, lambda v: v <= 8),
+        Check('speech', 'Speech level', f'{speech:.1f} dB', rank_speech(speech),
               f'Loudness of the voiced parts. The target is {ac.TARGET_VOICED_DB:.0f} dB; Normalize sets it.'),
         Check('peak', 'Peak', f"{stats['peak_dbfs']:.1f} dBFS",
-              'ok' if stats['peak_dbfs'] <= -1.0 else 'warn',
+              'ok' if stats['peak_dbfs'] <= PEAK_OK_DBFS else 'warn',
               'Peaks above -1 dBFS leave no headroom; the limiter keeps them under the ceiling.'),
-        Check('clipping', 'Clipping', f'{clipped * 100:.3f}% of samples', 'ok' if clipped <= 0.001 else 'bad',
+        Check('clipping', 'Clipping', f'{clipped * 100:.3f}% of samples', 'ok' if clipped <= CLIPPED_MAX else 'bad',
               'More than 0.1% of samples at full scale is flagged as clipped. The recording counts too: gain and the '
               'limiter can hide clipping, but not repair it.'),
         Check('loudness', 'Loudness', f'{loudness_lufs(x, rate):.1f} LUFS', 'info',
               'Integrated loudness (ITU-R BS.1770). For comparison only.'),
-        Check('noise', 'Noise floor', f'{floor:.1f} dB',
-              rank(floor, lambda v: v <= -55, lambda v: v <= -45),
+        Check('noise', 'Noise floor', f'{floor:.1f} dB', rank_noise(floor),
               f'Level of the quietest tenth of the clip. Speech is about {max(speech - floor, 0):.0f} dB above it.'),
         Check('bandwidth', 'Bandwidth', f'{band / 1000:.1f} kHz',
               rank(band, lambda v: v >= 4500, lambda v: v >= 3500),
@@ -527,3 +545,35 @@ def quality_report(x, rate=ac.EXPORT_RATE, recorded_clipped=0.0, purpose=None):
               'More than 40% pauses leaves little speech.'),
     ]
     return rows
+
+
+# ---- the room and the level, before a session -------------------------------------------------------------------------
+
+Room = namedtuple('Room', 'heard floor_db speech_db floor_at_target_db peak_dbfs clipped hum room level headroom')
+
+
+def room_check(quiet, spoken, rate, out_rate=ac.EXPORT_RATE):
+    """What a few seconds of the room and then a spoken sentence say, judged by the Check tab's limits.
+
+    `quiet` and `spoken` are the two parts of the recording, mono, at `rate`. The whole of it is measured as the Check tab
+    measures a take of it, at `out_rate`, so that the two cannot disagree; peaks and clipping are read on the recording
+    itself, as the Check tab counts the recording's clipping too, and hum in the quiet part. The room is judged where it
+    will be once the voice is at the target level, as Normalize puts it: a quiet voice is raised, and the room with it.
+    `room`, `level` and `headroom` are 'ok', 'warn' or 'bad'; with no voice heard, `level` is 'bad' and `room` is judged
+    as it is.
+    """
+    quiet, spoken = np.asarray(quiet, dtype=np.float32), np.asarray(spoken, dtype=np.float32)
+    whole = np.concatenate([quiet, spoken])
+    stats = ac.measure(whole, rate)
+    x = ac.resample(whole, rate, out_rate) if rate != out_rate else whole
+    q = ac.resample(quiet, rate, out_rate) if rate != out_rate else quiet
+    energy = ac.frame_energy(x, out_rate)
+    floor = noise_floor_db(x, out_rate, energy)
+    speech = ac.voiced_rms_db(x, out_rate, energy) if len(x) else -240.0
+    heard = speech > max(floor + LIVE_ABOVE_ROOM_DB, LIVE_FLOOR_DB)
+    at_target = round(floor + (ac.TARGET_VOICED_DB - speech), 1) if heard else floor
+    clipped = stats['clipped_fraction']
+    headroom = 'bad' if clipped > CLIPPED_MAX else 'ok' if stats['peak_dbfs'] <= PEAK_OK_DBFS else 'warn'
+    return Room(heard=heard, floor_db=floor, speech_db=round(speech, 1), floor_at_target_db=at_target,
+                peak_dbfs=stats['peak_dbfs'], clipped=clipped, hum=detect_hum(q, out_rate), room=rank_noise(at_target),
+                level=rank_speech(speech) if heard else 'bad', headroom=headroom if heard else 'ok')

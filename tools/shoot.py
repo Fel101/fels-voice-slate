@@ -21,11 +21,12 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 STATES = ['edit', 'process', 'check', 'analyze', 'record', 'empty', 'compact', 'reading', 'script', 'countin', 'light',
-          'settings', 'about', 'shortcuts', 'copy', 'manifest', 'dataset', 'speaker', 'keepmany', 'handsfree']
-DIALOGS = ('settings', 'about', 'shortcuts', 'copy', 'manifest', 'dataset', 'speaker', 'keepmany', 'handsfree')
+          'settings', 'about', 'shortcuts', 'copy', 'manifest', 'dataset', 'speaker', 'keepmany', 'handsfree', 'roomcheck']
+DIALOGS = ('settings', 'about', 'shortcuts', 'copy', 'manifest', 'dataset', 'speaker', 'keepmany', 'handsfree',
+           'roomcheck', 'roomspeak')
 RUN = ('countin', 'runlisten', 'runheard')
 # drawn only when asked for with --only, to look at a state the documents do not show
-CHECKS = ['unreachable', 'runlisten', 'runheard']
+CHECKS = ['unreachable', 'runlisten', 'runheard', 'roomspeak']
 SAMPLE = ('The morning ferry left the harbour just as the fog began to lift from the water, and the gulls followed '
           'it out past the lighthouse.')
 SCRIPT = ('The morning ferry left the harbour just as the fog began to lift.\n'
@@ -232,6 +233,22 @@ def run_take(app, window, state):
     window._refresh_run()
 
 
+def room_dialog(session, state):
+    """The room and level check: what one check found, with a voice a little low, or the step of reading the sentence. No
+    microphone is opened: the result is given, as the check would leave it."""
+    from recorder.core.analysis import Room
+    from recorder.ui.roomcheck import RoomCheckDialog
+    if state == 'speak':
+        session.room.phase = 'speak'
+    else:
+        session.room.result = Room(heard=True, floor_db=-71.8, speech_db=-25.4, floor_at_target_db=-66.4, peak_dbfs=-9.6,
+                                   clipped=0.0, hum=None, room='ok', level='warn', headroom='ok')
+    dialog = RoomCheckDialog(session)
+    if state == 'speak':
+        dialog.meter.set_levels(-18.0, -27.0)
+    return dialog
+
+
 def save_picture(widget, path, scale):
     """Save a picture of the widget, `scale` times its size in logical pixels whatever the display's own scaling is."""
     from PySide6.QtCore import Qt
@@ -300,6 +317,8 @@ def main():
                           'dataset': lambda: dialogs.DatasetDialog('My voice', totals),
                           'speaker': lambda: dialogs.SpeakerDialog('Sam Rivera', release, True),
                           'keepmany': lambda: dialogs.KeepManyDialog('My voice', [SimpleNamespace(meta=said)] * 12, said),
+                          'roomcheck': lambda: room_dialog(session, 'done'),
+                          'roomspeak': lambda: room_dialog(session, 'speak'),
                           'handsfree': lambda: dialogs.HandsFreeDialog({**run.OPTIONS, 'next_line': True, 'stop_after_pause': True,
                                                                         'auto_start': True}, 'F9')}[state]()
                 dialog.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)        # drawn, but never on the person's screen

@@ -127,9 +127,10 @@ class TopBar(QWidget):
             self.record.setAccessibleName(tr('Record'))
             self.record.setIcon(icons.icon('record', 'red_ink'))
             tagged(self.record, kind='record')
+        busy = recording or run.active or self.session.room.active         # each of them has the device in use
         for widget in (self.source, self.device, self.channel):
-            widget.setEnabled(not recording and not run.active)
-        self.arm.setEnabled(not recording and not run.active)
+            widget.setEnabled(not busy)
+        self.arm.setEnabled(not busy)
         self.arm.setChecked(capturing.armed)
         self.clock.setStyleSheet(f'color: {PALETTE["red"]};' if recording else '')
 
