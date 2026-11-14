@@ -113,6 +113,25 @@ made for (a result for an older recipe is dropped), follows the clip as it is ed
 `Editor.apply_auto_fix`, which adds **all** of its steps to the undo history as one. The Check tab's card (`AutoCard` in
 `ui/inspector.py`) only shows what the advisor holds.
 
+## A long take
+
+A 45-minute stereo take is 950 MB of float32, so nothing may copy it whole when it does not have to. Everything that measures
+works from `take.mono`, made once. `audio_core.frame_energy` works out the energy of each 20 ms frame a block (`ac.BLOCK`
+samples) at a time, and the measurements that need it take it as `energy=` instead of each working it out again; the loudness
+filter, the peak pyramid and the clipping count go a block at a time too, and `audio_core.resample` does a long input in
+overlapping blocks that give exactly what one call would. `render.finish` clips in place.
+
+`audio_import.fit` decides, from the length and channels alone, whether a recording can be worked on here: refused past 70%
+of the computer's memory (`physical_memory`, from Windows), asked about past 35% or an hour. `memory_needed` counts 4 bytes a
+channel and 20 more a frame, measured: a one-hour stereo take, imported, measured and split, peaked at 3.75 GB against the
+4.46 GB it counts. `store.Importing` copies a recording in a block at a time, writing the original under a temporary name as it
+goes. FFmpeg's decode, and closing, syncing and renaming the original (Windows looks a long file over as it is closed, a third
+of a second for 45 minutes), happen on threads of their own, and `step()` returns without waiting for them. `Importing.run`
+does it all at once, for a short import. It works out the mono mix a block at a time as it copies, into `take.cache['mono']`,
+because working it out afterwards held the window for 1.5 s. `Measurements.pyramid` builds the peaks of a take over
+`PYRAMID_AT_ONCE` samples in the background (the window asks for them first, before the spectrogram), and the waveform says it
+is being drawn until they arrive.
+
 ## Threads, the tick and the clock
 
 - **Device threads.** The microphone and loopback callbacks copy audio into buffers and nothing else.
@@ -233,7 +252,10 @@ None of these changes a kept clip, and none goes online.
   `Script.progress` counts `take.meta['script_line']` over the takes of the speaker in front, so it cannot go stale.
 - **Many takes at once** (`session/batch.py`) run in `Session.tick`, a slice of 40 ms at a time, on the main thread, because each
   step changes files and lists the window shows. `Batch.keep` takes a statement the window collected. It goes on each take for its
-  own Keep with `consent_batch`, and comes off again if that Keep fails: the permission is still never remembered.
+  own Keep with `consent_batch`, and comes off again if that Keep fails: the permission is still never remembered. A step that
+  has more of its item to do returns `MORE`, and one waiting on a thread returns `WAIT`; `Batch.part` is how far that item has
+  got. `Batch.import_files` and `Batch.split` use this, so a long import or split shows its progress and can be stopped. The
+  window imports at once only when every file's length is known and they come to under five minutes in all.
 - **The reading check** (`core/reading.py`) compares words with `difflib`, without capitals or punctuation, and letter by letter in
   languages written without spaces. `workspace.reading_of` gives the check for a take, or None when the draft was made before the
   latest cuts, and `Drafts` asks for a new draft when that happens.
@@ -241,7 +263,10 @@ None of these changes a kept clip, and none goes online.
   edits are. `analysis.quietest_near` moves the edges of a word to the quiet beside it, because the recognizer's times are rough.
   `ui/words.py` shows them as links in a text view, which gives the keyboard and a screen reader what they need.
 - **Splitting** (`analysis.split_ranges`, `Workspace.split_take`) makes ordinary takes with their own originals, cut in the middle of
-  pauses, and leaves the long take alone.
+  pauses, and leaves the long take alone. `Workspace.split_part` makes one part, writes its original and lets go of its audio;
+  `split_done` lists and opens them. The window runs the parts through `Batch.split`.
+- **Busy**: anything the window waits for on a take over two minutes long (Keep, Play, opening it, looking for pauses) runs inside
+  `MainWindow._busy`, which shows the wait cursor and a status line first. A notice about what went wrong is shown after it.
 
 ## The window
 

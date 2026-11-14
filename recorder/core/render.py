@@ -113,7 +113,10 @@ def cut_stage(master, rate, recipe, cache=None, ident=None):
         return hit
     mono = ac.to_mono(master)
     shaped = apply_regions(mono, rate, recipe.edits)
-    out = ac.render(shaped, rate, recipe.edits, recipe.fade_ms, snap_to=mono)
+    if any(e.get('op', 'cut') == 'cut' for e in recipe.edits):
+        out = ac.render(shaped, rate, recipe.edits, recipe.fade_ms, snap_to=mono)
+    else:
+        out = shaped        # no cuts: nothing after this changes its input, so the recording's own mix is not copied
     if cache is not None and ident is not None:
         cache.put(key, out)
     return out
@@ -155,11 +158,11 @@ def finish(processed, rate, chain, export_rate=ac.EXPORT_RATE):
     """A processed clip as the export holds it: at `export_rate`, clipped to full scale. Resampling can lift a peak a little
     above the limiter's ceiling, so with the limiter on the resampled clip gets one more pass (a no-op when it is already
     under)."""
-    out = ac.resample(processed, rate, export_rate)
+    out = ac.resample(processed, rate, export_rate)            # a new array, whatever the rates
     limiter = chain['limiter']
     if limiter['enabled']:
         out = chain_mod.limit(out, export_rate, limiter['ceiling_db'])
-    return np.clip(out, -1.0, 1.0).astype(np.float32)
+    return np.clip(out, -1.0, 1.0, out=out)
 
 
 def export_samples(master, rate, recipe, denoise=None, cache=None, ident=None, export_rate=ac.EXPORT_RATE):
@@ -167,29 +170,50 @@ def export_samples(master, rate, recipe, denoise=None, cache=None, ident=None, e
     return finish(process(master, rate, recipe, denoise, cache, ident), rate, recipe.chain, export_rate)
 
 
-def recorded_clipping(master, rate, recipe):
+def recorded_clipping(master, rate, recipe, mono=None):
     """How much of the recording behind the clip is at full scale, on its loudest channel, as the keep rules count it.
 
     Measuring the finished clip cannot tell: gain and the limiter bring clipped peaks down, and the clip then measures clean
     although the damage is still in it. Only what the clip leaves out (the cuts and the silenced parts) does not count.
+    `mono` is the master's mono mix, when it is at hand. The recording is read a block at a time, without copies of it.
     """
-    peak = np.abs(np.asarray(master, dtype=np.float32))
-    peak = peak if peak.ndim == 1 else peak.max(axis=1)
-    used = np.zeros(len(peak), dtype=bool)
-    for a, b in segments_of(master, rate, recipe.edits):
-        used[a:b] = True
+    n = len(master)
+    used = segments_of(master if mono is None else mono, rate, recipe.edits)
     for e in recipe.edits:
         if e.get('op') == 'silence':
-            used[int(round(e['start_seconds'] * rate)):int(round(e['end_seconds'] * rate))] = False
-    kept = peak[used]
-    return {'recording_clipped': bool(kept.size and kept.max() >= ac.CLIP_FLAG),
-            'recording_clipped_fraction': round(float(np.mean(kept >= ac.CLIP_LAB)), 6) if kept.size else 0.0}
+            used = _without(used, int(round(e['start_seconds'] * rate)), int(round(e['end_seconds'] * rate)))
+    flagged, near, count = False, 0, 0
+    for a, b in used:
+        for first in range(max(a, 0), min(b, n), ac.BLOCK):
+            peak = np.abs(np.asarray(master[first:min(first + ac.BLOCK, b, n)], dtype=np.float32))
+            peak = peak if peak.ndim == 1 else peak.max(axis=1)
+            flagged = flagged or bool(peak.size and peak.max() >= ac.CLIP_FLAG)
+            near += int(np.count_nonzero(peak >= ac.CLIP_LAB))
+            count += len(peak)
+    return {'recording_clipped': flagged, 'recording_clipped_fraction': round(near / count, 6) if count else 0.0}
+
+
+def _without(ranges, a, b):
+    """Sample ranges with [a, b) taken out of them."""
+    if b <= a:
+        return ranges
+    out = []
+    for first, end in ranges:
+        if end <= a or first >= b:
+            out.append((first, end))
+            continue
+        if first < a:
+            out.append((first, a))
+        if end > b:
+            out.append((b, end))
+    return out
 
 
 # ---- master time and edited time ------------------------------------------------------------------------------------
 
 def segments_of(master, rate, edits):
-    """The kept stretches of the master as sample ranges, after snapping the cuts to zero crossings."""
+    """The kept stretches of the master as sample ranges, after snapping the cuts to zero crossings. Only the mono mix is
+    read, so a caller that holds it (take.mono) passes that, and a stereo recording is not mixed again for each edit."""
     mono = ac.to_mono(master)
     return ac.kept_segments(ac.cut_ranges(edits, rate, len(mono), mono), len(mono))
 

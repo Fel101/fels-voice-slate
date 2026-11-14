@@ -12,6 +12,7 @@ from PySide6.QtGui import QBrush, QFont, QImage, QPainter, QPen, QPixmap, QPolyg
 from PySide6.QtWidgets import QWidget
 
 from .. import audio_core as ac
+from ..i18n import tr
 from . import theme
 from .palette import color
 
@@ -426,7 +427,10 @@ class WaveformView(TimelineView):
         return RULER + area / 2, area / 2 * 0.90
 
     def _layer_for(self, take):
+        """The waveform drawn for the view, or None while a long take's peaks are still being worked out."""
         pyramid = self.session.measure.pyramid(take)
+        if pyramid is None:
+            return None
         dpr = self.devicePixelRatioF()
         key = (take.id, id(pyramid), round(self.view.t0, 6), round(self.view.t1, 6), self.width(), self.height(), dpr)
         if key == self._layer_key:
@@ -477,7 +481,13 @@ class WaveformView(TimelineView):
         rect = self.plot_rect()
         draw_amplitude_grid(p, rect, mid, scale, self.width())
         self.paint_edits(p, rect)
-        p.drawPixmap(0, 0, self._layer_for(take))
+        layer = self._layer_for(take)
+        if layer is None:
+            p.setPen(color('dim'))
+            p.setFont(theme.ui_font(12))
+            p.drawText(rect, int(Qt.AlignmentFlag.AlignCenter), tr('Drawing the waveform...'))
+        else:
+            p.drawPixmap(0, 0, layer)
         draw_ruler(p, self.width(), self.view.t0, self.view.t1, self.x_of)
         self.paint_selection(p, rect)
         self.paint_playhead(p)
@@ -619,6 +629,8 @@ class Minimap(QWidget):
     def _layer_for(self, take):
         dpr = self.devicePixelRatioF()
         pyramid = self.session.measure.pyramid(take)
+        if pyramid is None:                 # a long take's, still being worked out
+            return None
         key = (take.id, id(pyramid), self.width(), self.height(), dpr)
         if key == self._layer_key:
             return self._layer
@@ -646,7 +658,9 @@ class Minimap(QWidget):
         take = self.session.current
         if take is None or self.view.seconds <= 0:
             return
-        p.drawPixmap(0, 0, self._layer_for(take))
+        layer = self._layer_for(take)
+        if layer is not None:
+            p.drawPixmap(0, 0, layer)
         plot = self._plot()
         for edit in take.history.edits:
             if edit.get('op', 'cut') == 'cut':

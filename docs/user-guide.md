@@ -166,6 +166,16 @@ make, AAC, AMR, WMA and WebM, and the sound of a video (MP4, MOV or 3GP). FFmpeg
 the import, which is deleted after. Without FFmpeg, such a file is refused with a message that says how to get it; or save
 the recording as WAV first.
 
+A few minutes of audio come in at once. More than that, or a file FFmpeg reads, comes in a piece at a time: the status line
+says how far it has got, and **Stop** at the bottom of the window stops it. What is already in stays; the recording being
+copied when you stop is left out, and nothing of it is left behind. Each take opens as it arrives.
+
+A recording over an hour long, or one that would use more than about a third of this computer's memory, is asked about first:
+everything on a take that long (measuring, playing, keeping) takes a while. One that would need more than about 70% of the
+memory is refused, with how long it is, what it would need, and how short its parts should be; cut it into parts with another
+program and import those. The length of a file FFmpeg reads is known only once FFmpeg has read it, so such a file is not asked
+about, only refused if it is too long.
+
 ## Speakers
 
 A speaker is a person whose voice you are recording, and has their own folder. Add one with the **+** next to the
@@ -311,6 +321,9 @@ The long take stays as it is, so nothing is lost, and each part starts from the 
 edits. If the long take had a draft transcript, each part gets its share of the words; otherwise each is drafted by itself if you
 set that up. Each part is an ordinary take: edit it, keep it or discard it. Its sidecar says which take it came from
 (`split_from`). When you have what you want, discard the long take.
+
+The parts are made one at a time, each written to the `masters` folder as it is made, with how far it has got in the status line.
+**Stop** at the bottom of the window stops it: the parts already made stay in the list, and the long take is still there.
 
 ## Process the whole take
 
@@ -631,6 +644,15 @@ place that is not connected now, or a file stands where the folder should be. Yo
 changed anything there, and does not start a new library somewhere else. The window says which folder it is. Connect the drive (or
 move the file) and choose **Try again**, or choose another folder in Settings. Until then Record, Import and New speaker say why they
 cannot work, instead of failing.
+
+**It says a recording is too long to import.** Working on a take needs it in memory several times over (the recording, its mix,
+and what playing, measuring and keeping work out from it), so a recording past a certain length would starve Windows. The
+message says how long the recording is, how much memory it would need, how much this computer has, and how short the parts
+should be. Cut it into parts with an audio editor (Audacity, say) and import those.
+
+**The pointer turns into an hourglass when I press Keep or Play.** On a take over two minutes long, getting the clip ready
+takes a moment, and the status line says what is being done. Noise reduction takes the longest. It is back as soon as the clip
+is ready. Opening a long take from the list does the same, and its waveform may take a moment longer to appear.
 
 **A saved clip is missing from the list.** The program lists a message in the status line when a sidecar cannot be used,
 and does not change the files. Common reasons are a moved or deleted original, or a sidecar edited by hand. The other clips

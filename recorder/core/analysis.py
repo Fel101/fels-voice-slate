@@ -33,7 +33,12 @@ class PeakPyramid:
         block = self.BASE
         lo, hi = self._reduce(self.mono, self.mono, block)
         starts = np.arange(0, self.n, block)
-        sq = np.add.reduceat(self.mono.astype(np.float64) ** 2, starts)
+        sq = np.empty(len(starts), dtype=np.float64)
+        step = ac.BLOCK // block * block            # a block at a time: no 64-bit copy of a long recording
+        for first in range(0, self.n, step):
+            chunk = self.mono[first:first + step].astype(np.float64)
+            sums = np.add.reduceat(chunk ** 2, np.arange(0, len(chunk), block))
+            sq[first // block:first // block + len(sums)] = sums
         count = np.diff(np.append(starts, self.n))
         self.levels.append((block, lo, hi))
         self._energy.append((sq, count))
@@ -117,41 +122,44 @@ def spectrogram(x, rate, max_hz=12000.0, max_frames=12000):
     """dB below full scale per frequency bin (rows, low to high) and frame (columns), up to max_hz."""
     mono = ac.to_mono(x)
     n_fft = int(2 ** round(math.log2(max(rate * 0.0256, 64))))
-    hop = max(1, int(rate * 0.005), len(mono) // max_frames)
-    padded = np.pad(mono.astype(np.float32), (n_fft // 2, n_fft // 2), mode='reflect' if len(mono) > n_fft else 'constant')
-    starts = np.arange(0, max(len(padded) - n_fft + 1, 1), hop)
+    half, n = n_fft // 2, len(mono)
+    hop = max(1, int(rate * 0.005), n // max_frames)
+    if n > n_fft:
+        source, shift = mono, half      # the frames are read from the recording itself, mirrored at its ends, not from a copy
+    else:
+        source, shift = np.pad(mono.astype(np.float32), (half, half)), 0
+    starts = np.arange(0, max(n + 2 * half - n_fft + 1, 1), hop)
     window = np.hanning(n_fft).astype(np.float32)
     bins = int(min(max_hz, rate / 2) / (rate / n_fft)) + 1
     out = np.empty((bins, len(starts)), dtype=np.float32)
     scale = n_fft / 4.0                                     # a full-scale sine reads 0 dB
     for first in range(0, len(starts), 512):
-        idx = starts[first:first + 512, None] + np.arange(n_fft)[None, :]
-        mag = np.abs(np.fft.rfft(padded[idx] * window, axis=1))[:, :bins]
+        idx = starts[first:first + 512, None] + np.arange(n_fft)[None, :] - shift
+        if shift:
+            idx = np.abs(idx)                               # as np.pad's 'reflect': -1 reads sample 1
+            past = idx >= n
+            idx[past] = 2 * (n - 1) - idx[past]
+        mag = np.abs(np.fft.rfft(source[idx].astype(np.float32) * window, axis=1))[:, :bins]
         out[:, first:first + len(idx)] = (20.0 * np.log10(mag / scale + 1e-9)).T
     return Spectrogram(out, rate / n_fft, hop / rate)
 
 
 # ---- levels -----------------------------------------------------------------------------------------------------------
 
-def frame_db(x, rate):
-    """RMS level of each 20 ms frame in dB (the last partial frame is dropped)."""
-    m = ac.to_mono(x).astype(np.float64)
-    frame = max(1, int(rate * ac.FRAME_SECONDS))
-    usable = len(m) // frame * frame
-    if usable == 0:
-        return np.zeros(0)
-    rms = np.sqrt(np.mean(m[:usable].reshape(-1, frame) ** 2, axis=1))
-    return 20.0 * np.log10(rms + 1e-12)
+def frame_db(x, rate, energy=None):
+    """RMS level of each 20 ms frame in dB (the last partial frame is dropped). `energy` is ac.frame_energy of the same
+    clip, when it has been worked out already: the measures below all start from it, so one look at a clip shares it."""
+    return ac.energy_db(ac.frame_energy(x, rate) if energy is None else energy)
 
 
 QUIET_STRETCH_FRAMES = 10       # 0.2 s of frames in a row is enough to read the noise floor from
 
 
-def noise_floor_db(x, rate):
+def noise_floor_db(x, rate, energy=None):
     """The level of the quietest tenth of the frames, or of the quietest 0.2 s stretch if that is lower, ignoring digital
     silence. An estimate: it needs a pause. The stretch keeps the estimate from rising when the pauses are cut short
     (Auto-trim, Shorten pauses), which would leave the pauses under a tenth of the frames."""
-    db = frame_db(x, rate)
+    db = frame_db(x, rate, energy)
     db = db[db > -110.0]
     if not db.size:
         return -120.0
@@ -162,8 +170,9 @@ def noise_floor_db(x, rate):
     return round(floor, 1)
 
 
-def snr_db(x, rate):
-    return round(ac.voiced_rms_db(x, rate) - noise_floor_db(x, rate), 1)
+def snr_db(x, rate, energy=None):
+    energy = ac.frame_energy(x, rate) if energy is None else energy
+    return round(ac.voiced_rms_db(x, rate, energy) - noise_floor_db(x, rate, energy), 1)
 
 
 VOICE_BANDS = ((1000.0, 4000.0), (4000.0, 11000.0))     # where the consonants are, which noise cleaning takes first
@@ -182,7 +191,8 @@ def voice_loss_db(before, after, rate):
     frame = max(1, int(rate * ac.FRAME_SECONDS))
     x, y = ac.to_mono(before), ac.to_mono(after)
     count = min(min(len(x), len(y)) // frame, int(VOICE_CHECK_SECONDS / ac.FRAME_SECONDS))
-    speech = frame_db(x, rate)[:count] > speech_threshold_db(x, rate)
+    energy = ac.frame_energy(x, rate)
+    speech = frame_db(x, rate, energy)[:count] > speech_threshold_db(x, rate, energy)
     if not speech.any() or speech.all():
         return 0.0
     window = np.hanning(frame).astype(np.float32)
@@ -211,18 +221,32 @@ _K_HIGHPASS = ([1.0, -2.0, 1.0], [1.0, -1.99004745483398, 0.99007225036621])
 
 
 def loudness_lufs(x, rate):
-    """Integrated loudness of a mono signal, ITU-R BS.1770-4 (K-weighting, 400 ms blocks, absolute and relative gates)."""
+    """Integrated loudness of a mono signal, ITU-R BS.1770-4 (K-weighting, 400 ms blocks, absolute and relative gates).
+
+    Worked out a piece at a time: the filters carry their state from one piece to the next, and the energy is summed per
+    100 ms hop, of which each 400 ms block holds four. The result is the one a single pass over everything gives."""
     m = ac.to_mono(x)
-    if rate != 48000:
-        m = ac.resample(m, rate, 48000)
-    y = lfilter(*_K_HIGHPASS, lfilter(*_K_SHELF, m.astype(np.float64)))
+    pieces = ac.resample_blocks(m, rate, 48000) if rate != 48000 else (m[i:i + ac.BLOCK] for i in range(0, len(m), ac.BLOCK))
+    shelf = np.zeros(len(_K_SHELF[1]) - 1)
+    highpass = np.zeros(len(_K_HIGHPASS[1]) - 1)
     block, hop = 19200, 4800
-    if len(y) < block:
-        ms = np.array([float(np.mean(y * y))]) if len(y) else np.zeros(1)
+    hops, left = [], np.zeros(0)
+    total, length = 0.0, 0
+    for piece in pieces:
+        y, shelf = lfilter(*_K_SHELF, np.asarray(piece, dtype=np.float64), zi=shelf)
+        y, highpass = lfilter(*_K_HIGHPASS, y, zi=highpass)
+        total += float(np.dot(y, y))
+        length += len(y)
+        y = np.concatenate([left, y])
+        whole = len(y) // hop * hop
+        hops.append(np.sum(y[:whole].reshape(-1, hop) ** 2, axis=1))
+        left = y[whole:]
+    if length < block:
+        ms = np.array([total / length]) if length else np.zeros(1)
     else:
-        csum = np.concatenate([[0.0], np.cumsum(y * y)])
-        starts = np.arange(0, len(y) - block + 1, hop)
-        ms = (csum[starts + block] - csum[starts]) / block
+        sums = np.concatenate(hops)
+        count = (length - block) // hop + 1
+        ms = (sums[:count] + sums[1:count + 1] + sums[2:count + 2] + sums[3:count + 3]) / block
     with np.errstate(divide='ignore'):
         block_lufs = -0.691 + 10.0 * np.log10(ms)
     kept = block_lufs > -70.0
@@ -235,18 +259,35 @@ def loudness_lufs(x, rate):
     return round(-0.691 + 10.0 * math.log10(float(np.mean(ms[kept]))), 1)
 
 
-def bandwidth_hz(x, rate):
-    """The frequency below which 99.9% of the energy of the voiced frames lies: a band-limited source shows here."""
-    m = ac.to_mono(x).astype(np.float64)
-    db = frame_db(m, rate)
+BANDWIDTH_PIECE_FRAMES = 3000          # voiced frames looked at together: a minute at most, so a long take needs little memory
+
+
+def bandwidth_hz(x, rate, energy=None):
+    """The frequency below which 99.9% of the energy of the voiced frames lies: a band-limited source shows here.
+
+    The spectrum is averaged over pieces of up to a minute of voiced frames, weighted by their length, which comes to the
+    same as one spectrum over all of them for anything but a few segments where two pieces meet."""
+    m = ac.to_mono(x)
+    db = frame_db(m, rate, energy)
     if db.size == 0:
         return 0.0
     frame = max(1, int(rate * ac.FRAME_SECONDS))
     voiced = np.nonzero(db > max(ac.SILENCE_FRAME_DB, db.max() - 30.0))[0]
     if voiced.size == 0:
         return 0.0
-    signal = np.concatenate([m[i * frame:(i + 1) * frame] for i in voiced])
-    freqs, power = welch(signal, fs=rate, nperseg=min(2048, len(signal)))
+    nperseg = min(2048, voiced.size * frame)
+    power, weight, freqs = None, 0, None
+    for first in range(0, voiced.size, BANDWIDTH_PIECE_FRAMES):
+        frames = voiced[first:first + BANDWIDTH_PIECE_FRAMES]
+        signal = m[(frames[:, None] * frame + np.arange(frame)[None, :]).reshape(-1)].astype(np.float64)
+        if len(signal) < nperseg:
+            if power is not None:
+                break                       # a short remainder after full pieces changes nothing that matters
+            nperseg = len(signal)
+        freqs, piece = welch(signal, fs=rate, nperseg=nperseg)
+        power = piece * len(signal) if power is None else power + piece * len(signal)
+        weight += len(signal)
+    power = power / weight
     cumulative = np.cumsum(power)
     return round(float(freqs[min(int(np.searchsorted(cumulative, 0.999 * cumulative[-1])), len(freqs) - 1)]), 0)
 
@@ -258,10 +299,10 @@ def _runs(flags):
     return list(zip(changes[::2], changes[1::2]))
 
 
-def detect_hum(x, rate):
+def detect_hum(x, rate, energy=None):
     """(mains frequency, strength in dB) when 50 or 60 Hz hum stands out in the longest quiet stretch, else None."""
-    m = ac.to_mono(x).astype(np.float64)
-    db = frame_db(m, rate)
+    m = ac.to_mono(x)
+    db = frame_db(m, rate, energy)
     if db.size < 15:
         return None
     frame = max(1, int(rate * ac.FRAME_SECONDS))
@@ -271,7 +312,8 @@ def detect_hum(x, rate):
     first, last = max(runs, key=lambda r: r[1] - r[0])
     if (last - first) * frame < 0.3 * rate:
         return None
-    freqs, power = welch(m[first * frame:last * frame], fs=rate, nperseg=min(1 << 15, (last - first) * frame))
+    quiet = m[first * frame:last * frame].astype(np.float64)
+    freqs, power = welch(quiet, fs=rate, nperseg=min(1 << 15, (last - first) * frame))
     level = 10.0 * np.log10(power + 1e-30)
     best = None
     for mains in (50.0, 60.0):
@@ -296,7 +338,7 @@ SPEECH_ABOVE_NOISE_DB = 15.0    # the loudest tenth of the frames is speech when
                                 # noise rises and falls by 6 dB comes within 12 dB of its own floor
 
 
-def speech_threshold_db(x, rate):
+def speech_threshold_db(x, rate, energy=None):
     """Frames at or below this level count as pauses: well above the noise floor, well below the speech.
 
     The speech level is that of the loudest tenth of the frames. In a take that is mostly pause, such as one short word
@@ -304,31 +346,34 @@ def speech_threshold_db(x, rate):
     the speech. The threshold stays below the frames the speech level is read from, so some of every take is speech, and
     a take is never all pause, however quiet the voice.
     """
-    db = frame_db(x, rate)
+    energy = ac.frame_energy(x, rate) if energy is None else energy
+    db = frame_db(x, rate, energy)
     if db.size == 0:
         return ac.SILENCE_FRAME_DB
-    noise = noise_floor_db(x, rate)
+    noise = noise_floor_db(x, rate, energy)
     speech = float(np.percentile(db, 90))
     if speech < noise + SPEECH_ABOVE_NOISE_DB:
         speech = float(np.percentile(db, 99))
     return min(max(noise + 6.0, speech - 25.0, ac.SILENCE_FRAME_DB - 15.0), speech - 10.0)
 
 
-def silent_runs(x, rate, min_seconds=0.0):
+def silent_runs(x, rate, min_seconds=0.0, energy=None):
     """Runs of pause frames as (start, end) seconds on the signal's own timeline. Includes the ends of the clip."""
-    db = frame_db(x, rate)
+    energy = ac.frame_energy(x, rate) if energy is None else energy
+    db = frame_db(x, rate, energy)
     if db.size == 0:
         return []
-    runs = [(a * ac.FRAME_SECONDS, b * ac.FRAME_SECONDS) for a, b in _runs(db <= speech_threshold_db(x, rate))]
+    runs = [(a * ac.FRAME_SECONDS, b * ac.FRAME_SECONDS) for a, b in _runs(db <= speech_threshold_db(x, rate, energy))]
     return [(a, b) for a, b in runs if b - a >= min_seconds]
 
 
-def edge_silence(x, rate):
+def edge_silence(x, rate, energy=None):
     """(seconds of pause before the first speech, seconds of pause after the last)."""
+    energy = ac.frame_energy(x, rate) if energy is None else energy
     total = len(ac.to_mono(x)) / rate
-    runs = silent_runs(x, rate)
+    runs = silent_runs(x, rate, energy=energy)
     lead = runs[0][1] if runs and runs[0][0] <= 1e-9 else 0.0
-    tail = total - runs[-1][0] if runs and runs[-1][1] >= len(frame_db(x, rate)) * ac.FRAME_SECONDS - 1e-9 else 0.0
+    tail = total - runs[-1][0] if runs and runs[-1][1] >= len(energy) * ac.FRAME_SECONDS - 1e-9 else 0.0
     return round(lead, 3), round(max(tail, 0.0), 3)
 
 
@@ -364,20 +409,20 @@ WORD_EDGE_FRAME = 0.005
 def quietest_near(x, rate, seconds, reach=WORD_EDGE_REACH):
     """The moment within `reach` of `seconds` where the sound is quietest. The times a recognizer gives a word are rough, and a
     cut made exactly on them can leave the first sound of the word behind. The gap between two words is where it belongs."""
-    m = ac.to_mono(x).astype(np.float64)
+    m = ac.to_mono(x)
     frame = max(1, int(rate * WORD_EDGE_FRAME))
     first, last = max(int((seconds - reach) * rate), 0), min(int((seconds + reach) * rate), len(m))
     count = (last - first) // frame
     if count < 2:
         return seconds
-    energy = np.sum(m[first:first + count * frame].reshape(-1, frame) ** 2, axis=1)
+    energy = np.sum(m[first:first + count * frame].astype(np.float64).reshape(-1, frame) ** 2, axis=1)
     return (first + (int(np.argmin(energy)) + 0.5) * frame) / rate
 
 
 SPLIT_PAUSE_SECONDS = 0.35      # a pause at least this long is a place to split a take
 
 
-def split_ranges(x, rate, shortest, keep_min, keep_max):
+def split_ranges(x, rate, shortest, keep_min, keep_max, energy=None):
     """Where to split a long take: (first, end) sample ranges that cover all of it, cut in the middle of its pauses.
 
     Each part closes at the first pause after it has reached `shortest` seconds, which gives parts of about that length
@@ -386,7 +431,8 @@ def split_ranges(x, rate, shortest, keep_min, keep_max):
     """
     n = len(ac.to_mono(x))
     total = n / rate
-    pauses = [(a + b) / 2 for a, b in silent_runs(x, rate, min_seconds=SPLIT_PAUSE_SECONDS) if a > 1e-9 and b < total - 0.05]
+    pauses = [(a + b) / 2 for a, b in silent_runs(x, rate, min_seconds=SPLIT_PAUSE_SECONDS, energy=energy)
+              if a > 1e-9 and b < total - 0.05]
     parts, start = [], 0.0
     for point in pauses:
         if point - start >= shortest:
@@ -411,13 +457,14 @@ def quality_report(x, rate=ac.EXPORT_RATE, recorded_clipped=0.0, purpose=None):
     finished clip can hide. `purpose` gives the length rules (a Reference's if none is given).
     """
     rules = purpose or ac.PURPOSES[ac.DEFAULT_PURPOSE]
-    stats = ac.measure(x, rate)
+    energy = ac.frame_energy(x, rate)           # worked out once, for every measure below
+    stats = ac.measure(x, rate, energy)
     seconds = stats['seconds']
-    speech = ac.voiced_rms_db(x, rate)
-    floor = noise_floor_db(x, rate)
-    lead, tail = edge_silence(x, rate)
-    hum = detect_hum(x, rate)
-    band = bandwidth_hz(x, rate)
+    speech = ac.voiced_rms_db(x, rate, energy)
+    floor = noise_floor_db(x, rate, energy)
+    lead, tail = edge_silence(x, rate, energy)
+    hum = detect_hum(x, rate, energy)
+    band = bandwidth_hz(x, rate, energy)
     clipped = max(stats['clipped_fraction'], recorded_clipped)
 
     def rank(value, ok, warn):

@@ -85,7 +85,7 @@ class Drafts:
         def work():
             # Rendered here, in the drafts' own lane, so that a long take or many imported ones never hold up the window.
             export = lib.export_for(take, recipe)
-            segments = render.segments_of(take.samples, take.rate, recipe.edits)
+            segments = render.segments_of(take.mono, take.rate, recipe.edits)
             result = transcript.suggest(export, python, model, language, rate, self.worker)
             return result, segments
 

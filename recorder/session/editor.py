@@ -203,7 +203,7 @@ class Editor:
         take = self.take
         lib = self.workspace.lib
         audio = lib.before_level(take)
-        segments = render.segments_of(take.samples, take.rate, take.history.edits)
+        segments = render.segments_of(take.mono, take.rate, take.history.edits)
         return audio, segments
 
     def _to_master(self, ranges, segments, rate):

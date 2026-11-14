@@ -375,15 +375,16 @@ def _findings(look, plan, out, final, recorded):
     return sorted(found, key=lambda f: {'bad': 0, 'warn': 1, 'ok': 2}[f.status])
 
 
-def diagnose(master, rate, history, before_level, denoise_ok=True, purpose=None):
+def diagnose(master, rate, history, before_level, denoise_ok=True, purpose=None, mono=None):
     """Measure a take and plan its repairs.
 
     `master` and `rate` are the take's samples and rate, `history` its recipe, and `before_level(recipe)` renders a
     recipe (anything with .edits, .chain and .fade_ms) to the clip at `rate` with every step but gain and the limiter,
     as Library.before_level does. `denoise_ok` says whether noise cleaning can run, and `purpose` what the clip is for (a
-    Reference if not given). Returns a Diagnosis.
+    Reference if not given). `mono` is the master's mono mix when it is at hand (take.mono). Returns a Diagnosis.
     """
     rules = purpose or ac.PURPOSES[ac.DEFAULT_PURPOSE]
+    mono = ac.to_mono(master) if mono is None else mono     # the cuts are placed on it; mixed once, not for each step
     out_rate = rules.rate_for(rate)
 
     def report(clip, clipped):
@@ -392,19 +393,19 @@ def diagnose(master, rate, history, before_level, denoise_ok=True, purpose=None)
     x = before_level(_snapshot(history))
     look = _look(x, rate)
     here = _export(x, rate, history.chain, out_rate)
-    recorded = render.recorded_clipping(master, rate, history)['recording_clipped_fraction']
+    recorded = render.recorded_clipping(master, rate, history, mono)['recording_clipped_fraction']
     before = report(here, recorded)
     if look.speech < NO_SPEECH_DB:
         finding = Finding('speech', 'bad', 'No speech found', 'The clip is silent, or too quiet to measure. There is '
                           'nothing to fix.', '')
         return Diagnosis([finding], [], {}, [], before, before)
 
-    plan = _repair(master, rate, history, before_level, denoise_ok, look, rules, out_rate)
+    plan = _repair(mono, rate, history, before_level, denoise_ok, look, rules, out_rate)
     now = _output(here, out_rate)
     if not plan.steps:
         return Diagnosis(_findings(look, plan, now, now, recorded), [], {}, [], before, before)
     final = _export(before_level(_snapshot(plan.history)), rate, plan.history.chain, out_rate)
-    left = render.recorded_clipping(master, rate, plan.history)['recording_clipped_fraction']
+    left = render.recorded_clipping(master, rate, plan.history, mono)['recording_clipped_fraction']
     return Diagnosis(_findings(look, plan, now, _output(final, out_rate), recorded), plan.ops, plan.chain, plan.steps,
                      before, report(final, left), plan.done,
                      (analysis.snr_db(here, out_rate), analysis.snr_db(final, out_rate)))

@@ -5,6 +5,7 @@ the window redraws the parts that heard about it. A timer calls `session.tick()`
 is also when the meter, the clock, the live waveform and the playhead are updated.
 """
 import base64
+from contextlib import contextmanager
 from pathlib import Path
 
 from PySide6.QtCore import QByteArray, QSize, QStandardPaths, Qt, QTimer, Signal
@@ -39,6 +40,8 @@ TICK_MS = 50
 ANALYSIS_DELAY_MS = 200            # how long the measurements wait after the last edit, so a dragged slider measures once
 ALERT_MS = 2000                    # how long the taskbar button flashes when the record key was pressed in another program
 ANNOUNCE_AFTER_MS = 400            # a burst of status messages is read out as its last one, not stammered through
+LONG_TAKE_SECONDS = 120.0          # rendering a take this long can hold the window for more than half a second
+SHORT_IMPORT_SECONDS = 300.0       # recordings this short in all are copied in at once; longer ones a block at a time
 
 
 class MainWindow(QMainWindow):
@@ -166,10 +169,10 @@ class MainWindow(QMainWindow):
         capturing, editor, transport, workspace = s.capturing, s.editor, s.transport, s.workspace
         a.record.triggered.connect(capturing.toggle)
         a.arm.triggered.connect(lambda: capturing.toggle_arm())
-        a.play.triggered.connect(transport.toggle)
+        a.play.triggered.connect(self.toggle_play)
         a.stop.triggered.connect(transport.stop)
         a.loop.triggered.connect(lambda: transport.toggle_loop())
-        a.ab.triggered.connect(transport.ab)
+        a.ab.triggered.connect(lambda: self._busy_with('Getting the clip ready to play...', transport.ab))
         a.escape.triggered.connect(self._escape)
         a.undo.triggered.connect(editor.undo)
         a.redo.triggered.connect(editor.redo)
@@ -183,7 +186,7 @@ class MainWindow(QMainWindow):
         a.auto_fix.triggered.connect(self.auto_fix)
         a.auto_trim.triggered.connect(lambda: editor.auto_trim())
         a.shorten.triggered.connect(lambda: editor.shorten_pauses())
-        a.check_joins.triggered.connect(transport.check_cuts)
+        a.check_joins.triggered.connect(lambda: self._busy_with('Getting the clip ready to play...', transport.check_cuts))
         a.cut_start.triggered.connect(editor.cut_from_start)
         a.cut_end.triggered.connect(editor.cut_to_end)
         a.select_all.triggered.connect(self._select_all)
@@ -348,6 +351,7 @@ class MainWindow(QMainWindow):
             take = s.current
             panel.view.reset(take.seconds if take is not None else 0.0)
             if take is not None:
+                s.measure.pyramid(take)             # first: the waveform is what the person looks at
                 s.measure.spectrogram(take)
             self._measure_edited()
             self.inspector.refresh_edits()
@@ -373,7 +377,7 @@ class MainWindow(QMainWindow):
         if 'analysis' in topics:
             derived = self._derived()
             self.inspector.refresh_analysis(derived)
-            panel.spectrogram.update()
+            self._repaint_timelines()               # the spectrogram, or a long take's waveform, may have arrived
         if 'advice' in topics:
             self.inspector.refresh_advice()
         if 'recording' in topics:
@@ -413,7 +417,10 @@ class MainWindow(QMainWindow):
         if take is None:
             self._edited_seconds = 0.0
             return
-        segments = render.segments_of(take.samples, take.rate, take.history.edits)
+        if not take.history.cuts:                   # all of it: no need for its mono mix, which takes a while on a long take
+            self._edited_seconds = take.seconds
+            return
+        segments = render.segments_of(take.mono, take.rate, take.history.edits)
         self._edited_seconds = sum(b - a for a, b in segments) / take.rate
 
     def _repaint_timelines(self):
@@ -643,7 +650,9 @@ class MainWindow(QMainWindow):
         if self.session.batch.running:
             self.session.bus.status('Wait for this to finish, or press Stop, before opening another take.')
             return
-        self.session.workspace.open_take(take)
+        with self._busy('Opening the take...', take):
+            if self.session.workspace.open_take(take) and take.seconds >= LONG_TAKE_SECONDS:
+                take.mono                           # worked out now, under the busy cursor, not when it is first drawn
 
     def step_take(self, delta):
         """Open the take `delta` rows down the list, as it is filtered now."""
@@ -666,14 +675,48 @@ class MainWindow(QMainWindow):
                 self.inspector.show_tab(0)
                 return
             s.workspace.confirm_transcript()
+        error = None
+        with self._busy('Keeping the take...'):
+            try:
+                s.keep()
+            except (KeepBlocked, CleanError, OSError) as e:
+                error = e
+        if isinstance(error, KeepBlocked):              # said once the busy cursor is gone, not under it
+            self.dialogs.notice('warning', 'Cannot keep yet', '\n'.join(f'- {p}' for p in error.problems))
+        elif isinstance(error, CleanError):
+            self.dialogs.notice('error', 'Could not clean the audio', str(error))
+        elif isinstance(error, OSError):
+            self.dialogs.notice('error', 'Could not write the files', str(error))
+
+    def toggle_play(self):
+        """Space: pause, resume, or play the edited clip. Getting a long take ready to play can take a second or two."""
+        transport = self.session.transport
+        if transport.playing or transport.paused:
+            transport.toggle()
+            return
+        self._busy_with('Getting the clip ready to play...', transport.toggle)
+
+    @contextmanager
+    def _busy(self, text, take=None):
+        """While a long take (the one in front, unless another is given) is worked on, the wait cursor, and `text` in the
+        status line until the work says what it did. A short take is quick enough to need neither."""
+        take = take or self.session.current
+        if take is None or take.seconds < LONG_TAKE_SECONDS:
+            yield
+            return
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        self._show_status(text)
+        self.status_text.repaint()          # drawn now: the window does not get back to drawing until the work is done
         try:
-            s.keep()
-        except KeepBlocked as e:
-            self.dialogs.notice('warning', 'Cannot keep yet', '\n'.join(f'- {p}' for p in e.problems))
-        except CleanError as e:
-            self.dialogs.notice('error', 'Could not clean the audio', str(e))
-        except OSError as e:
-            self.dialogs.notice('error', 'Could not write the files', str(e))
+            yield
+        finally:
+            QApplication.restoreOverrideCursor()
+            if self.status_text.full_text == tr(text):      # the work said nothing: the line goes back to what it said
+                self._show_status(self.session.bus.status_text)
+
+    def _busy_with(self, text, action):
+        with self._busy(text):
+            action()
 
     def _discard_current(self, title, text):
         """Ask, then move the take's files to the Recycle Bin (or delete them if the person insists). True if it is gone."""
@@ -748,9 +791,10 @@ class MainWindow(QMainWindow):
         """Make a new take of each part of the open take, after saying how many there would be."""
         s = self.session
         take = s.current
-        if take is None or s.capturing.recording:
+        if take is None or s.capturing.recording or s.batch.running:
             return
-        ranges = s.workspace.split_ranges(take)
+        with self._busy('Looking for the pauses...'):
+            ranges = s.workspace.split_ranges(take)
         if len(ranges) < 2:
             self.dialogs.notice('info', 'Split at pauses', f'There is nowhere to split this take: it has no pause of at least '
                                 f'a third of a second after its first {take.purpose.best_from:g} seconds.')
@@ -759,10 +803,7 @@ class MainWindow(QMainWindow):
         if self.dialogs.confirm('Split this take?', f'It will become {len(ranges)} new takes, cut in the middle of its pauses '
                                 f'({lengths}{", ..." if len(ranges) > 8 else ""} seconds). This take stays as it is, and the '
                                 'new takes start from the original recording, without its edits.', yes=f'Make {len(ranges)} takes'):
-            try:
-                s.workspace.split_take(take)
-            except OSError as e:
-                self.dialogs.notice('error', 'Could not split the take', str(e))
+            s.batch.split(take, ranges)         # a part at a time, with Stop: a long take makes hundreds
 
     def rerecord(self):
         if self.session.current is not None and self._discard_current(
@@ -788,11 +829,39 @@ class MainWindow(QMainWindow):
         self.import_files(self.dialogs.choose_files('Import recordings', self.session.lib.root))
 
     def import_files(self, paths):
-        """Copy recordings in as takes, the last one in front. One that cannot be read is said in a notice, once the
-        rest are in. FFmpeg can take a few seconds over a long M4A, so the cursor shows that the window is busy."""
+        """Copy recordings in as takes, the last one in front. A few short ones are copied at once, under the busy cursor.
+        More than that, or a format FFmpeg has to write out first (its length is not known until then), are copied a block
+        at a time, with how far it has got in the status line and Stop. A recording long enough to slow everything down is
+        asked about first; one too long for this computer's memory is refused, with what to do. One that cannot be read is
+        said in a notice."""
+        s = self.session
         paths = list(paths)
-        if not paths:
+        if not paths or s.capturing.recording:
             return
+        if s.batch.running:                         # dropped on the window while something else is under way
+            s.bus.status('Wait for this to finish, or press Stop, before importing more.')
+            return
+        wanted, seconds, unknown = [], 0.0, False
+        for path in paths:
+            try:
+                shape = audio_import.shape_of(path)
+            except (RuntimeError, OSError):         # the import says what is wrong with it
+                wanted.append(path)
+                continue
+            if shape is None:
+                unknown = True
+            else:
+                fit = audio_import.fit(*shape)
+                if fit.verdict == 'warn' and not self._long_import_wanted(Path(path).name, fit):
+                    continue
+                seconds += fit.seconds if fit.verdict != 'refuse' else 0.0
+            wanted.append(path)
+        if not wanted:
+            return
+        if unknown or seconds > SHORT_IMPORT_SECONDS:
+            s.batch.import_files(wanted)
+            return
+        paths = wanted
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         imported = 0
         try:
@@ -805,6 +874,18 @@ class MainWindow(QMainWindow):
             QApplication.restoreOverrideCursor()
         if imported > 1:
             self.session.bus.status(f'Imported {imported} recordings. Edit each one, then Keep.')
+
+    def _long_import_wanted(self, name, fit):
+        """Ask before importing a recording long enough to make every step slow, and to use much of the memory."""
+        length = audio_import.duration_text(fit.seconds)
+        if fit.memory:
+            text = tr('{name} is {length} long. Working on it will use about {needed} GB of memory, of the {memory} GB this '
+                      'computer has, and measuring, playing and keeping it will each take a while. Import it?').format(
+                name=name, length=length, needed=f'{fit.needed / 2**30:.1f}', memory=f'{fit.memory / 2**30:.0f}')
+        else:
+            text = tr('{name} is {length} long, and measuring, playing and keeping it will each take a while. Import '
+                      'it?').format(name=name, length=length)
+        return self.dialogs.confirm('Import a long recording?', text, yes='Import it', no='Leave it out')
 
     def new_speaker(self):
         name = self.dialogs.ask_text('New speaker', 'Name of the voice you are recording:')

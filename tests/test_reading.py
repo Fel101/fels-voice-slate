@@ -3,6 +3,7 @@ import json
 
 import numpy as np
 import pytest
+import soundfile as sf
 
 from helpers import bursts, fill, record, settle
 from recorder import transcript
@@ -294,7 +295,9 @@ def test_the_parts_sound_as_the_recording_did(session):
     session.workspace.set_purpose('sentence')
     take = record(session, samples=long_take())
     parts = session.workspace.split_take()
-    assert np.array_equal(np.concatenate([part.samples for part in parts]), take.samples)
+    # Each part is read back from its original, as the long take is from its own: 24-bit, the same on both sides.
+    original, _ = sf.read(str(take.master_path), dtype='float32')
+    assert np.array_equal(np.concatenate([part.samples for part in parts]), original)
 
 
 def test_the_list_shows_the_parts_in_the_order_they_were_said(session):

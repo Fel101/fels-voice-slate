@@ -15,7 +15,7 @@ from .. import settings
 from ..core import analysis, reading
 from ..core.edits import words_key
 from ..i18n import tr
-from ..store import Library, Take, now_iso, out_of_reach
+from ..store import Importing, Library, Take, now_iso, out_of_reach
 
 Step = namedtuple('Step', 'key label done detail')           # a rule that must be met before Keep
 Advice = namedtuple('Advice', 'key text')                     # something worth knowing that does not block Keep
@@ -284,17 +284,35 @@ class Workspace:
         return take
 
     def import_file(self, path):
-        """Copy a recording from anywhere into the speaker's folder as a take. Returns None, with a notice, on failure."""
+        """Copy a recording from anywhere into the speaker's folder as a take, all at once. Returns None, with a notice, on
+        failure. Batch.import_files does the same a block at a time, for a long recording."""
+        importing = self.start_import(path)
+        if importing is None:
+            return None
+        try:
+            importing.run()
+        except Exception as e:                  # unreadable or unsupported file: say so, keep running
+            importing.cancel()
+            self.bus.notice('error', 'Could not import', f'{Path(path).name}: {e}')
+            return None
+        return self.finish_import(importing)
+
+    def start_import(self, path):
+        """Begin copying a recording in (store.Importing). None, with a notice, when it cannot begin."""
         if self.check_root() is not None:
             self.bus.notice('error', 'Could not import', self._refused(
                 'Your recordings folder cannot be reached, so there is nowhere to put {name}: {folder}', name=Path(path).name))
             return None
         try:
             slug = self.speaker or self.ensure_speaker()
-            take = self.lib.import_file(slug, path, self.purpose.key)
-        except Exception as e:                  # unreadable or unsupported file: say so, keep running
+        except (OSError, ValueError) as e:
             self.bus.notice('error', 'Could not import', f'{Path(path).name}: {e}')
             return None
+        return Importing(self.lib, slug, path, self.purpose.key)
+
+    def finish_import(self, importing):
+        """List and open the take of a finished import, and ask for its draft."""
+        take, path = importing.take, importing.path
         self.takes.insert(0, take)
         self.bus.notify('takes')
         self.open_take(take)
@@ -486,38 +504,61 @@ class Workspace:
         ranges = self.split_ranges(take) if take is not None else []
         if len(ranges) < 2:
             return []
+        parts = []
+        try:
+            for first, end in ranges:
+                parts.append(self.split_part(take, first, end))
+        finally:
+            self.split_done(take, parts, len(ranges), stopped=len(parts) < len(ranges))
+        return parts
+
+    def split_part(self, take, first, end):
+        """Make the part of `take` from sample `first` to `end` a take of its own, with its original written to disk, and
+        list it. Its audio is let go of once it is written: it is read back when it is opened. Raises OSError, with nothing
+        listed, when the original cannot be written."""
         started = dt.datetime.fromisoformat(take.created)
         words = take.meta.get('draft_words') or []
-        parts = []
-        for first, end in ranges:
-            begin, stop = first / take.rate, end / take.rate
-            created = (started + dt.timedelta(seconds=begin)).isoformat(timespec='seconds')
-            part = Take(source=take.source, samples=np.array(take.samples[first:end]), rate=take.rate, created=created,
-                        device=dict(take.device), speaker=take.speaker, unsaved=True,
-                        flags=[flag for flag in take.flags if flag in KEPT_THROUGH_A_SPLIT] + ['split'],
-                        meta={'origin': take.meta.get('origin', ''), 'allowed_use': take.meta.get('allowed_use', ''),
-                              'purpose': take.purpose.key,
-                              'split_from': {'take': take.id, 'start_seconds': round(begin, 3), 'end_seconds': round(stop, 3)}})
-            heard = reading.words_between(words, begin, stop)
-            if heard:
-                part.meta.update(transcript=heard, draft_text=heard, transcript_status='asr_draft',
-                                 draft_heard=words_key(part.history),
-                                 draft_words=[(word, round(a - begin, 3), round(b - begin, 3)) for word, a, b in words
-                                              if begin <= (a + b) / 2 < stop])
-                part.draft_key = words_key(part.history)
-            self.lib.save_master(take.speaker or self.speaker, part)
-            self.lib.autosave(part)
-            parts.append(part)
-            self.takes.append(part)
+        begin, stop = first / take.rate, end / take.rate
+        created = (started + dt.timedelta(seconds=begin)).isoformat(timespec='seconds')
+        part = Take(source=take.source, samples=np.array(take.samples[first:end]), rate=take.rate, created=created,
+                    device=dict(take.device), speaker=take.speaker, unsaved=True,
+                    flags=[flag for flag in take.flags if flag in KEPT_THROUGH_A_SPLIT] + ['split'],
+                    meta={'origin': take.meta.get('origin', ''), 'allowed_use': take.meta.get('allowed_use', ''),
+                          'purpose': take.purpose.key,
+                          'split_from': {'take': take.id, 'start_seconds': round(begin, 3), 'end_seconds': round(stop, 3)}})
+        heard = reading.words_between(words, begin, stop)
+        if heard:
+            part.meta.update(transcript=heard, draft_text=heard, transcript_status='asr_draft',
+                             draft_heard=words_key(part.history),
+                             draft_words=[(word, round(a - begin, 3), round(b - begin, 3)) for word, a, b in words
+                                          if begin <= (a + b) / 2 < stop])
+            part.draft_key = words_key(part.history)
+        self.lib.save_master(take.speaker or self.speaker, part)
+        self.lib.autosave(part)
+        if part.can_let_go:
+            part.let_go()
+        self.takes.append(part)
+        return part
+
+    def split_done(self, take, parts, total, stopped=False):
+        """Show the parts of a split (split_part), the first one in front, and ask for a draft of each part the long take's
+        draft had no words for. `total` is how many parts there were to be."""
         self.takes.sort(key=lambda t: t.created, reverse=True)
         self._remember_takes()
         self.bus.notify('takes')
+        if not parts:
+            self.bus.status(tr('The take was not split.'))
+            return
         self.open_take(parts[0])
         for part in parts:
-            if not part.meta['transcript'] and self.on_take_added is not None:
+            if not part.meta['transcript'] and self.on_take_added is not None and not self.closing:
                 self.on_take_added(part)
-        self.bus.status(f'Split into {len(parts)} takes. The long take is still there: discard it once you have what you want.')
-        return parts
+        if stopped or len(parts) < total:
+            self.bus.status(tr('Stopped after {count} of {total} parts. The parts made are in the list, and the long take is '
+                               'still there.').format(count=len(parts), total=total))
+        else:
+            self.bus.status(tr('Split into {count} takes. The long take is still there: discard it once you have what you '
+                               'want.').format(count=len(parts)))
 
     def move_take(self, slug, take=None):
         """File a take (the open one unless another is given) under another speaker. Returns the old files that could

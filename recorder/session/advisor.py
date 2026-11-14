@@ -109,7 +109,7 @@ class Advisor:
 
         def work():
             diagnosis = autofix.diagnose(take.samples, take.rate, history, lambda recipe: lib.before_level(take, recipe),
-                                         denoise_ok=can_clean, purpose=purpose)
+                                         denoise_ok=can_clean, purpose=purpose, mono=take.mono)
             return Advice(key, diagnosis, '')
 
         def arrived(result):

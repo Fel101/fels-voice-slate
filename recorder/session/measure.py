@@ -14,6 +14,7 @@ from ..core import analysis
 
 Derived = namedtuple('Derived', 'key stats report error')
 THUMB_COLUMNS = 90
+PYRAMID_AT_ONCE = 1 << 24       # samples (about six minutes at 48 kHz): a longer take's peak pyramid is built in the background
 
 
 def frozen(history):
@@ -85,11 +86,24 @@ class Measurements:
         return None
 
     def pyramid(self, take):
-        """The master's peak pyramid for drawing, built once per take."""
+        """The master's peak pyramid for drawing, built once per take: at once for a take of a few minutes, and in the
+        background for a longer one, which has none (None) until it arrives."""
         pyramid = take.cache.get('pyramid')                 # read once: another thread can drop it (store._Resident)
-        if pyramid is None:
+        if pyramid is not None:
+            return pyramid
+        if take.frames <= PYRAMID_AT_ONCE:
             pyramid = take.cache['pyramid'] = analysis.PeakPyramid(take.mono)
-        return pyramid
+            return pyramid
+        if not take.cache.get('pyramid_requested'):
+            take.cache['pyramid_requested'] = True
+
+            def done(result):
+                take.cache['pyramid'] = result
+                self.bus.notify('analysis')
+
+            self.jobs.submit(lambda: analysis.PeakPyramid(take.mono), done,
+                             lambda error: take.cache.update(pyramid_requested=False), about=take)
+        return None
 
     def thumbnail(self, take):
         """The take's outline for the list, as (highs, lows) in THUMB_COLUMNS columns, or None until it has been worked out.
@@ -99,7 +113,7 @@ class Measurements:
             take.cache['thumb_requested'] = True
 
             def work():
-                pyramid = analysis.PeakPyramid(take.mono)
+                pyramid = take.cache.get('pyramid') or analysis.PeakPyramid(take.mono)
                 lo, hi = pyramid.columns(0, pyramid.n, THUMB_COLUMNS)
                 return hi, lo
 

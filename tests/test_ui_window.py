@@ -15,7 +15,7 @@ from PySide6.QtGui import QDropEvent  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 import ui_helpers  # noqa: E402
-from helpers import RATE, fill, record, speech  # noqa: E402
+from helpers import RATE, fill, finish_batch, record, speech  # noqa: E402
 from recorder import audio_import, clean, settings  # noqa: E402
 from recorder.ui.editor_panel import EditorPanel  # noqa: E402
 from recorder.ui.inspector import Inspector  # noqa: E402
@@ -386,6 +386,7 @@ def test_a_phone_recording_dropped_on_the_window_is_imported_through_ffmpeg(wind
 
     monkeypatch.setattr(audio_import.subprocess, 'run', ffmpeg)
     drop(window, memo)
+    finish_batch(session)       # its length is known once FFmpeg has written it out, so it comes in a block at a time
     assert [take.device['name'] for take in session.workspace.takes] == ['Voice memo.m4a']
 
 

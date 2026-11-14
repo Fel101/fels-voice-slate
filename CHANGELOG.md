@@ -23,6 +23,15 @@ the project uses [Semantic Versioning](https://semver.org/).
   came after 18.2 s. Drafts now have a lane of their own and the take in front goes first: the same import showed them after
   0.4 s. A draft for a take discarded meanwhile is not made, the bottom of the window says how many drafts are waiting, and
   closing the window does not wait for them. The audio for a draft is now prepared in the background too.
+- **Long recordings no longer freeze the window or need twice the memory.** Importing a 45-minute stereo recording froze the
+  window for 2 s and splitting it for 13 s, and the program used 5.6 GB at its peak. Import and Split now go a piece at a time,
+  with how far they have got in the status line and **Stop**: the longest pause was 0.1 s, and the peak 3.1 GB. Each part of a
+  split is written to disk as it is made. The waveform of a long take is drawn in the background, and opening the take
+  after the import no longer holds the window for 2.5 s. Keep, Play, opening a take from the list and looking for the
+  pauses of a take over two minutes long show the busy cursor and say what is happening. Play after Normalize went from
+  0.36 s to 0.03 s, and each edit of a 10-minute take from 0.3 s to under 0.01 s. A recording too long for this computer's memory is refused before anything is copied, with its
+  length, what it would need and how short its parts should be. One over an hour, or that would use more than a third of the
+  memory, is asked about first. A stopped import leaves nothing behind.
 
 ## [0.6.0] - 2026-11-04
 

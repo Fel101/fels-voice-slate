@@ -31,6 +31,7 @@ import os
 import re
 import shutil
 import threading
+import time
 import uuid
 import weakref
 from collections import OrderedDict
@@ -199,7 +200,7 @@ class _Resident:
     use always stays, however large, and so does a take whose original is not on disk."""
 
     MAX_BYTES = 256 << 20
-    FROM_THE_AUDIO = ('mono', 'pyramid', 'spectrogram', 'spectrogram_image', 'spectrogram_requested')
+    FROM_THE_AUDIO = ('mono', 'pyramid', 'pyramid_requested', 'spectrogram', 'spectrogram_image', 'spectrogram_requested')
 
     def __init__(self):
         self._lock = threading.Lock()
@@ -448,6 +449,218 @@ class Relocation:
         for path in self.done:
             _remove(self.target / path.relative_to(self.source))
         shutil.rmtree(self.target, ignore_errors=True)
+
+
+class TooLong(ValueError):
+    """A recording too long for this computer's memory. The message says how long it is and what to do."""
+
+
+def too_long_text(fit):
+    """Why a recording is refused, and what to do, after its name and a colon, as the other reasons an import fails."""
+    return (f'it is {audio_import.duration_text(fit.seconds)} long, and working on it would need about '
+            f'{fit.needed / 2**30:.1f} GB of memory; this computer has {fit.memory / 2**30:.0f} GB. Cut it into parts '
+            f'shorter than {audio_import.duration_text(fit.longest)} with another program, and import those.')
+
+
+class Importing:
+    """A recording being copied in as a take, a block at a time, so that a long one can show how far it has got and be
+    stopped. `step()` does one block and returns True once the take is complete; `cancel()` removes what was written.
+
+    A format FFmpeg reads is decoded first, on a thread of its own, while `step()` keeps returning False. The original is
+    written under a temporary name and renamed when every block has arrived, so a stopped import leaves nothing behind.
+    Closing it, putting it on the disk and renaming it happen on a thread of their own too: Windows looks a long file over
+    as it is closed, which took a third of a second for 45 minutes of stereo.
+    """
+
+    BLOCK_FRAMES = 1 << 19          # about ten seconds at 48 kHz, which takes a few milliseconds to read and write
+
+    def __init__(self, lib, slug, path, purpose=ac.DEFAULT_PURPOSE, memory=None):
+        self.lib, self.slug, self.path, self.purpose, self.memory = lib, slug, Path(path), purpose, memory
+        self.take = None
+        self.done = 0
+        self.frames = None
+        self._source = self._writer = self._tmp = None
+        self._decoding = None           # (thread, outcome) while FFmpeg writes it out
+        self._closing = None            # (thread, outcome) while the original is closed and renamed
+        self._samples = None
+        self._mono = None               # the mono mix of a recording of several channels, worked out a block at a time
+        self._finished = False
+
+    @property
+    def progress(self):
+        """How much has been copied, from 0 to 1."""
+        return self.done / self.frames if self.frames else 0.0
+
+    @property
+    def waiting(self):
+        """True while FFmpeg is still writing the recording out, or the original is being closed: there is nothing to do
+        until that is done."""
+        return any(pair is not None and pair[0].is_alive() for pair in (self._decoding, self._closing))
+
+    def step(self):
+        if self._finished:
+            return True
+        if self._closing is not None:
+            return self._closed()
+        if self._source is None and not self._open():
+            return False
+        block = self._source.read(self.BLOCK_FRAMES, dtype='float32', always_2d=True)
+        if len(block):
+            if not np.isfinite(block).all():
+                raise ValueError('the file is damaged: some of its samples are not numbers')
+            if self.done + len(block) > len(self._samples):        # the file said it was shorter: an MP3 can
+                self._samples = np.concatenate([self._samples, np.empty_like(block)])
+                if self._mono is not None:
+                    self._mono = np.concatenate([self._mono, np.empty(len(block), dtype=np.float32)])
+            self._samples[self.done:self.done + len(block)] = block
+            if self._mono is not None:      # here, a block at a time, not on the window's thread all at once later
+                self._mono[self.done:self.done + len(block)] = ac.to_mono(block)
+            try:
+                self._writer.write(block)
+            except RuntimeError as e:
+                raise OSError(f'{self._tmp.name} could not be written: {e}') from e
+            self.done += len(block)
+        if len(block) < self.BLOCK_FRAMES:
+            if self.done == 0:
+                raise ValueError('the file holds no audio')
+            self._close_source()
+            self._start_closing()
+            return self._closed()
+        return False
+
+    def run(self):
+        """Do it all now, with a short sleep while a thread of its own has the work. Returns the take."""
+        while not self.step():
+            if self.waiting:
+                time.sleep(0.005)
+        return self.take
+
+    def _open(self):
+        """Open the recording, after FFmpeg has written it out if it has to. False while that is still going."""
+        if audio_import.needs_decoding(self.path) and self._decoding is None:
+            outcome = {}
+
+            def decode():
+                try:
+                    outcome['source'] = audio_import.open_audio(self.path)
+                except BaseException as e:      # handed to the window's thread in step()
+                    outcome['error'] = e
+
+            thread = threading.Thread(target=decode, name='recorder-decode', daemon=True)
+            self._decoding = (thread, outcome)
+            thread.start()
+        if self._decoding is not None:
+            thread, outcome = self._decoding
+            if thread.is_alive():
+                return False
+            if 'error' in outcome:
+                raise outcome['error']
+            self._opened = outcome['source']
+        else:
+            self._opened = audio_import.open_audio(self.path)
+        self._source = self._opened.file
+        self.frames, rate, channels = self._source.frames, self._source.samplerate, self._source.channels
+        if self.frames <= 0:
+            raise ValueError('the file holds no audio')
+        fit = audio_import.fit(self.frames, rate, channels, self.memory)
+        if fit.verdict == 'refuse':
+            raise TooLong(too_long_text(fit))
+        self._samples = np.empty((self.frames, channels), dtype=np.float32)
+        self._mono = np.empty(self.frames, dtype=np.float32) if channels > 1 else None
+        # Only the file's name goes in the take, and so into the sidecar that travels with the clip: where the file was
+        # on this computer (a user name, say) is nobody else's business.
+        self.take = Take(source='import', samples=None, rate=int(rate), device={'name': self.path.name}, flags=['imported'],
+                         meta={**self.lib.speaker_defaults(self.slug), 'purpose': self.purpose}, speaker=self.slug,
+                         frames=self.frames, channels=channels)      # its length is known before its audio arrives
+        target = self.lib.folder(self.slug) / 'masters' / f'{self.take.stem}.raw.wav'
+        target.parent.mkdir(parents=True, exist_ok=True)
+        self._tmp = target.with_name(target.name + '.tmp')
+        try:
+            self._writer = sf.SoundFile(str(self._tmp), 'w', int(rate), channels, MASTER_SUBTYPE, format='WAV')
+        except RuntimeError as e:
+            raise OSError(f'{target.name} could not be written: {e}') from e
+        return True
+
+    def _start_closing(self):
+        """Close the original, put it on the disk and give it its name, on a thread of its own."""
+        writer, tmp = self._writer, self._tmp
+        target = tmp.with_name(tmp.name[:-len('.tmp')])
+        outcome = {}
+
+        def close():
+            try:
+                try:
+                    writer.close()
+                except RuntimeError as e:       # SoundFile's own errors
+                    raise OSError(f'{target.name} could not be written: {e}') from e
+                sync_file(tmp)
+                os.replace(tmp, target)
+                outcome['target'] = target
+            except BaseException as e:          # handed to the window's thread in step()
+                outcome['error'] = e
+
+        self._writer = None
+        thread = threading.Thread(target=close, name='recorder-import-close', daemon=True)
+        self._closing = (thread, outcome)
+        thread.start()
+
+    def _closed(self):
+        """Once the original has its name, the take is complete. False while it is still being closed."""
+        thread, outcome = self._closing
+        if thread.is_alive():
+            return False
+        if 'error' in outcome:
+            raise outcome['error']
+        self._closing, self._tmp = None, None
+        target = outcome['target']
+        samples = self._samples[:self.done]
+        _set_samples(self.take, samples if samples.shape[1] > 1 else samples[:, 0])
+        if self._mono is not None:
+            self.take.cache['mono'] = self._mono[:self.done]
+            self._mono = None
+        if self.done != self.frames:            # an MP3's length is an estimate until it has been read
+            self.take.history = History(seconds=self.take.seconds)
+        self._samples = None
+        self.take.master_path = target
+        self.take.unsaved = False
+        self._finished = True
+        return True
+
+    def _close_source(self):
+        opened = getattr(self, '_opened', None)
+        if opened is not None:
+            opened.close()
+            self._opened = None
+        self._source = None
+
+    def cancel(self):
+        """Stop: close the files and remove the original written so far. The take does not exist."""
+        if self._finished:
+            return
+        if self._writer is not None:
+            try:
+                self._writer.close()
+            except RuntimeError:
+                pass
+            self._writer = None
+        if self._closing is not None:           # a moment's wait: the original is being closed, and goes once it is
+            thread, outcome = self._closing
+            thread.join()
+            if 'target' in outcome:
+                _remove(outcome['target'])
+            self._closing = None
+        if self._tmp is not None:
+            _remove(self._tmp)
+            self._tmp = None
+        if self._decoding is not None and self._decoding[0].is_alive():
+            # FFmpeg is still writing its temporary WAV: it is removed when FFmpeg is done, by whoever opened it.
+            thread, outcome = self._decoding
+            threading.Thread(target=lambda: (thread.join(), outcome.get('source') and outcome['source'].close()),
+                             daemon=True).start()
+        self._close_source()
+        self._samples = self._mono = None
+        self.take = None
+        self._finished = True
 
 
 @dataclass(frozen=True)
@@ -709,21 +922,17 @@ class Library:
         self._drop_spool(take)
         return take.master_path
 
-    def import_file(self, slug, path, purpose=ac.DEFAULT_PURPOSE):
+    def import_file(self, slug, path, purpose=ac.DEFAULT_PURPOSE, memory=None):
         """Copy a recording from anywhere on disk into the speaker's masters, as a take ready to edit. A format soundfile
-        does not read, such as a phone's M4A, is decoded by FFmpeg when it is installed (see audio_import.py)."""
-        samples, rate = audio_import.read_audio(path)
-        if samples.size == 0:
-            raise ValueError('the file holds no audio')
-        if not np.isfinite(samples).all():
-            raise ValueError('the file is damaged: some of its samples are not numbers')
-        # Only the file's name goes in the take, and so into the sidecar that travels with the clip: where the file was
-        # on this computer (a user name, say) is nobody else's business.
-        take = Take(source='import', samples=samples, rate=int(rate),
-                    device={'name': Path(path).name}, flags=['imported'],
-                    meta={**self.speaker_defaults(slug), 'purpose': purpose}, speaker=slug)
-        self.save_master(slug, take)
-        return take
+        does not read, such as a phone's M4A, is decoded by FFmpeg when it is installed (see audio_import.py). All at once:
+        Importing does the same a block at a time, for a long recording."""
+        importing = Importing(self, slug, path, purpose, memory)
+        try:
+            importing.run()
+        except BaseException:
+            importing.cancel()
+            raise
+        return importing.take
 
     def discard(self, take, permanent=False):
         """Remove the take's files: to the Recycle Bin, or for good when `permanent`.
@@ -962,22 +1171,21 @@ class Library:
         `recipe` (anything with .edits, .chain and .fade_ms) defaults to the take's own; a background job passes a
         frozen copy so that edits made meanwhile cannot change what it renders.
         """
-        return render.before_level(take.samples, take.rate, recipe or take.history, self._denoiser(), self.cache,
-                                   take.id)
+        return render.before_level(take.mono, take.rate, recipe or take.history, self._denoiser(), self.cache, take.id)
 
     def process_native(self, take, recipe=None):
         """The edited clip at its own rate, mono: regions, cuts, filters, cleaning, gain and limiter."""
-        return render.process(take.samples, take.rate, recipe or take.history, self._denoiser(), self.cache, take.id)
+        return render.process(take.mono, take.rate, recipe or take.history, self._denoiser(), self.cache, take.id)
 
     def export_for(self, take, recipe=None):
         """What the export WAV would hold right now: the same chain as process_native, at the rate the clip is kept at."""
-        return render.export_samples(take.samples, take.rate, recipe or take.history, self._denoiser(), self.cache,
+        return render.export_samples(take.mono, take.rate, recipe or take.history, self._denoiser(), self.cache,
                                      take.id, take.export_rate)
 
     def stats_for(self, take, export, recipe=None):
         """What the keep rules judge: the measurements of `export`, and the clipping of the recording it was made from."""
         return {**ac.measure(export, take.export_rate),
-                **render.recorded_clipping(take.samples, take.rate, recipe or take.history)}
+                **render.recorded_clipping(take.samples, take.rate, recipe or take.history, take.mono)}
 
     def _place_master(self, folder, take):
         """The stem a take is kept under. Its original is written now if it is not on disk yet."""

@@ -264,6 +264,18 @@ def record(session, seconds=12.0, source='mic', samples=None, **kwargs):
     return session.workspace.add_take(speech(seconds) if samples is None else samples, RATE, source, {}, **kwargs)
 
 
+def finish_batch(session, limit=10.0):
+    """Run the batch job under way to its end, as the window's ticks do. A step waiting for FFmpeg's own thread is given
+    the time it needs, up to `limit` seconds."""
+    import time
+    give_up = time.monotonic() + limit
+    while session.batch.running:
+        session.batch.tick()
+        if session.batch.running:
+            assert time.monotonic() < give_up, 'the batch did not finish'
+            time.sleep(0.002)
+
+
 def settle(session):
     """Deliver every finished background job."""
     session.jobs.drain()

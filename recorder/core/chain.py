@@ -149,11 +149,12 @@ def _slow_release(deficit, decay, block=1 << 17):
 
 def apply_level(x, rate, chain):
     """Gain, then the limiter if it is on. Without the limiter the result is clipped at full scale, as before."""
-    x = np.asarray(x, dtype=np.float32)
+    given = x = np.asarray(x, dtype=np.float32)
     gain_db = chain['level']['gain_db']
     limiter = chain['limiter']
     if gain_db:
         x = x * np.float32(10.0 ** (gain_db / 20.0))
     if limiter['enabled']:
         x = limit(x, rate, limiter['ceiling_db'])
-    return np.clip(x, -1.0, 1.0).astype(np.float32, copy=False)
+    # The input may be a stage the render cache keeps, so it is never changed; an array made here is clipped where it is.
+    return np.clip(x, -1.0, 1.0) if x is given else np.clip(x, -1.0, 1.0, out=x)

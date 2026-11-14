@@ -1,7 +1,10 @@
-"""Doing something to many takes: keeping, discarding or moving them, a few at a time.
+"""Doing something to many takes: keeping, discarding or moving them, a few at a time; and the long jobs on one take that
+must not freeze the window: importing recordings and splitting a take.
 
 The work runs in `tick`, a slice at a time, so the window stays alive and the person can stop it. Nothing here happens on a
-worker thread, because each step changes the files and the lists the window shows.
+worker thread, because each step changes the files and the lists the window shows. A step that has more of the same item
+to do returns MORE (an import copies a long recording a block at a time), and one that can do nothing until later returns
+WAIT (FFmpeg is still writing the recording out on a thread of its own).
 
 Keeping many takes at once still needs the statement that the person has the right to use the voice. It is made in one
 sitting for a list the person has in front of them: the window shows the takes and what each says about its origin and
@@ -16,6 +19,8 @@ from ..clean import CleanError
 from ..store import KeepBlocked, TrashUnavailable, now_iso
 
 SLICE_SECONDS = 0.04        # how long one tick may work, so that the window keeps moving
+MORE = 'more'               # a step's item is not finished: it is called again with the same one
+WAIT = 'wait'               # nor can it go on yet: it is called again on the next tick
 
 
 class Batch:
@@ -29,6 +34,7 @@ class Batch:
         self.done = 0
         self.ok = 0
         self.left_out = []          # (what, why) for each item that was not done
+        self.part = None            # how far the item being worked on has got, from 0 to 1, when it takes a while
         self._step = None
         self._finish = None
 
@@ -40,7 +46,11 @@ class Batch:
 
     @property
     def progress_text(self):
-        return f'{self.title}: {self.done} of {len(self.items)}'
+        if self.part is None:
+            return f'{self.title}: {self.done} of {len(self.items)}'
+        if len(self.items) == 1:
+            return f'{self.title}: {self.part:.0%}'
+        return f'{self.title}: {self.done + 1} of {len(self.items)}, {self.part:.0%}'
 
     # ---- the three jobs -----------------------------------------------------------------------------------------------
 
@@ -136,6 +146,67 @@ class Batch:
 
         self._start('Moving your recordings', relocation.files, step, finish)
 
+    def import_files(self, paths):
+        """Copy recordings in as takes (store.Importing), a block at a time, each one opening as it arrives. One that cannot
+        be read is listed at the end. When there is nowhere to put them, because the folder cannot be reached, the job stops
+        and that is said once, not for each file. Stopped, the recording being copied is left out and nothing of it stays."""
+        state = {'importing': None}
+
+        def drop():
+            importing, state['importing'] = state['importing'], None
+            if importing is not None:
+                importing.cancel()
+
+        def step(path):
+            importing = state['importing']
+            if importing is None:
+                importing = state['importing'] = self.workspace.start_import(path)
+                if importing is None:               # the notice says why
+                    self.cancel()
+                    return None
+            try:
+                finished = importing.step()
+            except Exception as e:                  # unreadable, unsupported or too long: say so at the end, go on
+                drop()
+                self.left_out.append((Path(path).name, str(e)))
+                return None
+            if not finished:
+                self.part = importing.progress
+                return WAIT if importing.waiting else MORE
+            state['importing'] = None
+            self.workspace.finish_import(importing)
+            self.ok += 1
+            return None
+
+        def finish(stopped):
+            drop()
+            if stopped:
+                self.bus.status(f'Stopped. Imported {self.ok} of {len(self.items)} recordings.')
+            elif self.ok > 1:
+                self.bus.status(f'Imported {self.ok} recordings. Edit each one, then Keep.')
+
+        self._start('Importing recordings', paths, step, finish)
+
+    def split(self, take, ranges):
+        """Make a new take of each part of `take`, (first, end) sample ranges of its original (Workspace.split_part). Each
+        part's original is written as it is made and its audio let go of, so a long take is not held in memory twice.
+        Stopped, or when a part cannot be written, the parts already made stay."""
+        parts = []
+
+        def step(span):
+            try:
+                parts.append(self.workspace.split_part(take, *span))
+            except OSError as e:
+                self.left_out.append((f'The part at {span[0] / take.rate:.1f} s', str(e)))
+                self.cancel()
+                return
+            self.ok += 1
+
+        def finish(stopped):
+            self.workspace.split_done(take, parts, len(self.items), stopped)
+
+        self._start('Splitting the take', ranges, step, finish)
+
     def _keep_one(self, take, origin, allowed_use, stated_at, covered):
         meta = take.meta
         before = {key: meta.get(key) for key in ('origin', 'allowed_use', 'consent_confirmed', 'consent_confirmed_at',
@@ -173,7 +244,7 @@ class Batch:
 
     def _start(self, title, items, step, finish):
         self.title, self.items = title, list(items)
-        self.done, self.ok, self.left_out = 0, 0, []
+        self.done, self.ok, self.left_out, self.part = 0, 0, [], None
         self._step, self._finish = step, finish
         self.bus.notify('batch')
 
@@ -185,7 +256,13 @@ class Batch:
         while self.running and self.done < len(self.items) and self.clock() - started < SLICE_SECONDS:
             item = self.items[self.done]
             self.done += 1
-            self._step(item)
+            outcome = self._step(item)
+            if outcome in (MORE, WAIT) and self.running:
+                self.done -= 1                      # the same item again
+                if outcome == WAIT:
+                    break
+            else:
+                self.part = None
         if self.running and self.done >= len(self.items):
             self._end(False)
         elif self.running:
@@ -193,12 +270,12 @@ class Batch:
             self.bus.notify('batch')
 
     def cancel(self):
-        """Stop after the take being worked on. What has been done stays done."""
+        """Stop. What has been done stays done; a recording being imported is left out."""
         if self.running:
             self._end(True)
 
     def _end(self, stopped):
-        finish, self._step, self._finish = self._finish, None, None
+        finish, self._step, self._finish, self.part = self._finish, None, None, None
         finish(stopped)
         self.bus.notify('takes')
         self.bus.notify('batch')

@@ -70,7 +70,7 @@ class Transport:
     def _buffer(self, take, mode):
         if mode == 'edited':
             return (self.workspace.lib.process_native(take),
-                    render.segments_of(take.samples, take.rate, take.history.edits))
+                    render.segments_of(take.mono, take.rate, take.history.edits))
         return take.mono, None
 
     def _to_buffer_time(self, master_seconds):
@@ -236,7 +236,7 @@ class Transport:
         except CleanError as e:
             self.bus.status(str(e))
             return False
-        joins = render.join_positions(render.segments_of(take.samples, take.rate, take.history.edits))
+        joins = render.join_positions(render.segments_of(take.mono, take.rate, take.history.edits))
         if not joins:
             return False
         gap = np.zeros(int(0.5 * take.rate), dtype=np.float32)
