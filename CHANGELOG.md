@@ -13,6 +13,9 @@ the project uses [Semantic Versioning](https://semver.org/).
   chosen at first is Windows' default instead of MME's sound mapper. **List every Windows audio interface** in Settings
   brings the full lists back, and they come back by themselves when the usual interface has no device, as in a remote
   desktop session. A microphone, input or output chosen in 0.6 is found again, or the default is used.
+- **A take is recorded at the rate the microphone runs at.** The microphone chosen at first was MME's sound mapper, which
+  reports 44.1 kHz for every microphone, so an Audition from a 48 kHz microphone was recorded and kept at 44.1 kHz after
+  Windows had resampled it. It now comes out at 48 kHz, also from a microphone chosen through MME in 0.6.
 - A device with more than two inputs is opened with all of them when the first two are mixed, as it already was when one
   input is chosen, because Windows may refuse to open part of them.
 

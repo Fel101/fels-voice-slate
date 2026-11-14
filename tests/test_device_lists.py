@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+from helpers import speech
 from recorder import audio_io, capture as cap
 from recorder import devices, settings
 
@@ -213,6 +214,54 @@ def test_an_output_kept_from_mme_finds_the_device_and_not_mme(monkeypatch):
     sound_library(monkeypatch)
     assert audio_io.find_output('Speakers (Realtek(R) Audio)  [MME]') == 11
     assert audio_io.find_output('Speakers (Realtek(R) Audio)  [MME]', every=True) == 10
+
+
+# ---- the microphone's own rate ---------------------------------------------------------------------------------------------------
+
+def record_a_take(session, streams, clock, seconds=3.0):
+    """Record from the stand-in's stream as the sound card would deliver it, and stop. Returns the take."""
+    assert session.capturing.start() is True
+    stream = streams[-1]
+    rate, inputs = stream.options['samplerate'], stream.options['channels']
+    voice = speech(seconds, rate=rate)
+    flags = SimpleNamespace(input_overflow=False, input_underflow=False)
+    for start in range(0, len(voice), 1024):
+        block = np.repeat(voice[start:start + 1024, None], inputs, axis=1)
+        stream.options['callback'](block, len(block), None, flags)
+    session.capturing.stop()
+    clock.advance(1.5)
+    session.tick()
+    return session.workspace.current
+
+
+def test_a_take_from_the_microphone_chosen_at_first_is_at_its_own_rate(make_session, monkeypatch, real_lists, clock):
+    """The sound library's own default is MME's sound mapper, which reports 44.1 kHz whatever the microphone runs at, so
+    an Audition from a 48 kHz microphone came out at 44.1 kHz after Windows had resampled it."""
+    streams = sound_library(monkeypatch)
+    session = make_session()
+    session.workspace.set_purpose('audition')
+    take = record_a_take(session, streams, clock)
+    assert streams[0].options['device'] == 6 and streams[0].options['samplerate'] == 48000
+    assert take.rate == 48000 and take.export_rate == 48000
+
+
+def test_a_microphone_chosen_through_mme_in_0_6_now_records_at_its_own_rate(make_session, monkeypatch, real_lists, clock,
+                                                                              tmp_path):
+    streams = sound_library(monkeypatch)
+    settings.update({'input_device': {'mic': f'{STUDIO[:31]}  [MME]'}}, tmp_path / 'settings.json')
+    session = make_session()
+    session.workspace.set_purpose('audition')
+    assert record_a_take(session, streams, clock).rate == 48000
+
+
+def test_a_16_khz_headset_is_recorded_at_16_khz_and_not_made_up_to_more(make_session, monkeypatch, real_lists, clock):
+    """An Audition is never kept above the rate it was recorded at: that would add no detail."""
+    streams = sound_library(monkeypatch)
+    session = make_session()
+    session.capturing.select_device(7)
+    session.workspace.set_purpose('audition')
+    take = record_a_take(session, streams, clock)
+    assert take.rate == 16000 and take.export_rate == 16000
 
 
 # ---- several inputs ------------------------------------------------------------------------------------------------------------

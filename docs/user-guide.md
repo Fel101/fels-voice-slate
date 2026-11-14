@@ -60,7 +60,8 @@ Check tab, Auto fix and Keep all follow them.
 
 A recording can run past what can be kept, so it never stops in the middle of a sentence. The take can then be trimmed, or
 [split](#splitting-a-long-take). An audition is never kept above the rate it was recorded at, because that adds no detail: a
-44.1 kHz microphone gives a 44.1 kHz clip.
+44.1 kHz microphone gives a 44.1 kHz clip. Voice Slate records at the rate Windows runs the microphone at. To change it,
+open the microphone in Windows' *Settings > System > Sound* and choose another **Format**, such as 48000 Hz.
 
 The **Clip** tab changes the purpose of one take, beside its label. Changing it on a kept clip counts as a change, and
 **Update kept clip** writes the clip again in the new format.
