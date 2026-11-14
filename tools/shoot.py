@@ -190,14 +190,17 @@ def reading_take(app, window):
 
 
 def script_take(app, window):
-    """The Script tab, part of the way through a script."""
+    """The Script tab, part of the way through a script, with a line read twice: once with a word that differs, then as
+    written. The list shows the takes in script order, each with its reading check."""
     session = window.session
     session.script.load_text(SCRIPT)
     read_a_line(session)
     session.workspace.set_meta(consent_confirmed=True)
     session.keep()
+    read_a_line(session, 'A few gulls followed it out past the light.')
     read_a_line(session)
     window.flush()
+    window.library.show_takes(order='script')
     settle(app, session)
     measure(app, window)
     window.inspector.show_tab(window.inspector.SCRIPT_TAB)

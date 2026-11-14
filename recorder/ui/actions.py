@@ -62,6 +62,9 @@ SPEC = {
                                                            'permission for all of them', False),
     'discard_selected': ('Discard selected takes...', None, [], 'Move the takes selected in the list to the Recycle Bin',
                          False),
+    'discard_others': ('Discard the other takes of this line...', None, [], 'Move the takes of this script line that are '
+                                                                             'not kept, apart from this one, to the Recycle '
+                                                                             'Bin', False),
     'move_selected': ('Move selected takes to speaker...', None, [], 'File the takes selected in the list under a different '
                                                                       'speaker', False),
     'import_recording': ('Import recording...', 'import', ['Ctrl+O'], 'Copy one or more recordings in as new takes',

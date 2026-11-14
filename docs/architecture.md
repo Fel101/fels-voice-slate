@@ -107,7 +107,9 @@ audio and of what was worked out from it. The take in front (`in_use`) and a tak
 go. Another thread can let a take go at any moment, so code that reads `take.cache` for something made from the audio reads it once.
 
 The list of takes (`ui/library.py`) is a `QListView` over a model, drawn by a delegate, so only the rows on screen cost anything.
-`Measurements.thumbnail` works out the outline of a row in the background the first time it is drawn.
+`Measurements.thumbnail` works out the outline of a row in the background the first time it is drawn. What it shows is
+`library.arrange`: the takes, newest first as the workspace holds them, narrowed by the filter words and by the choice above
+the list, in the order chosen there. It reads only what the takes already hold, never their audio.
 
 `session/advisor.py` runs it. It works out the advice on a worker thread, caches it per take under the recipe it was
 made for (a result for an older recipe is dropped), follows the clip as it is edited, and applies a fix through

@@ -14,6 +14,7 @@ from ..i18n import tr
 from ..session.workspace import reading_of
 from ..store import LABEL_MAX
 from . import theme
+from .library import reading_said
 from .palette import PALETTE, color
 from .widgets import Segmented, Switch, button, caption, card, chip, clear_layout, hbox, label, set_chip, vbox
 
@@ -199,9 +200,7 @@ class ClipPage(QWidget):
         self.reading.setVisible(check is not None)
         if check is not None:
             count = reading.differences(check)
-            self.reading_title.setText(tr('Reading check: read as written') if not count else
-                                       tr('Reading check: {count} place differs' if count == 1 else
-                                          'Reading check: {count} places differ').format(count=count))
+            self.reading_title.setText(reading_said(count))
             self.reading_text.setText(reading_html(check))
             self.reading_text.setVisible(bool(count))
             heard = str(take.meta.get('draft_text') or '').strip()
@@ -584,9 +583,10 @@ class CheckPage(QWidget):
 # ---- the Script page --------------------------------------------------------------------------------------------------
 
 class ScriptPage(QWidget):
-    """Every line of the script and how far it has got: click a line to go to it."""
+    """Every line of the script, how many takes it has and how far it has got: click a line to go to it."""
 
     loadRequested = Signal()
+    showTakesRequested = Signal()
 
     MARKS = (('kept', '✓'), ('recorded', '●'), ('open', '○'))
 
@@ -603,10 +603,17 @@ class ScriptPage(QWidget):
         self.lines.itemClicked.connect(lambda item: self.session.script.go_to(self.lines.row(item)))
         self.lines.itemActivated.connect(lambda item: self.session.script.go_to(self.lines.row(item)))
         layout.addWidget(self.lines, 1)
-        row = hbox(spacing=8)
+        row = hbox(spacing=8)                   # two rows: three buttons do not fit side by side in the narrow tab
         self.next = button('Next line to record', None, None, 'Go to the next line that has no kept clip (Ctrl+Shift+Down)')
         self.next.clicked.connect(self._next)
         row.addWidget(self.next)
+        self.show_takes = button('Show its takes', 'ghost', None, 'List only the takes of the current line, to choose between '
+                                                                  'them')
+        self.show_takes.clicked.connect(self.showTakesRequested)
+        row.addWidget(self.show_takes)
+        row.addStretch(1)
+        layout.addLayout(row)
+        row = hbox(spacing=8)
         self.load = button('Load script...', 'ghost', None, 'Read prompts from a text file, one line per take')
         self.load.clicked.connect(self.loadRequested)
         row.addWidget(self.load)
@@ -620,14 +627,17 @@ class ScriptPage(QWidget):
 
     @staticmethod
     def _row(line):
+        """The mark, the number, how many takes the line has when it has more than one, and the line."""
         mark = '✓' if line.kept else '●' if line.takes else '○'
-        return f'{mark}  {line.number}.  {line.text}'
+        count = f'{line.takes}×  ' if line.takes > 1 else ''
+        return f'{mark}  {line.number}.  {count}{line.text}'
 
     @staticmethod
     def _spoken(line):
         """The line as a screen reader says it, where the eye has the mark."""
         state = tr('Kept') if line.kept else tr('Recorded') if line.takes else tr('Not recorded yet')
-        return f'{state}. {line.number}. {line.text}'
+        takes = f' {tr("{count} takes").format(count=line.takes)}.' if line.takes > 1 else ''
+        return f'{state}.{takes} {line.number}. {line.text}'
 
     def refresh(self):
         session = self.session
@@ -645,13 +655,15 @@ class ScriptPage(QWidget):
             self.lines.setCurrentRow(script.index)
             self.lines.scrollToItem(self.lines.currentItem())
         self.lines.blockSignals(False)
-        self.summary.setText(tr('{done} of {total} lines have a kept clip, for this speaker. ✓ kept, ● recorded, ○ not yet.')
+        self.summary.setText(tr('{done} of {total} lines have a kept clip, for this speaker. ✓ kept, ● recorded, ○ not yet; '
+                                '3× has three takes.')
                              .format(done=done, total=len(progress)) if progress else
                              tr('A script is a text file with one prompt on each line. Each take then gets a line as its '
                                 'transcript, and this list shows how far you have got. Your place is remembered when you '
                                 'close the program.'))
         self.lines.setVisible(bool(progress))
         self.next.setVisible(bool(progress))
+        self.show_takes.setVisible(bool(progress))
 
 
 # ---- the Keep checklist -----------------------------------------------------------------------------------------------
@@ -915,6 +927,7 @@ class Inspector(QWidget):
     autoAnalyzeRequested = Signal()
     autoFixRequested = Signal()
     loadScriptRequested = Signal()
+    showLineTakesRequested = Signal()
 
     REVIEW, RECORDING, IDLE = 0, 1, 2
     CLIP_TAB, PROCESS_TAB, CHECK_TAB, SCRIPT_TAB = 0, 1, 2, 3
@@ -939,6 +952,7 @@ class Inspector(QWidget):
         self.check = CheckPage(session)
         self.script = ScriptPage(session)
         self.script.loadRequested.connect(self.loadScriptRequested)
+        self.script.showTakesRequested.connect(self.showLineTakesRequested)
         self.pages = QStackedWidget()
         for page in (self.clip, self.process, self.check):
             self.pages.addWidget(scrolling(page))

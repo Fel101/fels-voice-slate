@@ -14,6 +14,11 @@ the project uses [Semantic Versioning](https://semver.org/).
   just read once more, and keeps the take of it that was there. The program makes no sound, so nothing of the count-in
   reaches a recording. A run only records: it never keeps a clip or ticks the permission box, and the microphone closes when
   it ends unless it was armed before. The sign on top of other windows shows a run between its takes too.
+- **Choosing between takes of one line.** The list of takes can be put in script order or oldest first, and narrowed to
+  the takes not kept, kept, changed since they were kept, or of the current script line. **Show its takes** on the Script
+  tab lists the takes of the line in front, each line there says how many takes it has, and each take of a script line
+  shows its reading check in the list. **Discard the other takes of this line...** sends the takes not chosen to the
+  Recycle Bin after one question, and leaves the take open and any kept clip.
 
 ### Changed
 

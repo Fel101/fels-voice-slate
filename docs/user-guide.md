@@ -136,9 +136,22 @@ Script mode shows one prompt per take, which is handy for reading a list of sent
    change it). After you **Keep** the take of the line on screen, the script moves to the next line that has no kept clip.
    Updating a kept clip, or keeping an older take of another line, leaves the script where it is.
 
-The **Script** tab lists every line with a mark: ✓ has a kept clip, ● has a take, ○ not yet. It is worked out from the takes of
-the speaker in front, so the same script can be read by several people. Click a line to go to it. **Next line to record**
-(`Ctrl+Shift+Down`) goes to the next line with no kept clip.
+The **Script** tab lists every line with a mark: ✓ has a kept clip, ● has a take, ○ not yet. A line read more than once
+says how many takes it has, as *3×*. It is worked out from the takes of the speaker in front, so the same script can be read
+by several people. Click a line to go to it. **Next line to record** (`Ctrl+Shift+Down`) goes to the next line with no kept
+clip.
+
+### Choosing between takes of one line
+
+When you read a line several times, **Show its takes** on the **Script** tab lists only the takes of the current line, so
+you can play them one after another. The list keeps showing the takes of the current line as you move along the script;
+choose **All takes** above the list to see every take again. With a draft transcript set up, each take of a script line
+has a mark after its state: a green ✓ when it was read as written, an amber ! when the reading check found places that
+differ. Its tooltip says how many.
+
+Once you have chosen, keep that take. **Discard the other takes of this line...**, in the take's right-click menu and the
+gear menu, sends the rest to the Recycle Bin after one question. It leaves the take open, and any kept clip of the line:
+a kept clip goes only when you discard it on its own.
 
 The script and your place in it are remembered, in a small `script.json` beside the settings, so a long list can be read over
 several sittings. **Clear script** in the gear menu stops using it.
@@ -269,6 +282,15 @@ and then in the sidecar. Changing the label of a kept clip is saved at once, wit
 The box above the list filters the current speaker's takes. Type some words, and only the takes whose label, transcript or
 notes contain all of them are shown, in any order and whatever the capitals; the counter beside **Takes** says how many of
 how many. The numbers do not change while a filter is on. Clear the box to see every take again.
+
+The two lists under the box choose the order of the takes and which of them to show:
+
+- **Newest first** (as the program starts), **Oldest first**, or **Script order**: the takes of each script line together,
+  in the order of the script and in the order they were read, then the takes of no line, newest first.
+- **All takes**, **Not kept**, **Kept**, **Changed** (kept clips with changes that **Update kept clip** has not written
+  yet), or, while a script is loaded, **Current line**: the takes of the line shown above the waveform.
+
+The filter box works inside what these show.
 
 ## Several takes at once
 

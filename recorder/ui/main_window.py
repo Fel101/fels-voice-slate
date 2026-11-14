@@ -151,7 +151,7 @@ class MainWindow(QMainWindow):
         a, menu = self.actions, self.topbar.menu
         for group in (('settings', 'import_recording', 'new_speaker', 'rename_speaker', 'speaker_details', 'delete_speaker'),
                       ('move_take', 'save_copy', 'export_manifest', 'export_dataset', 'split_take'),
-                      ('keep_selected', 'discard_selected', 'move_selected'),
+                      ('keep_selected', 'discard_selected', 'move_selected', 'discard_others'),
                       ('load_script', 'hands_free', 'clear_script', 'open_folder')):
             for name in group:
                 menu.addAction(a[name])
@@ -224,6 +224,7 @@ class MainWindow(QMainWindow):
         a.split_take.triggered.connect(self.split_take)
         a.keep_selected.triggered.connect(lambda: self.keep_selected())
         a.discard_selected.triggered.connect(lambda: self.discard_selected())
+        a.discard_others.triggered.connect(self.discard_other_takes)
         a.move_selected.triggered.connect(lambda: self.move_selected())
         a.settings.triggered.connect(self.open_settings)
         a.shortcuts.triggered.connect(self.dialogs.shortcuts)
@@ -246,7 +247,7 @@ class MainWindow(QMainWindow):
         self.library.importRequested.connect(self.import_recording)
         self.library.folderRequested.connect(self.open_folder)
         panel = self.editor_panel
-        panel.recordRequested.connect(capturing.toggle)
+        panel.recordRequested.connect(s.record_pressed)      # as the record key: with the count-in on, a script run
         panel.importRequested.connect(self.import_recording)
         panel.retryRequested.connect(s.workspace.retry_root)
         panel.settingsRequested.connect(self.open_settings)
@@ -272,6 +273,7 @@ class MainWindow(QMainWindow):
         inspector.autoAnalyzeRequested.connect(self.auto_analyze)
         inspector.autoFixRequested.connect(self.auto_fix)
         inspector.loadScriptRequested.connect(self.load_script)
+        inspector.showLineTakesRequested.connect(lambda: self.library.show_takes('line'))
 
     # ---- hearing the session -----------------------------------------------------------------------------------------
 
@@ -361,7 +363,9 @@ class MainWindow(QMainWindow):
             self._request_analysis()
             panel.info.refresh()
             panel.listen.set_current(0 if s.transport.listen == 'original' else 1)
-        if topics & {'takes', 'current', 'recording', 'folder'}:
+        if 'script' in topics:
+            self.library.refresh_choices()
+        if topics & {'takes', 'current', 'recording', 'folder', 'script'}:
             self.library.refresh_takes()
         if 'meta' in topics and 'current' not in topics:
             self.inspector.refresh_meta(self._derived())
@@ -508,6 +512,7 @@ class MainWindow(QMainWindow):
             'import_recording': idle, 'new_speaker': idle, 'settings': idle, 'arm': idle, 'record': not s.batch.running,
             'split_take': has_take, 'next_take': idle and bool(s.workspace.takes), 'prev_take': idle and bool(s.workspace.takes),
             'keep_selected': idle and len(chosen) > 1, 'discard_selected': idle and len(chosen) > 1,
+            'discard_others': has_take and bool(self._other_takes_of_line()),
             'move_selected': idle and len(chosen) > 1 and len(s.workspace.speakers) > 1,
             'rename_speaker': idle and s.workspace.speaker is not None,
             'speaker_details': idle and s.workspace.speaker is not None,
@@ -812,6 +817,35 @@ class MainWindow(QMainWindow):
         if self.dialogs.confirm(f'Discard {len(takes)} takes?', f'They move to the Recycle Bin, with their original '
                                 f'recordings.{also} You can restore them from there.', yes='Move to Recycle Bin'):
             s.batch.discard(takes)
+
+    def _other_takes_of_line(self, take=None):
+        """The takes of the script line of `take` (the open take) that are not kept, apart from that take."""
+        take = take or self.session.current
+        line = take.meta.get('script_line') if take is not None else None
+        if not line:
+            return []
+        return [other for other in self.session.workspace.takes
+                if other is not take and not other.kept and other.meta.get('script_line') == line]
+
+    def discard_other_takes(self):
+        """Having chosen the take of a line, send the rest of its takes to the Recycle Bin, after one question. Kept clips
+        stay: a kept clip goes only when it is discarded on its own."""
+        s = self.session
+        others = self._other_takes_of_line()
+        if not others or s.capturing.recording or s.batch.running or s.run.active:
+            return
+        count, line = len(others), s.current.meta['script_line']
+        shown = line if len(line) <= 60 else line[:57] + '...'
+        if count == 1:
+            title = tr('Discard the other take of this line?')
+            text = tr('"{line}"\n\nIt moves to the Recycle Bin, with its original recording, and you can restore it from '
+                      'there. The take open stays, and so does any kept clip of the line.')
+        else:
+            title = tr('Discard the {count} other takes of this line?')
+            text = tr('"{line}"\n\nThey move to the Recycle Bin, with their original recordings, and you can restore them '
+                      'from there. The take open stays, and so does any kept clip of the line.')
+        if self.dialogs.confirm(title.format(count=count), text.format(line=shown), yes='Move to Recycle Bin'):
+            s.batch.discard(others)
 
     def move_selected(self, takes=None, slug=None):
         """File the selected takes under another speaker, asking which unless `slug` says."""
@@ -1326,6 +1360,8 @@ class MainWindow(QMainWindow):
             menu.addAction('Go back to the kept clip...', lambda: self.revert_take(take))
         menu.addSeparator()
         menu.addAction('Discard...', lambda: (self._take_picked(take), self.discard()))
+        if self._other_takes_of_line(take):
+            menu.addAction(self.actions.discard_others.text(), lambda: (self._take_picked(take), self.discard_other_takes()))
         return menu
 
     def _take_menu(self, take, pos):
