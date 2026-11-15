@@ -38,6 +38,11 @@ the project uses [Semantic Versioning](https://semver.org/).
 - **The permission travels inside the WAV.** A kept clip's WAV now carries one line of plain text in its standard
   information chunk: the clip's id, the name of its sidecar, the allowed use and the date the permission was given, but not
   the origin. Copies and dataset clips carry it too, also of clips kept before, which are not changed themselves.
+- **Back up recordings, and bring a backup in.** **Back up recordings...** copies the whole output folder to a place you
+  choose, reads every file back and checks it, and writes a list of the files and their SHA-256 beside them. **Bring in a
+  backup...** copies one into an output folder that has no recordings yet and checks each file against that list. Both are
+  long jobs with progress and **Stop**, and one that stops or fails removes what it copied. The user guide says how to move
+  to another PC.
 
 ### Changed
 

@@ -52,6 +52,8 @@ what is in it and whether you had the right to record it.
 - **Share.** Drag a kept clip into Explorer or another program, save a copy as WAV, FLAC, MP3 or Ogg at 16 to 48 kHz, export
   a manifest of the kept clips (JSON Lines or CSV), or a whole dataset in one folder: clips with sidecars, LJSpeech, a Hugging
   Face audio folder or a Kaldi data folder, with a split for validation if you want one. The kept clips are never changed.
+- **Back up and move.** Back up the whole output folder in one step, each file checked, and bring the backup in on another
+  PC.
 - **Draft transcripts** (optional) from a speech recognizer that runs on your own computer, set up in one step.
 - **For everyone.** Dark, light and high-contrast themes, a size setting for the whole window, screen-reader names and
   keyboard access throughout, and the window in English, German, Spanish or French.

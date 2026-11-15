@@ -8,7 +8,8 @@ This guide goes through Voice Slate from the first start to a kept clip. For ins
 [Moving a take](#moving-a-take-to-another-speaker) · [Naming and finding takes](#naming-and-finding-takes) ·
 [Several takes at once](#several-takes-at-once) · [Editing](#editing) · [Splitting a long take](#splitting-a-long-take) ·
 [Process](#process-the-whole-take) · [Check](#check) · [Auto analyze and Auto fix](#auto-analyze-and-auto-fix) ·
-[Keeping a clip](#keeping-a-clip) · [Sharing your clips](#sharing-your-clips) · [Settings](#settings) ·
+[Keeping a clip](#keeping-a-clip) · [Sharing your clips](#sharing-your-clips) ·
+[Backing up, and moving to another PC](#backing-up-and-moving-to-another-pc) · [Settings](#settings) ·
 [Using it without a mouse, and with a screen reader](#using-it-without-a-mouse-and-with-a-screen-reader) ·
 [Keyboard shortcuts](#keyboard-shortcuts) · [Troubleshooting](#troubleshooting)
 
@@ -611,6 +612,37 @@ rate you chose, which keeps detail a 24 kHz clip no longer has; a clip with nois
 clips* resamples what was kept, which is quicker. The clips that go in are the ones a manifest would list, so one that has changed
 since it was kept, or whose release has run out, is left out and named. The job runs a few clips at a time, and **Stop** in the
 status bar stops it, keeping what is done.
+
+## Backing up, and moving to another PC
+
+Everything Voice Slate keeps is in the output folder: the speakers, every original recording, the kept clips and their
+sidecars, the releases, and the work on takes not kept yet. A copy of that folder is a whole backup.
+
+**Back up recordings...** in the gear menu copies the whole output folder to a place you choose, such as a USB drive or
+another disk: choose an empty folder outside the output folder. Each file is copied, then read back and checked against
+what was read, and at the end a list of every file with its SHA-256 is written beside them, as `voice-slate-backup.json`.
+Nothing in the output folder changes. It runs a file at a time, a long recording a part at a time, and **Stop** in the
+status bar stops it; a backup that was stopped, or that met a file it could not copy, removes what it had copied, so half a
+backup is never left to be taken for a whole one. A backup on the same disk as the output folder does not survive that disk:
+put it somewhere else. Recording waits while it runs.
+
+**Bring in a backup...** does the opposite, into an output folder that has no recordings yet. Choose the backup's folder,
+say yes, and each file is copied into the output folder and checked against the backup's own list, so a file that changed
+or was damaged since the backup was made is found: then nothing is brought in, the output folder is left empty, and the
+message names the file. The backup itself is never changed. A copy of an output folder made by hand, with no list, can be
+brought in too; each file is then checked against what was read.
+
+**To move to another PC:**
+
+1. On the old PC, choose **Back up recordings...** and back up to a USB drive or a shared folder.
+2. On the new PC, install Fel's Voice Slate and start it. Its output folder is empty.
+3. Choose **Bring in a backup...** and choose the backup on the drive. When it is done, the speakers and takes are there,
+   kept and not kept alike.
+
+If the new PC's output folder already has recordings, choose an empty folder in **Settings > Output folder** first. Settings
+such as the theme, the keys and the speech recognizer are not in the output folder and do not move; set them again on the
+new PC. You can also leave the backup where it is and point **Settings > Output folder** at a copy of it, which uses it as it
+is, with no copying.
 
 ## Settings
 

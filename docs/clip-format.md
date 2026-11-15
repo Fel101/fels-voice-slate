@@ -309,6 +309,29 @@ clips or more, and never all of them. Each row of `manifest.jsonl` then has `spl
 | Hugging Face audio folder | `train\` and `validation\`, each with its own `metadata.csv` |
 | Kaldi | `train\` and `validation\`, each a data folder with its four lists; the clips stay in `wavs\` |
 
+## Backups
+
+**Back up recordings...** writes a copy of the whole output folder, laid out exactly as above, and beside it one more file,
+`voice-slate-backup.json`, which lists every file the backup holds and the SHA-256 it had when it was copied and checked:
+
+```json
+{
+  "schema": "voice-slate-backup-v1",
+  "software": { "name": "voice-slate", "version": "0.7.0" },
+  "made": "2026-11-14T19:40:12+00:00",
+  "files": {
+    "my-voice/20261020-161204_mic_3f9a1c2e.json": "…",
+    "my-voice/20261020-161204_mic_3f9a1c2e.wav": "…",
+    "my-voice/masters/20261020-161204_mic_3f9a1c2e.raw.wav": "…",
+    "speakers.json": "…"
+  }
+}
+```
+
+The names are relative to the backup's folder, with `/`. **Bring in a backup...** checks each file it copies against this
+list, and refuses a backup that is missing a file the list names. The list itself is not brought into the output folder. A
+file still being written when the backup ran, one ending in `.tmp`, is not in it.
+
 ## Older sidecars
 
 Sidecars with `schema` `voice-recorder-clip-v1`, from early builds, are still read. Their `gain_db` and `denoise`

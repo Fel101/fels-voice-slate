@@ -21,7 +21,7 @@ from ..core.edits import describe
 from ..i18n import tr
 from ..session import Session, run
 from ..session.measure import take_key
-from ..store import KeepBlocked, Relocation, TrashUnavailable, clean_label
+from ..store import Backup, BringIn, KeepBlocked, Relocation, TrashUnavailable, clean_label
 from .actions import SPEC, Actions, shortcut_text
 from .badge import RecordingBadge
 from .dialogs import Dialogs
@@ -154,7 +154,8 @@ class MainWindow(QMainWindow):
         for group in (('settings', 'import_recording', 'new_speaker', 'rename_speaker', 'speaker_details', 'delete_speaker'),
                       ('move_take', 'save_copy', 'export_manifest', 'export_dataset', 'split_take'),
                       ('keep_selected', 'discard_selected', 'move_selected', 'discard_others'),
-                      ('load_script', 'hands_free', 'clear_script', 'open_folder')):
+                      ('load_script', 'hands_free', 'clear_script'),
+                      ('open_folder', 'back_up', 'bring_in')):
             for name in group:
                 menu.addAction(a[name])
             menu.addSeparator()
@@ -215,6 +216,8 @@ class MainWindow(QMainWindow):
         a.save_copy.triggered.connect(self.save_copy)
         a.export_manifest.triggered.connect(self.export_manifest)
         a.open_folder.triggered.connect(self.open_folder)
+        a.back_up.triggered.connect(self.back_up)
+        a.bring_in.triggered.connect(self.bring_in)
         a.refresh_devices.triggered.connect(capturing.refresh_devices)
         a.load_script.triggered.connect(self.load_script)
         a.clear_script.triggered.connect(s.script.clear)
@@ -416,6 +419,7 @@ class MainWindow(QMainWindow):
             panel.words.refresh()
         if 'batch' in topics:
             self.status_stop.setVisible(s.batch.running)
+            self.status_stop.setToolTip(tr(s.batch.stop_tip))
         if 'settings' in topics:
             self._refresh_status_items()
         elif 'drafts' in topics:
@@ -535,6 +539,7 @@ class MainWindow(QMainWindow):
             'clear_script': bool(s.script.lines) and not s.run.active,
             'again': bool(s.script.lines) and not s.batch.running and not s.room.active, 'hands_free': idle,
             'room_check': idle or s.room.active,
+            'back_up': idle and bool(s.workspace.speakers), 'bring_in': idle and not s.workspace.speakers,
         }
         for name, value in enabled.items():
             a[name].setEnabled(bool(value))
@@ -1224,6 +1229,61 @@ class MainWindow(QMainWindow):
             return
         s.batch.export_dataset(export, export.split(rows))
         s.batch.left_out.extend(left_out)
+
+    def _backup_refused(self, title):
+        """Why a backup cannot be made or brought in now, said to the person, or False when it can."""
+        s = self.session
+        if s.capturing.recording or s.batch.running:
+            return True
+        if s.workspace.check_root() is not None:
+            self.dialogs.notice('error', title, s.workspace.out_of_reach_text())
+            return True
+        if s.workspace.has_unsaved_takes():
+            self.dialogs.notice('warning', title, 'A take is only in memory, because its original could not be written yet. '
+                                                  'Wait until it is saved, then try again.')
+            return True
+        return False
+
+    def back_up(self):
+        """Copy the whole output folder to a place the person chooses, each file checked, as a job that can be stopped."""
+        s = self.session
+        if self._backup_refused('Back up recordings'):
+            return
+        folder = self.dialogs.choose_folder('Choose an empty folder for the backup', '')
+        if not folder:
+            return
+        try:
+            backup = Backup(s.lib.root, folder)
+        except (ValueError, OSError) as e:
+            self.dialogs.notice('warning', 'Back up recordings', str(e))
+            return
+        s.batch.back_up(backup)
+
+    def bring_in(self):
+        """Copy a backup into the output folder while it has no recordings, each file checked, as a job that can be
+        stopped. The window shows what came in once all of it has."""
+        s = self.session
+        workspace = s.workspace
+        if self._backup_refused('Bring in a backup'):
+            return
+        if workspace.speakers:
+            self.dialogs.notice('info', 'Bring in a backup', 'Bring a backup into an output folder that has no recordings '
+                                                             'yet: choose an empty one in Settings > Output folder first.')
+            return
+        folder = self.dialogs.choose_folder('Choose the backup to bring in', '')
+        if not folder:
+            return
+        try:
+            bringing = BringIn(folder, s.lib.root)
+        except (ValueError, OSError) as e:
+            self.dialogs.notice('warning', 'Bring in a backup', str(e))
+            return
+        text = tr('Its {count} files are copied into the output folder, {folder}, and each one is checked. The backup '
+                  'itself is not changed.').format(count=len(bringing.files), folder=s.lib.root)
+        if not self.dialogs.confirm('Bring in this backup?', text, yes='Bring it in'):
+            return
+        root = s.lib.root
+        s.batch.bring_in(bringing, lambda: workspace.set_root(root, moved=True))
 
     def open_folder(self):
         s = self.session

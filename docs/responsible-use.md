@@ -96,7 +96,8 @@ A recording of a voice is **personal data**, and a voiceprint can identify a per
   releases. Do not train on a dataset for anything its allowed use does not cover.
 - **Delete on request, and when you no longer need them.** **Discard** in the program moves a take's files to the
   Recycle Bin, which is not a secure erase: empty it. To remove everything for a speaker, use **Delete speaker...**, which moves
-  their whole folder there, with their release. Remember any copies you made: a dataset, a manifest, a saved copy.
+  their whole folder there, with their release. Remember any copies you made: a dataset, a manifest, a saved copy, and any
+  backup, which holds every recording and release.
 
 ## Rules that may apply to you
 

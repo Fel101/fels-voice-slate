@@ -20,6 +20,9 @@ from ..i18n import tr
 from ..store import KeepBlocked, TrashUnavailable, now_iso
 
 SLICE_SECONDS = 0.04        # how long one tick may work, so that the window keeps moving
+STOP_TIP = 'Stop after the take being worked on. What is done stays done'
+# A backup half made, or brought in half way, could be taken for a whole one, so stopping removes what it copied.
+STOP_COPY_TIP = 'Stop, and remove what it has copied. Nothing else changes'
 MORE = 'more'               # a step's item is not finished: it is called again with the same one
 WAIT = 'wait'               # nor can it go on yet: it is called again on the next tick
 
@@ -36,6 +39,7 @@ class Batch:
         self.ok = 0
         self.left_out = []          # (what, why) for each item that was not done
         self.part = None            # how far the item being worked on has got, from 0 to 1, when it takes a while
+        self.stop_tip = STOP_TIP    # what Stop does to the job under way
         self._step = None
         self._finish = None
 
@@ -47,11 +51,14 @@ class Batch:
 
     @property
     def progress_text(self):
+        title, total = tr(self.title), len(self.items)
         if self.part is None:
-            return f'{self.title}: {self.done} of {len(self.items)}'
-        if len(self.items) == 1:
-            return f'{self.title}: {self.part:.0%}'
-        return f'{self.title}: {self.done + 1} of {len(self.items)}, {self.part:.0%}'
+            return tr('{title}: {done} of {total}').format(title=title, done=self.done, total=total)
+        percent = f'{self.part:.0%}'
+        if total == 1:
+            return tr('{title}: {percent}').format(title=title, percent=percent)
+        return tr('{title}: {done} of {total}, {percent}').format(title=title, done=self.done + 1, total=total,
+                                                                  percent=percent)
 
     # ---- the three jobs -----------------------------------------------------------------------------------------------
 
@@ -152,6 +159,69 @@ class Batch:
 
         self._start('Moving your recordings', relocation.files, step, finish)
 
+    def _copy_step(self, copy):
+        """One step of a backup or of bringing one in (store.FolderCopy): a block of a file. A file that fails stops the
+        whole job, which then removes what it copied. One the program removed meanwhile is passed over."""
+        def step(path):
+            try:
+                done = copy.step(path)
+            except OSError as e:
+                if isinstance(e, FileNotFoundError) and not path.exists():
+                    copy.gone.append(path)
+                    return None
+                self.left_out.append((copy.name_of(path), str(e)))
+                self.cancel()
+                return None
+            self.part = copy.part
+            if done:
+                self.ok += 1
+                return None
+            return MORE
+
+        return step
+
+    def back_up(self, backup):
+        """Copy the whole output folder to a backup (store.Backup), each file checked, and write its list at the end.
+        Stopped or failed on the way, what was copied is removed: half a backup could be taken for a whole one."""
+        def finish(stopped):
+            if not stopped and not self.left_out:
+                try:
+                    backup.finish()
+                except OSError as e:
+                    self.left_out.append(('The list of the files', str(e)))
+            if stopped or self.left_out:
+                backup.undo()
+                self.bus.status(tr('The backup was stopped, and the files it had copied were removed.') if not self.left_out
+                                else tr('The backup could not be made, and the files it had copied were removed.'))
+                return
+            text = tr('Backed up {count} files to {folder}. Each one was read back and checked.').format(
+                count=len(backup.arrived), folder=backup.target)
+            if len(backup.gone) == 1:
+                text += ' ' + tr('1 file was removed by the program while it ran, and is not in it.')
+            elif backup.gone:
+                text += ' ' + tr('{count} files were removed by the program while it ran, and are not in it.').format(
+                    count=len(backup.gone))
+            self.bus.status(text)
+
+        self._start('Backing up your recordings', backup.files, self._copy_step(backup), finish, STOP_COPY_TIP)
+
+    def bring_in(self, bringing, arrived):
+        """Copy a backup into the empty output folder (store.BringIn), each file checked against the backup's list.
+        `arrived()` shows what came in. Stopped or failed on the way, what was copied is removed and the output folder is
+        empty again; the backup is never changed."""
+        def finish(stopped):
+            if stopped or self.left_out:
+                bringing.undo()
+                arrived()
+                self.bus.status(tr('The backup was not brought in, and the files it had copied were removed. The backup '
+                                   'itself was not changed.'))
+                return
+            arrived()
+            self.bus.status(tr('Brought in {count} files from {folder}. Each one was read back and checked.').format(
+                count=len(bringing.arrived), folder=bringing.source))
+
+        self._start('Bringing in a backup', bringing.files, self._copy_step(bringing), finish, STOP_COPY_TIP)
+
     def import_files(self, paths):
         """Copy recordings in as takes (store.Importing), a block at a time, each one opening as it arrives. One that cannot
         be read is listed at the end. When there is nowhere to put them, because the folder cannot be reached, the job stops
@@ -248,8 +318,8 @@ class Batch:
 
     # ---- running ------------------------------------------------------------------------------------------------------
 
-    def _start(self, title, items, step, finish):
-        self.title, self.items = title, list(items)
+    def _start(self, title, items, step, finish, stop_tip=STOP_TIP):
+        self.title, self.items, self.stop_tip = title, list(items), stop_tip
         self.done, self.ok, self.left_out, self.part = 0, 0, [], None
         self._step, self._finish = step, finish
         self.bus.notify('batch')
@@ -288,5 +358,6 @@ class Batch:
         if self.left_out:
             detail = '\n'.join(f'- {what}: {why}' for what, why in self.left_out[:30])
             more = len(self.left_out) - 30
-            self.bus.notice('warning', self.title, f'{len(self.left_out)} of them could not be done:\n\n{detail}'
-                            + (f'\n\nand {more} more.' if more > 0 else ''))
+            self.bus.notice('warning', self.title,
+                            tr('{count} of them could not be done:').format(count=len(self.left_out)) + f'\n\n{detail}'
+                            + ('\n\n' + tr('and {count} more.').format(count=more) if more > 0 else ''))

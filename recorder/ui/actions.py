@@ -88,6 +88,10 @@ SPEC = {
                                                             'whether the room is quiet enough and the microphone level '
                                                             'right. Nothing it hears is kept', False),
     'open_folder': ('Open output folder', 'folder', ['Ctrl+Shift+O'], 'Show the output folder in Explorer', False),
+    'back_up': ('Back up recordings...', None, [], 'Copy the whole output folder to a place you choose, and check every '
+                                                   'file', False),
+    'bring_in': ('Bring in a backup...', None, [], 'Copy a backup into the output folder while it has no recordings, and '
+                                                   'check every file', False),
     'load_script': ('Load script...', None, ['Ctrl+Shift+L'], 'Read prompts from a text file, one line per take', False),
     'clear_script': ('Clear script', None, [], 'Stop using the script', False),
     'prev_line': ('Previous script line', 'chevron_left', ['Ctrl+Up'], 'Go back one line of the script', False),

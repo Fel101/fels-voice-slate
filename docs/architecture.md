@@ -280,6 +280,11 @@ None of these changes a kept clip, and none goes online.
   original, a clip goes through `render.export_samples` again at the rate asked for, with the recipe in its sidecar. A split is
   `dataset.split`, before the job starts: the clips are ranked by a hash of their speaker and file name, so the same clips go to
   validation whatever order they come in. The lists of each layout are written by `finish`, from the clips that went in.
+- **Backing up and bringing a backup in** are `store.Backup` and `store.BringIn`, both a `store.FolderCopy`: a file is
+  copied a block of `COPY_BLOCK` at a time (a generator, so that `session/batch.py` can return MORE between blocks and the
+  window keeps moving), fsynced, read back, and must hash as what was read and, for a backup that has one, as its list says;
+  only then is it renamed into place. `undo` removes exactly the files and folders it made. `Relocation` predates them and
+  copies a whole file at once.
 - **Moving an output folder** is `store.Relocation`: every file is copied and compared, and the old files go only when all of them
   have arrived. Stopped or failed on the way, the copies are removed and the old folder stays in use.
 - **Drag out** is in `ui/library.py`. A kept card pulled past `startDragDistance` emits `dragRequested`, and the panel

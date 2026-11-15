@@ -48,7 +48,7 @@ from .core import chain as chain_mod
 from .core import render
 from .core.edits import History, validate_edits, words_key
 from .core.reading import clean_words
-from .settings import APP_NAME, default_root
+from .settings import APP_NAME, default_root, holds_recordings
 
 SCHEMA = 'voice-recorder-clip-v2'
 KNOWN_SCHEMAS = ('voice-recorder-clip-v1', SCHEMA)
@@ -70,6 +70,11 @@ PERMISSION_USE_CHARS = 400
 # What Keep works out afresh each time. Anything else among a take's flags is a fact about how it was recorded.
 WORKED_OUT_FLAGS = {'recovered', 'imported', 'clipped', 'edited', 'filtered', 'cleaned', 'level_changed', 'limited'}
 RESERVED_NAMES = {'CON', 'PRN', 'AUX', 'NUL', *(f'COM{n}' for n in range(10)), *(f'LPT{n}' for n in range(10))}
+BACKUP_FILE = 'voice-slate-backup.json'             # the list of a backup's files and their SHA-256, beside them
+BACKUP_SCHEMA = 'voice-slate-backup-v1'
+# How much of a file a backup copies or checks in one step. Each block is put on the disk before the next, so that no step
+# waits for a whole long recording to be flushed: a USB stick that takes 20 MB a second still answers within a tenth.
+COPY_BLOCK = 2 << 20
 
 
 class KeepBlocked(ValueError):
@@ -503,6 +508,176 @@ class Relocation:
         for path in self.done:
             _remove(self.target / path.relative_to(self.source))
         shutil.rmtree(self.target, ignore_errors=True)
+
+
+def _not_inside(source, target):
+    source, target = Path(source).resolve(), Path(target).resolve()
+    if target == source or source in target.parents or target in source.parents:
+        raise ValueError('The two folders must not be inside each other.')
+
+
+def _files_of(folder):
+    """Every file in the folder that a backup holds: not one still being written (`.tmp`), nor a backup's own list."""
+    folder = Path(folder)
+    return sorted(path for path in folder.rglob('*')
+                  if path.is_file() and path.suffix != '.tmp' and path != folder / BACKUP_FILE)
+
+
+class FolderCopy:
+    """The files of one folder copied into another, a block at a time so that a long recording does not hold the window
+    up, and each one checked: what arrived is read back and must be what was read, and, where `expected` gives a SHA-256
+    for it, that too. A file goes in under its own name only once it has passed. Nothing in the source is changed.
+
+    `step(path)` does one block and returns True once that file is in place. `undo()` removes every file it put there.
+    """
+
+    def __init__(self, source, target, files, expected=None):
+        self.source, self.target = Path(source), Path(target)
+        self.files = files
+        self.expected = expected or {}
+        self.arrived = {}               # the relative name of each file in place, with its SHA-256
+        self.gone = []                  # files that were removed from the source before they could be copied
+        self.part = None                # how far the file being copied has got, from 0 to 1
+        self._made_folders = []
+        self._current = None            # (path, the copying of it)
+
+    def name_of(self, path):
+        return path.relative_to(self.source).as_posix()
+
+    def step(self, path):
+        if self._current is None or self._current[0] != path:
+            self._stop_current()
+            self._current = (path, self._copying(path))
+        try:
+            next(self._current[1])
+        except StopIteration:
+            self._current, self.part = None, None
+            return True
+        except BaseException:
+            self._current, self.part = None, None
+            raise
+        return False
+
+    def _folder_for(self, destination):
+        missing = [folder for folder in [destination.parent, *destination.parent.parents] if not folder.exists()]
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        self._made_folders.extend(reversed(missing))
+
+    def _copying(self, path):
+        name = self.name_of(path)
+        destination = self.target / name
+        self._folder_for(destination)
+        tmp = destination.with_name(destination.name + '.tmp')
+        read, back = hashlib.sha256(), hashlib.sha256()
+        try:
+            size = max(1, path.stat().st_size)
+            with open(path, 'rb') as source, open(tmp, 'wb') as out:
+                while block := source.read(COPY_BLOCK):
+                    read.update(block)
+                    out.write(block)
+                    out.flush()
+                    os.fsync(out.fileno())
+                    self.part = source.tell() / size / 2
+                    yield
+            with open(tmp, 'rb') as written:
+                while block := written.read(COPY_BLOCK):
+                    back.update(block)
+                    self.part = 0.5 + written.tell() / size / 2
+                    yield
+            if back.hexdigest() != read.hexdigest():
+                raise OSError(f'{name} could not be copied exactly')
+            if name in self.expected and back.hexdigest() != str(self.expected[name]).lower():
+                raise OSError(f'{name} is not the file the backup was made with: it has changed or been damaged since')
+            if destination.exists():
+                raise OSError(f'{name} is already there, and nothing is overwritten')
+            os.replace(tmp, destination)
+        finally:
+            _remove(tmp)
+        self.arrived[name] = back.hexdigest()
+
+    def _stop_current(self):
+        if self._current is not None:
+            self._current[1].close()            # the half-written copy goes
+            self._current, self.part = None, None
+
+    def undo(self):
+        """Remove every file this put in place, and the folders it made that are empty again. Nothing else is touched."""
+        self._stop_current()
+        for name in self.arrived:
+            _remove(self.target / name)
+        self.arrived = {}
+        for folder in sorted(self._made_folders, key=lambda folder: len(folder.parts), reverse=True):
+            try:
+                folder.rmdir()
+            except OSError:
+                pass
+
+
+class Backup(FolderCopy):
+    """A copy of the whole output folder in another place, each file checked, with a list of every file and its SHA-256
+    written beside them at the end, so that bringing it in later can find a file that changed since. The output folder is
+    not changed. A file that the program removed while the backup ran (the work in progress of a take kept since) is
+    passed over and counted in `gone`."""
+
+    def __init__(self, source, target):
+        _not_inside(source, target)
+        target = Path(target)
+        if target.exists() and (not target.is_dir() or any(target.iterdir())):
+            raise ValueError('Choose an empty folder for the backup: nothing in a folder is overwritten.')
+        super().__init__(source, target, _files_of(source))
+
+    def finish(self):
+        """Write the list of the files. Raises OSError when it cannot be written."""
+        data = {'schema': BACKUP_SCHEMA, 'software': {'name': 'voice-slate', 'version': __version__}, 'made': now_iso(),
+                'files': dict(sorted(self.arrived.items()))}
+        Library._write_json(self.target / BACKUP_FILE, data)
+
+    def undo(self):
+        _remove(self.target / BACKUP_FILE)
+        super().undo()                          # a folder the person made for it stays, empty, as it was
+
+
+class BringIn(FolderCopy):
+    """A backup brought into an output folder that has no recordings, each file checked against the backup's own list when
+    it has one, so that a file damaged since the backup was made is found and nothing of it is used. A copy of an output
+    folder made some other way has no list, and each file is checked against what was read. The backup is not changed."""
+
+    def __init__(self, source, target):
+        source, target = Path(source), Path(target)
+        _not_inside(source, target)
+        listed = self._list_of(source)
+        if not holds_recordings(source) and not listed:
+            raise ValueError(f'{source} is not a backup of recordings: it has no speakers and no list of a backup in it.')
+        if target.exists() and any(path != target / 'speakers.json' for path in _files_of(target)) \
+                or holds_recordings(target):
+            raise ValueError('Bring a backup into an output folder that has no recordings yet: choose an empty one in '
+                             'Settings > Output folder first.')
+        files = _files_of(source)
+        missing = sorted(set(listed) - {path.relative_to(source).as_posix() for path in files})
+        if missing:
+            raise ValueError(f'The backup is missing {len(missing)} of the files it was made with, such as {missing[0]}, '
+                             'so it was not brought in.')
+        super().__init__(source, target, files, listed)
+
+    @staticmethod
+    def _list_of(folder):
+        """The files a backup's list names, with their SHA-256, or {} when there is no list. Raises ValueError for one
+        that cannot be read."""
+        try:
+            data = json.loads((Path(folder) / BACKUP_FILE).read_text(encoding='utf-8'))
+        except FileNotFoundError:
+            return {}
+        except (OSError, ValueError):
+            raise ValueError(f'The list of the backup in {folder} cannot be read, so its files cannot be checked.') from None
+        files = data.get('files') if isinstance(data, dict) and data.get('schema') == BACKUP_SCHEMA else None
+        if not isinstance(files, dict):
+            raise ValueError(f'The list of the backup in {folder} is not one this version knows.')
+        return {str(name): str(sha) for name, sha in files.items()}
+
+    def _copying(self, path):
+        if self.name_of(path) == 'speakers.json':
+            _remove(self.target / 'speakers.json')  # an empty list of speakers, which the backup's own replaces
+        yield from super()._copying(path)
 
 
 class TooLong(ValueError):
