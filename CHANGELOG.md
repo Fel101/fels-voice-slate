@@ -69,6 +69,10 @@ the project uses [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **The right panel's tabs fit the panel in every language.** In German and Spanish the two Auto analyze buttons, and in
+  Spanish and French the two copy buttons on the Clip tab, were wider than the panel side by side, and in English a Check
+  row with a long value was a few pixels too wide. The whole tab then became wider than the panel, and every row of it was
+  cut off on the right. Such buttons now go one above the other when they do not fit, and a Check row's name wraps.
 - **Every playback device plays every take.** A WASAPI device chosen in Settings refused any take that was not at the rate
   the device runs at ("Invalid sample rate"), and some WDM-KS devices refused 24 kHz and below. Windows now converts for a
   WASAPI device, a take that a device still refuses is converted to the device's own rate, and the playhead stays with the

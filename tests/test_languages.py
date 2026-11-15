@@ -214,3 +214,26 @@ def test_the_whole_window_draws_in_each_language(qapp, session, dialogs, speak, 
     assert not window.grab().isNull()
     window.close()
     ui_helpers.pump(qapp)
+
+
+@pytest.mark.parametrize('code', i18n.LANGUAGES)
+def test_each_tab_fits_its_panel_in_each_language(qapp, session, dialogs, speak, code):
+    """A page wider than the panel is cut off on the right, every row of it. The two Auto analyze buttons in German and
+    Spanish, the two copy buttons in Spanish and French, and in English a Check row whose value is long once made a tab so."""
+    speak(code)
+    session.workspace.set_purpose('audition')
+    record(session, 12.0)
+    window = MainWindow(session=session, dialogs=dialogs)
+    window.timer.stop()
+    window.resize(1440, 900)
+    window.show()
+    window.flush()
+    session.jobs.drain()
+    window.flush()
+    for tab in range(3):
+        window.inspector.show_tab(tab)
+        ui_helpers.pump(qapp)
+        scroll = window.inspector.pages.currentWidget()
+        assert scroll.widget().width() <= scroll.viewport().width(), window.inspector.TABS[tab]
+    window.close()
+    ui_helpers.pump(qapp)

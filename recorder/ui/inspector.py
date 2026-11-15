@@ -17,8 +17,8 @@ from ..store import LABEL_MAX
 from . import theme
 from .library import reading_said
 from .palette import PALETTE, color
-from .widgets import (Segmented, Switch, button, caption, card, chip, clear_layout, format_total, hbox, label, set_chip,
-                      vbox)
+from .widgets import (Segmented, Switch, button, caption, card, chip, clear_layout, flow, format_total, hbox, label,
+                      set_chip, vbox)
 
 
 # ---- the Clip page ----------------------------------------------------------------------------------------------------
@@ -138,14 +138,13 @@ class ClipPage(QWidget):
         self.source_url = self._field(layout, 'Source URL (optional)', 'A link to the original, if there is one',
                                       'source_url')
         layout.addSpacing(4)
-        row = hbox(spacing=4)
+        row = flow(spacing=4)                                   # two lines when a translation is too wide for one
         self.copy_text = button('Copy transcript', 'ghost', 'copy')
         self.copy_text.clicked.connect(lambda: self.copyRequested.emit('transcript'))
         self.copy_path = button('Copy file path', 'ghost', 'copy', 'The kept WAV file')
         self.copy_path.clicked.connect(lambda: self.copyRequested.emit('path'))
         row.addWidget(self.copy_text)
         row.addWidget(self.copy_path)
-        row.addStretch(1)
         layout.addLayout(row)
         layout.addStretch(1)
 
@@ -452,14 +451,13 @@ class AutoCard(QFrame):
         self.verdict = chip('', 'gray')
         head.addWidget(self.verdict)
         layout.addLayout(head)
-        row = hbox(spacing=8)                                   # above the findings, so the buttons never scroll away
+        row = flow(spacing=8)               # above the findings, so the buttons never scroll away; two lines if need be
         self.analyze = button('Auto analyze', None, 'analyze', 'Measure the clip and say what could be better')
         self.fix = button('Auto fix', 'primary', 'wand', 'Repair what Auto analyze finds, as one undo step')
         self.analyze.clicked.connect(self.analyzeRequested)
         self.fix.clicked.connect(self.fixRequested)
         row.addWidget(self.analyze)
         row.addWidget(self.fix)
-        row.addStretch(1)
         layout.addLayout(row)
         self.body = vbox(spacing=8)
         layout.addLayout(self.body)
@@ -609,12 +607,12 @@ class CheckPage(QWidget):
         dot = QLabel('●')
         dot.setAccessibleName(tr(STATUS_WORDS[row.status]))
         dot.setStyleSheet(f'color: {PALETTE[STATUS_COLOURS[row.status]]}; font-size: 12px;')
-        head.addWidget(dot)
-        head.addWidget(label(row.label, size=13, weight=QFont.Weight.DemiBold))
-        head.addStretch(1)
+        head.addWidget(dot, 0, Qt.AlignmentFlag.AlignTop)
+        name = label(row.label, size=13, weight=QFont.Weight.DemiBold, wrap=True)       # under itself beside a long value
+        head.addWidget(name, 1)
         value = QLabel(row.value)
         value.setFont(theme.mono_font(11))
-        head.addWidget(value)
+        head.addWidget(value, 0, Qt.AlignmentFlag.AlignTop)
         layout.addLayout(head)
         layout.addWidget(label(row.hint, 'dim', size=11, wrap=True))
         return box

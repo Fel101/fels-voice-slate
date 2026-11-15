@@ -1,10 +1,10 @@
 """Small widgets shared by the panels: layout helpers, chips, the level meter, a switch, a segmented control."""
 import time
 
-from PySide6.QtCore import QPointF, QRectF, QSize, Qt, Signal
+from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QBrush, QFont, QFontMetrics, QLinearGradient, QPainter, QPen
-from PySide6.QtWidgets import (QAbstractButton, QComboBox, QFrame, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QStyle,
-                               QStyleOptionComboBox, QStylePainter, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QAbstractButton, QComboBox, QFrame, QHBoxLayout, QLabel, QLayout, QPushButton, QSizePolicy,
+                               QStyle, QStyleOptionComboBox, QStylePainter, QVBoxLayout, QWidget)
 
 from .. import audio_core as ac
 from ..i18n import tr
@@ -26,6 +26,75 @@ def hbox(parent=None, margins=(0, 0, 0, 0), spacing=0):
     layout.setContentsMargins(*margins)
     layout.setSpacing(spacing)
     return layout
+
+
+class FlowLayout(QLayout):
+    """Widgets left to right that go on to the next line when the width runs out. A row of buttons that fits in English
+    can be too wide in German, and a row that cannot narrow makes the whole panel wider than the window gives it, which
+    cuts off everything on its right."""
+
+    def __init__(self, spacing=8):
+        super().__init__()
+        self.setContentsMargins(0, 0, 0, 0)
+        self._items = []
+        self._gap = spacing
+
+    def addItem(self, item):
+        self._items.append(item)
+
+    def count(self):
+        return len(self._items)
+
+    def itemAt(self, index):
+        return self._items[index] if 0 <= index < len(self._items) else None
+
+    def takeAt(self, index):
+        return self._items.pop(index) if 0 <= index < len(self._items) else None
+
+    def expandingDirections(self):
+        return Qt.Orientation(0)
+
+    def hasHeightForWidth(self):
+        return True
+
+    def heightForWidth(self, width):
+        return self._arrange(QRect(0, 0, width, 0), place=False)
+
+    def setGeometry(self, rect):
+        super().setGeometry(rect)
+        self._arrange(rect, place=True)
+
+    def _shown(self):
+        return [item for item in self._items if not item.isEmpty()]
+
+    def sizeHint(self):
+        """All on one line."""
+        hints = [item.sizeHint() for item in self._shown()]
+        width = sum(h.width() for h in hints) + self._gap * max(len(hints) - 1, 0)
+        return QSize(width, max((h.height() for h in hints), default=0))
+
+    def minimumSize(self):
+        """One above the other: as narrow as the widest of them."""
+        sizes = [item.minimumSize() for item in self._shown()]
+        return QSize(max((s.width() for s in sizes), default=0), max((s.height() for s in sizes), default=0))
+
+    def _arrange(self, rect, place):
+        """Lay the widgets out in `rect`, or only work out how high that would be. Returns the height."""
+        x, y, line = rect.x(), rect.y(), 0
+        for item in self._shown():
+            hint = item.sizeHint()
+            width = min(hint.width(), rect.width())
+            if x > rect.x() and x + width > rect.x() + rect.width():
+                x, y, line = rect.x(), y + line + self._gap, 0
+            if place:
+                item.setGeometry(QRect(QPoint(x, y), QSize(width, hint.height())))
+            x += width + self._gap
+            line = max(line, hint.height())
+        return y + line - rect.y()
+
+
+def flow(spacing=8):
+    return FlowLayout(spacing)
 
 
 def clear_layout(layout):
