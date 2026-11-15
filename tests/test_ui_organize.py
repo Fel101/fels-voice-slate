@@ -71,7 +71,7 @@ def test_a_long_label_is_cut_with_an_ellipsis_to_fit_the_card(window, session):
     card = cards(window)[0]
     room = window.library.list.viewport().width() - 134
     font = theme.ui_font(13, QFont.Weight.DemiBold)
-    shown = TakeDelegate.fit(card.title, font, room, card.named)
+    shown = TakeDelegate.fit(card.title, font, room)
     assert shown.endswith('…') and QFontMetrics(font).horizontalAdvance(shown) <= room + 4
     assert not window.library.list.grab().isNull()                    # and the row still paints
 

@@ -80,7 +80,8 @@ def when(created, now=None):
         return ''
     now = now or dt.datetime.now().astimezone()
     days = (now.date() - moment.date()).days
-    day = tr('Today') if days == 0 else tr('Yesterday') if days == 1 else         tr('{month} {day}').format(month=tr(MONTHS[moment.month - 1]), day=moment.day)
+    day = (tr('Today') if days == 0 else tr('Yesterday') if days == 1 else
+           tr('{month} {day}').format(month=tr(MONTHS[moment.month - 1]), day=moment.day))
     return f'{day} {moment:%H:%M}'
 
 
@@ -199,11 +200,14 @@ class TakeDelegate(QStyledItemDelegate):
         return QSize(option.rect.width(), ROW_HEIGHT)
 
     @staticmethod
-    def fit(text, font, room, named):
-        """The text as it is, or for a label cut with an ellipsis to the room the row has."""
-        if not named:
-            return text
-        return QFontMetrics(font).elidedText(text, Qt.TextElideMode.ElideRight, int(room) + 4)
+    def fit(text, font, room):
+        """The text as it is when it fits the room the row has; if not, with the spaces around its dots taken in, and then
+        cut with an ellipsis. Only a label was cut so, and the edge of the card cut "Système" to "Syst" with no sign."""
+        metrics = QFontMetrics(font)
+        room = int(room) + 4
+        if metrics.horizontalAdvance(text) > room:
+            text = text.replace('  ·  ', ' · ')
+        return metrics.elidedText(text, Qt.TextElideMode.ElideRight, room)
 
     def paint(self, p, option, index):
         row = index.data(ROW_ROLE)
@@ -246,11 +250,11 @@ class TakeDelegate(QStyledItemDelegate):
         p.setFont(title_font)
         p.setPen(color('text'))
         p.drawText(QRectF(122, 12, room, 20), int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
-                   self.fit(row.title, title_font, room, row.named))
+                   self.fit(row.title, title_font, room))
         p.setFont(sub_font)
         p.setPen(color('muted'))
         p.drawText(QRectF(122, 32, room, 16), int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
-                   self.fit(row.sub, sub_font, room, row.named))
+                   self.fit(row.sub, sub_font, room))
         name = STATUS_COLOURS.get(row.status, 'muted')
         chip_font = theme.ui_font(10, QFont.Weight.DemiBold)
         chip_text = tr(row.status)

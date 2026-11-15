@@ -93,6 +93,11 @@ the project uses [Semantic Versioning](https://semver.org/).
   shortened in the middle in all three ("Plus réc…bord"); they now have shorter names that fit. The first entry of the
   history is now called Beginning rather than Start, which is a button's word, and Noise reduction is called that in the
   history as well.
+- **A take card's lines fit the card, or end with "…".** The line under a take's name, when and where it comes from, ran off
+  the edge of the card with no sign that it was cut: "Aujourd'hui 01:10 · Syst" in French, "Hoy 01:10 · Importació" in
+  Spanish, and "Yesterday 23:59 · Sys" in English. Only a take's own label was cut with "…". Now a line too wide first has
+  the spaces around its dot taken in and is then cut with "…", and today, yesterday or any month, from any source, fits
+  whole in every language: French says "Auj." for today, and Spanish "Importada" and "sep".
 - **Every playback device plays every take.** A WASAPI device chosen in Settings refused any take that was not at the rate
   the device runs at ("Invalid sample rate"), and some WDM-KS devices refused 24 kHz and below. Windows now converts for a
   WASAPI device, a take that a device still refuses is converted to the device's own rate, and the playhead stays with the

@@ -411,3 +411,41 @@ def test_the_names_on_the_record_card_are_whole(qapp, session, speak, code):
     for title in card.titles:
         assert title.width() >= title.fontMetrics().horizontalAdvance(title.text()), title.text()
     card.close()
+
+
+@pytest.mark.parametrize('code', i18n.LANGUAGES)
+def test_when_and_where_a_take_comes_from_fits_its_card(qapp, session, dialogs, speak, monkeypatch, code):
+    """The second line of a card was cut by its edge with no sign: "Aujourd'hui 01:10 · Syst" in French, "Hoy 01:10 ·
+    Importació" in Spanish, and "Yesterday 23:59 · Sys" in English. Today, yesterday or any month, late in the day and from
+    any source, it now fits whole."""
+    import datetime as dt
+
+    from PySide6.QtGui import QFontMetrics
+
+    from recorder.ui import library, theme
+    speak(code)
+    rooms = []
+    fit = library.TakeDelegate.fit
+    monkeypatch.setattr(library.TakeDelegate, 'fit', staticmethod(lambda text, font, room: rooms.append(room) or
+                                                                  fit(text, font, room)))
+    takes = [record(session, 12.0, source=source) for source in library.SOURCES]
+    window = MainWindow(session=session, dialogs=dialogs)
+    window.timer.stop()
+    window.resize(1440, 900)
+    window.show()
+    window.flush()
+    ui_helpers.pump(qapp)
+    window.library.list.viewport().grab()
+    room, font = min(rooms), theme.ui_font(11)
+    metrics = QFontMetrics(font)
+    now = dt.datetime.now()
+    moments = [now.replace(hour=23, minute=59), (now - dt.timedelta(days=1)).replace(hour=23, minute=59)]
+    moments += [dt.datetime(now.year - 1, month, 28, 23, 59) for month in range(1, 13)]
+    for take in takes:
+        for moment in moments:
+            take.created = moment.astimezone().isoformat(timespec='seconds')
+            line = window.library.model.row_at(window.library.model.items.index(take)).sub
+            shown = fit(line, font, room)
+            assert '…' not in shown and metrics.horizontalAdvance(shown) <= int(room) + 4, line
+    window.close()
+    ui_helpers.pump(qapp)

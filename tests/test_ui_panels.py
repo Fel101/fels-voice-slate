@@ -181,6 +181,16 @@ def test_when_describes_a_take_by_day():
     assert library.when('not a date', now) == '' and library.when(None, now) == ''
 
 
+def test_a_line_too_wide_for_a_take_card_is_taken_in_then_cut_with_an_ellipsis(qapp):
+    """Only a take's own label was cut with "…"; anything else ran off the edge of the card, "Syst" for "Système"."""
+    from recorder.ui import theme
+    font, fit = theme.ui_font(11), library.TakeDelegate.fit
+    assert fit('Today 09:05  ·  Mic', font, 118) == 'Today 09:05  ·  Mic'                       # as it is when it fits
+    assert fit('Yesterday 23:59  ·  System', font, 118) == 'Yesterday 23:59 · System'           # its dots taken in
+    cut = fit("Aujourd'hui 01:10  ·  Système", font, 90)
+    assert cut.endswith('…') and len(cut) < len("Aujourd'hui 01:10 · Système")
+
+
 def test_a_live_outline_has_a_fixed_number_of_columns():
     assert library.live_thumbnail(np.zeros((0, 3), np.float32), 1.0) is None
     rows = np.array([(0.02 * (i + 1), -0.5, 0.25 + 0.001 * i) for i in range(100)], dtype=np.float32)
