@@ -424,7 +424,7 @@ def test_the_history_lists_every_step_and_clicking_one_goes_back_to_it(window, s
     session.editor.silence_selection()
     window.flush()
     page = window.inspector.process
-    assert page.history.count() == 3 and page.history.item(0).text() == 'Start' and page.history.currentRow() == 2
+    assert page.history.count() == 3 and page.history.item(0).text() == 'Beginning' and page.history.currentRow() == 2
     page.history.itemClicked.emit(page.history.item(1))
     window.flush()
     assert len(take.history.edits) == 1 and page.history.currentRow() == 1

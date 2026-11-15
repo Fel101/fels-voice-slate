@@ -208,7 +208,7 @@ class SettingsDialog(QDialog):
         self.text_scale.setAccessibleName('Size of the window and its text')
         self.text_scale.addItem('Size: as in Windows', None)
         for scale in settings.TEXT_SCALES:
-            self.text_scale.addItem(f'Size: {scale * 100:.0f}%', scale)
+            self.text_scale.addItem(tr('Size: {percent}%').format(percent=f'{scale * 100:.0f}'), scale)
         self.text_scale.setCurrentIndex(self.text_scale.findData(settings.text_scale(values)))
         self.language_choice = QComboBox()
         self.language_choice.setAccessibleName('Language of the window')
@@ -250,6 +250,8 @@ class SettingsDialog(QDialog):
         self.record_key.setMaximumSequenceLength(1)
         self.record_key.setAccessibleName('Record key')
         self.record_key.setToolTip('Click here and press the key to use')
+        for field in self.record_key.findChildren(QLineEdit):          # Qt's own "Press shortcut", in English
+            field.setPlaceholderText(tr('Press a key'))
         self.record_key.setFixedWidth(150)
         self.record_key.keySequenceChanged.connect(self._check_key)
         row.addWidget(self.record_key)
@@ -279,7 +281,8 @@ class SettingsDialog(QDialog):
         self.python.edit.textChanged.connect(self._check_recognizer)
         form.addRow('Speech recognizer: Python', self.python)
         self.model = PathRow(values.get('asr_model'), self._folder,
-                             f'A faster-whisper model folder ({transcript.SETUP_SCRIPT} downloads one and fills this in)')
+                             tr('A faster-whisper model folder ({script} downloads one and fills this in)').format(
+                                 script=transcript.SETUP_SCRIPT))
         self.model.edit.setPlaceholderText('Optional')
         self.model.edit.textChanged.connect(self._check_recognizer)
         form.addRow('Speech recognizer: model', self.model)
@@ -294,9 +297,10 @@ class SettingsDialog(QDialog):
         self.language.setAccessibleName('Speech language')
         form.addRow('Speech language', self.language)
         layout.addLayout(form)
-        layout.addWidget(label('FFmpeg (noise reduction) and the speech recognizer (draft transcripts) are optional; see the '
-                               f'README. {transcript.SETUP_SCRIPT} in the program folder sets the recognizer up and '
-                               'fills these in. The program itself never goes online.', 'muted', wrap=True))
+        layout.addWidget(label(tr('FFmpeg (noise reduction) and the speech recognizer (draft transcripts) are optional; see '
+                                  'the README. {script} in the program folder sets the recognizer up and fills these in. The '
+                                  'program itself never goes online.').format(script=transcript.SETUP_SCRIPT), 'muted',
+                               wrap=True))
         row = hbox(spacing=8)
         row.addStretch(1)
         cancel = QPushButton('Cancel')
@@ -361,7 +365,7 @@ class SettingsDialog(QDialog):
         path = self.ffmpeg.text()
         found = clean.locate(path or None)
         if found:
-            self.ffmpeg.say(f'Found: {found}', 'green')
+            self.ffmpeg.say(tr('Found: {path}').format(path=found), 'green')
         elif path:
             self.ffmpeg.say('That file does not exist.', 'red')
         else:
@@ -375,8 +379,8 @@ class SettingsDialog(QDialog):
         elif python or model:
             self.python.say('Both a Python and a model folder are needed, and both must exist.', 'amber')
         else:
-            self.python.say(f'Not set up. Run {transcript.SETUP_SCRIPT} in the program folder to get a speech recognizer, '
-                            'or type the transcript: that always works.', 'dim')
+            self.python.say(tr('Not set up. Run {script} in the program folder to get a speech recognizer, or type the '
+                               'transcript: that always works.').format(script=transcript.SETUP_SCRIPT), 'dim')
 
     def values(self):
         """The settings as typed. An empty optional text removes that setting."""
@@ -481,16 +485,18 @@ class CopyDialog(QDialog):
         self.setWindowTitle('Save a copy')
         self.setMinimumWidth(460)
         layout = vbox(self, (22, 20, 22, 18), 12)
-        layout.addWidget(label(f'A copy of "{name}" is made from the kept clip, which does not change.', wrap=True))
+        layout.addWidget(label(tr('A copy of "{name}" is made from the kept clip, which does not change.').format(name=name),
+                               wrap=True))
         form = QFormLayout()
         form.setSpacing(10)
         self.kind = QComboBox()
         for key, (text, *_) in share.FORMATS.items():
-            self.kind.addItem(text, key)
+            self.kind.addItem(tr(text), key)
         self.kind.setCurrentIndex(self.kind.findData(share.DEFAULT_KIND))
         self.rate = QComboBox()
         for rate in share.RATES:
-            self.rate.addItem(share.rate_text(rate) + (' (as kept)' if rate == kept_rate else ''), rate)
+            self.rate.addItem(tr('{rate} (as kept)').format(rate=share.rate_text(rate)) if rate == kept_rate else
+                              share.rate_text(rate), rate)
         self.rate.setCurrentIndex(self.rate.findData(share.DEFAULT_RATE))
         form.addRow('Format', self.kind)
         form.addRow('Sample rate', self.rate)
@@ -635,7 +641,7 @@ class SpeakerDialog(QDialog):
     def __init__(self, name, record, has_file, parent=None):
         super().__init__(parent)
         record = record or {}
-        self.setWindowTitle(f'Speaker details: {name}')
+        self.setWindowTitle(tr('Speaker details: {name}').format(name=name))
         self.setMinimumWidth(560)
         layout = vbox(self, (22, 20, 22, 18), 12)
         layout.addWidget(label('Keep the signed release for this voice here, so that it stays with their clips. Your own voice '
@@ -645,7 +651,7 @@ class SpeakerDialog(QDialog):
         self.file = PathRow('', self._choose, 'A copy of this file goes in the release folder of this speaker')
         self.file.edit.setAccessibleName('The signed release')
         self.file.edit.setPlaceholderText(record.get('file') if has_file else 'Choose the file, such as a signed PDF')
-        self.file.say(f"On record: {record.get('file')}" if has_file else
+        self.file.say(tr('On record: {file}').format(file=record.get('file')) if has_file else
                       ('The file on record is not in the folder any more.' if record.get('file') else 'No file on record.'))
         form.addRow('Signed release', self.file)
         self.signed_known = QCheckBox('Signed on')
@@ -712,7 +718,8 @@ class KeepManyDialog(QDialog):
         self.setMinimumWidth(560)
         count = len(takes)
         layout = vbox(self, (22, 20, 22, 18), 12)
-        layout.addWidget(label(f'Keep {count} takes of {speaker_name}?', size=15, weight=QFont.Weight.DemiBold))
+        layout.addWidget(label(tr('Keep {count} takes of {speaker}?').format(count=count, speaker=speaker_name), size=15,
+                               weight=QFont.Weight.DemiBold))
         groups = {}
         for take in takes:
             said = tuple(str(take.meta.get(key) or '').strip() for key in ('origin', 'allowed_use'))
@@ -722,8 +729,8 @@ class KeepManyDialog(QDialog):
                 for (origin, allowed), amount in groups.items() if origin and allowed]
         if rows:
             layout.addWidget(label('What these takes say:', 'muted'))
-            table = QLabel('<table><tr><td></td><td><b>Origin</b></td><td style="padding-left:14px"><b>Allowed use</b></td>'
-                           f'</tr>{"".join(rows)}</table>')
+            table = QLabel(f'<table><tr><td></td><td><b>{html.escape(tr("Origin"))}</b></td><td style="padding-left:14px">'
+                           f'<b>{html.escape(tr("Allowed use"))}</b></td></tr>{"".join(rows)}</table>')
             table.setTextFormat(Qt.TextFormat.RichText)
             table.setWordWrap(True)
             layout.addWidget(table)
@@ -742,8 +749,8 @@ class KeepManyDialog(QDialog):
             self.allowed.textChanged.connect(self._check)
             form.addRow('Allowed use', self.allowed)
             layout.addLayout(form)
-        self.consent = QCheckBox(f'I have the right to use this voice for the allowed use stated on each of these {count} '
-                                 'takes: it is my own voice, or the speaker has given permission.')
+        self.consent = QCheckBox(tr('I have the right to use this voice for the allowed use stated on each of these {count} '
+                                    'takes: it is my own voice, or the speaker has given permission.').format(count=count))
         self.consent.setStyleSheet('QCheckBox { spacing: 10px; }')
         self.consent.toggled.connect(self._check)
         statement = label(self.consent.text(), wrap=True)
@@ -761,7 +768,7 @@ class KeepManyDialog(QDialog):
         row.addStretch(1)
         cancel = QPushButton('Cancel')
         cancel.clicked.connect(self.reject)
-        self.keep = QPushButton(f'Keep {count} takes')
+        self.keep = QPushButton(tr('Keep {count} takes').format(count=count))
         self.keep.setDefault(True)
         self.keep.setProperty('kind', 'primary')
         self.keep.clicked.connect(self.accept)
@@ -783,11 +790,12 @@ class KeepManyDialog(QDialog):
 class AboutDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle(f'About {settings.APP_NAME}')
+        self.setWindowTitle(tr('About {name}').format(name=settings.APP_NAME))
         self.setMinimumWidth(520)
         layout = vbox(self, (26, 24, 26, 20), 10)
         layout.addWidget(label(settings.APP_NAME, size=22, weight=QFont.Weight.DemiBold))
-        layout.addWidget(label(f'{settings.APP_TAGLINE} - version {__version__}', 'muted'))
+        layout.addWidget(label(tr('{tagline} - version {version}').format(tagline=tr(settings.APP_TAGLINE), version=__version__),
+                               'muted'))
         layout.addSpacing(6)
         layout.addWidget(label('Record, edit and keep clean clips of one voice: reference clips, a sentence at a time for a '
                                'dataset, or full audition takes, with the transcript, where the recording came from and what '
@@ -798,9 +806,11 @@ class AboutDialog(QDialog):
                                'the documentation.', 'muted', wrap=True))
         layout.addSpacing(4)
         layout.addWidget(label(
-            f'Released under the MIT License. Built with Qt {qVersion()} through PySide6 {PySide6.__version__} (LGPL-3.0), '
-            f'NumPy, SciPy, SoundFile, sounddevice, PyAudioWPatch and Send2Trash; their licences are listed in '
-            f'THIRD_PARTY_NOTICES.md. Python {platform.python_version()}, {platform.system()} {platform.release()}.',
+            tr('Released under the MIT License. Built with Qt {qt} through PySide6 {pyside} (LGPL-3.0), NumPy, SciPy, '
+               'SoundFile, sounddevice, PyAudioWPatch and Send2Trash; their licences are listed in {notices}. '
+               'Python {python}, {system}.').format(qt=qVersion(), pyside=PySide6.__version__,
+                                                    notices='THIRD_PARTY_NOTICES.md', python=platform.python_version(),
+                                                    system=f'{platform.system()} {platform.release()}'),
             'dim', size=11, wrap=True))
         row = hbox(spacing=8)
         row.addStretch(1)

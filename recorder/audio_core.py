@@ -41,7 +41,6 @@ class Purpose:
     """
     key: str
     name: str
-    a_name: str                 # the name in a sentence: "kept as a reference"
     about: str
     min_seconds: float          # shorter clips cannot be kept
     best_from: float            # the range the meter marks green
@@ -62,11 +61,11 @@ class Purpose:
 
 
 PURPOSES = {
-    'reference': Purpose('reference', 'Reference', 'a reference', 'One good clip of a voice, for a text-to-speech tool',
+    'reference': Purpose('reference', 'Reference', 'One good clip of a voice, for a text-to-speech tool',
                          MIN_SECONDS, TARGET_MIN_SECONDS, TARGET_MAX_SECONDS, MAX_SECONDS, 120.0, EXPORT_RATE, 16),
-    'sentence': Purpose('sentence', 'Sentence', 'a sentence', 'One sentence per take, for a dataset or voice banking',
+    'sentence': Purpose('sentence', 'Sentence', 'One sentence per take, for a dataset or voice banking',
                         1.0, 2.0, 10.0, 15.0, 60.0, EXPORT_RATE, 16),
-    'audition': Purpose('audition', 'Audition', 'an audition', 'A full performance, kept at the best quality',
+    'audition': Purpose('audition', 'Audition', 'A full performance, kept at the best quality',
                         3.0, 30.0, 180.0, 600.0, 900.0, 48000, 24, own_rate=True),
 }
 DEFAULT_PURPOSE = 'reference'

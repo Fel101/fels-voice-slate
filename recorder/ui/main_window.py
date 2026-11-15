@@ -331,11 +331,12 @@ class MainWindow(QMainWindow):
         """Something failed that nothing here was ready for. Say so instead of leaving the person to wonder why nothing
         happened, but once for each message: a fault in something that repeats would otherwise open a dialog twenty times a
         second."""
-        self._show_status(f'Something went wrong: {text}')
+        self._show_status(tr('Something went wrong: {error}').format(error=text))
         if text not in self._errors_shown:
             self._errors_shown.add(text)
-            self.dialogs.notice('error', 'Something went wrong', f'{text}\n\nThe last action may not have finished. Your '
-                                f'recordings are not affected. The details are in {launch.log_path()}')
+            self.dialogs.notice('error', 'Something went wrong', text + '\n\n' + tr(
+                'The last action may not have finished. Your recordings are not affected. The details are in {log}').format(
+                log=launch.log_path()))
 
     def _derived(self):
         """The measurement of the current recipe if it is ready (never starts one)."""
@@ -460,7 +461,8 @@ class MainWindow(QMainWindow):
         take = self.session.current
         rules = take.purpose if take is not None else self.session.workspace.purpose
         rate = take.export_rate if take is not None else rules.export_rate
-        self.status_export.setText(f'{tr(rules.name)}: {rate / 1000:g} kHz · {rules.bit_depth}-bit · mono')
+        self.status_export.setText(tr('{purpose}: {rate} kHz · {bits}-bit · mono').format(
+            purpose=tr(rules.name), rate=f'{rate / 1000:g}', bits=rules.bit_depth))
         tip = tr('Write the {rate} kHz, {bits}-bit WAV and its sidecar').format(rate=f'{rate / 1000:g}', bits=rules.bit_depth)
         self.actions.keep.setToolTip(f'{tip} ({shortcut_text(SPEC["keep"][2])})')
         self.actions.keep.setStatusTip(tip)
@@ -653,7 +655,8 @@ class MainWindow(QMainWindow):
         self.actions.record.setToolTip(text)
         self.topbar.record.setToolTip(text)
         if wanted and not active:
-            self.session.bus.status(f'{key.name} only works while this window is in front: {key.problem}.')
+            self.session.bus.status(tr('{key} only works while this window is in front: {problem}.').format(
+                key=key.name, problem=key.problem))
 
     def _hotkey_pressed(self):
         """The record key was pressed, perhaps in another program. A dialog that is open is not interrupted by a recording
@@ -835,7 +838,7 @@ class MainWindow(QMainWindow):
             return workspace.discard()
         except TrashUnavailable as e:
             if self.dialogs.confirm('The Recycle Bin is not available',
-                                    f'{e}\n\nDelete the files for good instead? This cannot be undone.',
+                                    f'{e}\n\n' + tr('Delete the files for good instead? This cannot be undone.'),
                                     yes='Delete permanently', danger=True):
                 return workspace.discard(permanent=True)
             return False
@@ -869,9 +872,11 @@ class MainWindow(QMainWindow):
             self.discard()
             return
         kept = sum(1 for take in takes if take.kept)
-        also = f' {kept} of them are kept clips, and their WAV files and sidecars go too.' if kept else ''
-        if self.dialogs.confirm(f'Discard {len(takes)} takes?', f'They move to the Recycle Bin, with their original '
-                                f'recordings.{also} You can restore them from there.', yes='Move to Recycle Bin'):
+        also = ' ' + tr('{count} of them are kept clips, and their WAV files and sidecars go too.' if kept != 1 else
+                        '{count} of them is a kept clip, and its WAV file and sidecar go too.').format(count=kept) if kept else ''
+        if self.dialogs.confirm(tr('Discard {count} takes?').format(count=len(takes)),
+                                tr('They move to the Recycle Bin, with their original recordings.') + also + ' ' +
+                                tr('You can restore them from there.'), yes='Move to Recycle Bin'):
             s.batch.discard(takes)
 
     def _other_takes_of_line(self, take=None):
@@ -911,16 +916,19 @@ class MainWindow(QMainWindow):
             return
         if slug is None:
             others = self._other_speakers(takes[0])
-            index = self.dialogs.choose_item('Move takes', f'File these {len(takes)} takes under:',
+            index = self.dialogs.choose_item('Move takes', tr('File these {count} takes under:').format(count=len(takes)),
                                              [name for _, name in others]) if others else None
             if index is None:
                 return
             slug = others[index][0]
         kept = sum(1 for take in takes if take.kept)
         if kept and not self.dialogs.confirm(
-                'Move these kept clips?', f'{kept} kept clip{"s" if kept != 1 else ""} will be filed under '
-                f'{s.workspace.name_of(slug)}. Permission, origin and allowed use go with each one, and its saved '
-                'description will say where it was moved from.', yes='Move'):
+                'Move these kept clips?',
+                tr('{count} kept clip will be filed under {speaker}. Permission, origin and allowed use go with it, and its '
+                   'saved description will say where it was moved from.' if kept == 1 else
+                   '{count} kept clips will be filed under {speaker}. Permission, origin and allowed use go with each one, '
+                   'and its saved description will say where it was moved from.').format(
+                    count=kept, speaker=s.workspace.name_of(slug)), yes='Move'):
             return
         s.batch.move(takes, slug)
 
@@ -933,13 +941,17 @@ class MainWindow(QMainWindow):
         with self._busy('Looking for the pauses...'):
             ranges = s.workspace.split_ranges(take)
         if len(ranges) < 2:
-            self.dialogs.notice('info', 'Split at pauses', f'There is nowhere to split this take: it has no pause of at least '
-                                f'a third of a second after its first {take.purpose.best_from:g} seconds.')
+            self.dialogs.notice('info', 'Split at pauses', tr('There is nowhere to split this take: it has no pause of at '
+                                                              'least a third of a second after its first {seconds} '
+                                                              'seconds.').format(seconds=f'{take.purpose.best_from:g}'))
             return
         lengths = ', '.join(f'{(end - first) / take.rate:.0f}' for first, end in ranges[:8])
-        if self.dialogs.confirm('Split this take?', f'It will become {len(ranges)} new takes, cut in the middle of its pauses '
-                                f'({lengths}{", ..." if len(ranges) > 8 else ""} seconds). This take stays as it is, and the '
-                                'new takes start from the original recording, without its edits.', yes=f'Make {len(ranges)} takes'):
+        lengths += ', ...' if len(ranges) > 8 else ''
+        if self.dialogs.confirm('Split this take?', tr('It will become {count} new takes, cut in the middle of its pauses '
+                                                       '({lengths} seconds). This take stays as it is, and the new takes start '
+                                                       'from the original recording, without its edits.').format(
+                                    count=len(ranges), lengths=lengths),
+                                yes=tr('Make {count} takes').format(count=len(ranges))):
             s.batch.split(take, ranges)         # a part at a time, with Stop: a long take makes hundreds
 
     def rerecord(self):
@@ -1013,7 +1025,7 @@ class MainWindow(QMainWindow):
         finally:
             QApplication.restoreOverrideCursor()
         if imported > 1:
-            self.session.bus.status(f'Imported {imported} recordings. Edit each one, then Keep.')
+            self.session.bus.status(tr('Imported {count} recordings. Edit each one, then Keep.').format(count=imported))
 
     def _long_import_wanted(self, name, fit):
         """Ask before importing a recording long enough to make every step slow, and to use much of the memory."""
@@ -1076,16 +1088,20 @@ class MainWindow(QMainWindow):
             return
         kept, unkept = s.lib.speaker_contents(slug)
         name = workspace.name_of(slug)
-        if not self.dialogs.confirm(f'Delete {name}?', f'Their folder moves to the Recycle Bin: {kept} kept '
-                                    f'clip{"" if kept == 1 else "s"}, {unkept} other take{"" if unkept == 1 else "s"}, the '
-                                    'original recordings, and their release. You can restore it from there, but '
-                                    f'{name} leaves the list of speakers.', yes='Move to Recycle Bin', danger=True):
+        what = (tr('{count} kept clip' if kept == 1 else '{count} kept clips').format(count=kept),
+                tr('{count} other take' if unkept == 1 else '{count} other takes').format(count=unkept))
+        if not self.dialogs.confirm(tr('Delete {name}?').format(name=name),
+                                    tr('Their folder moves to the Recycle Bin: {kept}, {other}, the original recordings, and '
+                                       'their release. You can restore it from there, but {name} leaves the list of '
+                                       'speakers.').format(kept=what[0], other=what[1], name=name),
+                                    yes='Move to Recycle Bin', danger=True):
             return
         try:
             workspace.delete_speaker(slug)
         except TrashUnavailable as e:
-            if self.dialogs.confirm('The Recycle Bin is not available', f'{e}\n\nDelete the folder for good instead? This '
-                                    'cannot be undone.', yes='Delete permanently', danger=True):
+            if self.dialogs.confirm('The Recycle Bin is not available',
+                                    f'{e}\n\n' + tr('Delete the folder for good instead? This cannot be undone.'),
+                                    yes='Delete permanently', danger=True):
                 workspace.delete_speaker(slug, permanent=True)
         except ValueError as e:
             self.dialogs.notice('warning', 'Delete speaker', str(e))
@@ -1115,8 +1131,9 @@ class MainWindow(QMainWindow):
             return
         if take.kept and not self.dialogs.confirm(
                 'Move this kept clip?',
-                f'The clip will be filed under {workspace.name_of(slug)}. Its permission, origin and allowed use go with '
-                f'it, and its saved description will say it was moved from {workspace.name_of(take.speaker)}.',
+                tr('The clip will be filed under {speaker}. Its permission, origin and allowed use go with it, and its saved '
+                   'description will say it was moved from {before}.').format(speaker=workspace.name_of(slug),
+                                                                              before=workspace.name_of(take.speaker)),
                 yes='Move clip'):
             return
         try:
@@ -1142,8 +1159,8 @@ class MainWindow(QMainWindow):
         if take is None or not take.kept or s.capturing.recording:
             return
         if not Path(take.export_path).is_file():
-            self.dialogs.notice('error', 'Save a copy', f'The kept clip {Path(take.export_path).name} is not in its folder '
-                                                        'any more.')
+            self.dialogs.notice('error', 'Save a copy', tr('The kept clip {file} is not in its folder any more.').format(
+                file=Path(take.export_path).name))
             return
         name = clean_label(take.meta.get('label')) or ' '.join(str(take.meta.get('transcript') or '').split())[:60] \
             or Path(take.export_path).stem
@@ -1171,7 +1188,7 @@ class MainWindow(QMainWindow):
         except OSError as e:                        # share.CopyError is one
             self.dialogs.notice('error', 'Could not save the copy', str(e))
             return
-        s.bus.status(f'Saved a copy ({share.rate_text(rate)}) to {path}')
+        s.bus.status(tr('Saved a copy ({rate}) to {path}').format(rate=share.rate_text(rate), path=path))
 
     def _export_totals(self, slug):
         """(clips, seconds) a manifest or dataset of this speaker, and of all speakers, would hold, from the sidecars."""
@@ -1217,14 +1234,16 @@ class MainWindow(QMainWindow):
             return
         detail = '\n'.join(f'- {file}: {reason}' for file, reason in left_out)
         if not rows:
-            self.dialogs.notice('info', 'Export manifest', 'There are no kept clips to list yet.' +
-                                (f'\n\nLeft out:\n{detail}' if detail else ''))
+            self.dialogs.notice('info', 'Export manifest', tr('There are no kept clips to list yet.') +
+                                ('\n\n' + tr('Left out:') + f'\n{detail}' if detail else ''))
             return
-        s.bus.status(f'Listed {len(rows)} clip{"s" if len(rows) != 1 else ""} in {path}' +
-                     (f'. {len(left_out)} left out.' if left_out else ''))
+        listed = tr('Listed {count} clip in {path}' if len(rows) == 1 else 'Listed {count} clips in {path}').format(
+            count=len(rows), path=path)
+        s.bus.status(listed + ('. ' + tr('{count} left out.').format(count=len(left_out)) if left_out else ''))
         if left_out:
             self.dialogs.notice('warning', 'Some clips were left out',
-                                f'{len(rows)} clip{"s are" if len(rows) != 1 else " is"} in the manifest. These are not:'
+                                tr('{count} clip is in the manifest. These are not:' if len(rows) == 1 else
+                                   '{count} clips are in the manifest. These are not:').format(count=len(rows)) +
                                 f'\n\n{detail}')
 
     def export_dataset(self):
@@ -1422,10 +1441,12 @@ class MainWindow(QMainWindow):
         s = self.session
         workspace = s.workspace
         if settings.holds_recordings(s.lib.root) and not settings.holds_recordings(folder) and not workspace.has_unsaved_takes() \
-                and self.dialogs.confirm('Move your recordings?', f'Your recordings are in {s.lib.root}. Move them to {folder}?'
-                                         '\n\nEach file is copied and checked, and the old ones are removed once all of them '
-                                         'have arrived. Choose Leave them to start with an empty folder.', yes='Move them',
-                                         no='Leave them'):
+                and self.dialogs.confirm('Move your recordings?',
+                                         tr('Your recordings are in {old}. Move them to {new}?').format(old=s.lib.root,
+                                                                                                     new=folder) + '\n\n' +
+                                         tr('Each file is copied and checked, and the old ones are removed once all of them '
+                                            'have arrived. Choose Leave them to start with an empty folder.'),
+                                         yes='Move them', no='Leave them'):
             try:
                 relocation = Relocation(s.lib.root, folder)
             except (ValueError, OSError) as e:
@@ -1451,7 +1472,7 @@ class MainWindow(QMainWindow):
         if hits:
             menu.addSeparator()
             for i, edit in hits:
-                action = menu.addAction(f'Remove: {describe(edit)}')
+                action = menu.addAction(tr('Remove: {edit}').format(edit=describe(edit)))
                 action.triggered.connect(lambda checked=False, index=i: editor.remove_edit(index))
         menu.addSeparator()
         menu.addAction(a.zoom_selection)
@@ -1493,14 +1514,14 @@ class MainWindow(QMainWindow):
         """The right-click menu of several selected takes."""
         menu = QMenu(self)
         count = len(takes)
-        menu.addAction(f'Keep {count} takes...', lambda: self.keep_selected(takes))
+        menu.addAction(tr('Keep {count} takes...').format(count=count), lambda: self.keep_selected(takes))
         others = self._other_speakers(takes[0])
         if others:
-            move = menu.addMenu(f'Move {count} takes to speaker')
+            move = menu.addMenu(tr('Move {count} takes to speaker').format(count=count))
             for slug, name in others:
                 move.addAction(name, lambda checked=False, slug=slug: self.move_selected(takes, slug))
         menu.addSeparator()
-        menu.addAction(f'Discard {count} takes...', lambda: self.discard_selected(takes))
+        menu.addAction(tr('Discard {count} takes...').format(count=count), lambda: self.discard_selected(takes))
         return menu
 
     def _selection_menu(self, takes, pos):

@@ -103,7 +103,7 @@ class Capturing:
                 options, default = cap.list_loopbacks(), cap.default_loopback()
         except Exception as e:                  # a device library error is shown, not raised
             options, default = [], None
-            self.bus.status(f'Could not list devices: {e}')
+            self.bus.status(tr('Could not list devices: {error}').format(error=e))
         self.devices = list(options)
         indexes = [index for index, _ in self.devices]
         chosen = self._remembered('input_device').get(self.source)      # by name: the numbers change as devices come and go
@@ -241,7 +241,8 @@ class Capturing:
             self.close_capture()
             return False
         self._set_state('recording')
-        self.bus.status(self._open_spool(capture) or f'Recording. Press {self.record_key} or Stop when finished.')
+        self.bus.status(self._open_spool(capture) or
+                        tr('Recording. Press {key} or Stop when finished.').format(key=self.record_key))
         return True
 
     def add_marker(self):
@@ -285,8 +286,14 @@ class Capturing:
             self.finish_take()
         elif self.elapsed >= self.workspace.purpose.record_limit:
             rules = self.workspace.purpose
-            self.finish_take(message=f'Stopped at {rules.record_limit:g} s, the longest recording for {rules.a_name}. '
-                                     'Trim the take or split it at its pauses.', reason='limit')
+            key = rules.key
+            self.finish_take(message=tr(
+                'Stopped at {seconds} s, the longest recording for a sentence. Trim the take or split it at its pauses.'
+                if key == 'sentence' else
+                'Stopped at {seconds} s, the longest recording for an audition. Trim the take or split it at its pauses.'
+                if key == 'audition' else
+                'Stopped at {seconds} s, the longest recording for a reference. Trim the take or split it at its '
+                'pauses.').format(seconds=f'{rules.record_limit:g}'), reason='limit')
         elif self._stop is not None:
             pending, deadline = self._stop
             if pending is not capture:
@@ -301,28 +308,28 @@ class Capturing:
         only = capture.only_input()
         if only is not None:
             self._told_inputs = True
-            self.bus.status(f'Only input {only} has sound, and mixing it with the silent one lowers the voice by 6 dB. '
-                            f'Choose Input {only} beside the device.')
+            self.bus.status(tr('Only input {input} has sound, and mixing it with the silent one lowers the voice by 6 dB. '
+                               'Choose Input {input} beside the device.').format(input=only))
 
     def capture_failed(self, error):
         """An error while a device was open. Save what a running take captured, and always release the device."""
         capture = self.capture
         if capture is None:
-            self.bus.status(f'Capture error: {error}')
+            self.bus.status(tr('Capture error: {error}').format(error=error))
             return
         if not capture.recording:
             self.close_capture()
             self._set_state('error')
-            self.bus.status(f'Capture error: {error}. The device was released.')
+            self.bus.status(tr('Capture error: {error}. The device was released.').format(error=error))
             return
         self.interrupted = True
         try:
             self.finish_take()
-            self.bus.status(f'Capture error: {error}. The audio captured before the error was saved.')
+            self.bus.status(tr('Capture error: {error}. The audio captured before the error was saved.').format(error=error))
         except Exception as e:
             self.close_capture()
             self._set_state('error')
-            self.bus.status(f'Capture error: {error}. The take could not be saved: {e}')
+            self.bus.status(tr('Capture error: {error}. The take could not be saved: {reason}').format(error=error, reason=e))
 
     def finish_take(self, message=None, reason='stop'):
         self._cancel_stop()
@@ -350,13 +357,15 @@ class Capturing:
         self.ended_by = 'device' if self.interrupted else reason
         self._set_state('interrupted' if self.interrupted else 'stopped')
         if take.unsaved:
-            self.bus.status(f'The original could not be written to disk ({take.save_error}). The take is still in '
-                            'memory: free up space, then press Keep to write it.')
+            self.bus.status(tr('The original could not be written to disk ({error}). The take is still in memory: free up '
+                               'space, then press Keep to write it.').format(error=take.save_error))
         elif close_error is not None:
-            self.bus.status(f'Saved. The device reported an error as it stopped: {close_error}')
+            self.bus.status(tr('Saved. The device reported an error as it stopped: {error}').format(error=close_error))
         elif dropouts:
-            self.bus.status(f'Take saved, but the device lost audio {dropouts} time{"" if dropouts == 1 else "s"} during '
-                            'it. Listen for gaps before you keep it.')
+            self.bus.status(tr('Take saved, but the device lost audio {count} time during it. Listen for gaps before you keep '
+                               'it.' if dropouts == 1 else
+                               'Take saved, but the device lost audio {count} times during it. Listen for gaps before you '
+                               'keep it.').format(count=dropouts))
         else:
             self.bus.status(message or 'Take saved. Review it, then Keep.')
         if self._stay_armed and not self.interrupted and close_error is None and not self.workspace.closing:
@@ -389,7 +398,7 @@ class Capturing:
                                                         self.take_script_line, self.workspace.purpose.key)
         except OSError as e:
             self._spool = None
-            return f'Recording, but only in memory until you stop: {e}'
+            return tr('Recording, but only in memory until you stop: {error}').format(error=e)
         self._spool_synced = self.clock()
         return None
 
@@ -403,7 +412,7 @@ class Capturing:
                 self._spool_synced = self.clock()
         except (OSError, ValueError) as e:      # a full disk, say. The audio is in memory, and Stop writes it
             self._drop_spool()
-            self.bus.status(f'This take is only in memory until you stop: {e}')
+            self.bus.status(tr('This take is only in memory until you stop: {error}').format(error=e))
 
     def _drop_spool(self, take=None):
         """The take is finished. Its spool goes, unless it is the only copy on disk until the original can be written."""
@@ -422,6 +431,6 @@ class Capturing:
             self._ensure_capture().arm()
         except Exception as e:                  # the device has gone, or something else took it
             self.close_capture()
-            self.bus.status(f'The input could not be armed again: {e}')
+            self.bus.status(tr('The input could not be armed again: {error}').format(error=e))
             return
         self._set_state('armed')

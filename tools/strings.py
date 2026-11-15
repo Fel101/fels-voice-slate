@@ -22,15 +22,19 @@ FILES = [*sorted((ROOT / 'recorder' / 'ui').glob('*.py')), ROOT / 'recorder' / '
          ROOT / 'recorder' / 'session' / 'batch.py', ROOT / 'recorder' / 'dataset.py',
          # what the Check tab, Auto analyze and the Keep card say is worked out here, in the window's language
          ROOT / 'recorder' / 'core' / 'analysis.py', ROOT / 'recorder' / 'core' / 'autofix.py',
-         ROOT / 'recorder' / 'audio_core.py', ROOT / 'recorder' / 'store.py']
+         ROOT / 'recorder' / 'audio_core.py', ROOT / 'recorder' / 'store.py',
+         # and the history of edits, the status lines and the reasons a clip or a key is refused
+         ROOT / 'recorder' / 'core' / 'edits.py', ROOT / 'recorder' / 'session' / '__init__.py',
+         ROOT / 'recorder' / 'session' / 'autosave.py', ROOT / 'recorder' / 'manifest.py', ROOT / 'recorder' / 'share.py',
+         ROOT / 'recorder' / 'hotkey.py']
 CALLS = {'end', 'label', 'caption', 'button', 'chip', 'set_chip', 'setToolTip', 'setPlaceholderText', 'setText', 'setWindowTitle',
          'addRow', 'addItem', 'QCheckBox', 'QPushButton', 'QLabel', 'notice', 'confirm', 'ask_text', 'choose_item', 'addAction',
          'addMenu', 'setAccessibleName', 'setAccessibleDescription', 'set_tooltips', 'Segmented', 'status', 'tr', 'Step',
          'setStatusTip', 'StepCard', 'choose_file', 'choose_files', 'choose_folder', 'choose_save_file', 'add_note', '_field',
-         'PathRow', 'say', 'get', 'format', '_refused', '_busy', '_busy_with', '_start'}
+         'PathRow', 'say', 'get', 'format', '_refused', '_busy', '_busy_with', '_start', '_spin'}
 NAMES = {'STATEMENT', 'EMPTY_TEXT', 'OUT_OF_REACH_TEXT', 'INTRO', 'SPEC', 'TABS', 'THEME_NAMES', 'MOUSE_ROWS', 'SHORTCUT_GROUPS',
          'STATES', 'SOURCES', 'STATUS_WORDS', 'GLYPH_WORDS', 'ORDERS', 'SHOWN', 'CHOICE_TIPS', 'SENTENCE',
-         'WHERE_THE_LEVEL_IS', 'REFUSALS', 'LAYOUTS', 'SPLITS', 'STOP_TIP', 'STOP_COPY_TIP'}
+         'WHERE_THE_LEVEL_IS', 'REFUSALS', 'LAYOUTS', 'SPLITS', 'STOP_TIP', 'STOP_COPY_TIP', 'MONTHS'}
 SKIP = {'F9', 'muted', 'dim', 'ghost', 'primary', 'link', 'danger', 'amber', 'violet', 'green', 'red', 'gray', 'text',
         'Record      F9', 'Reading check: {count} place differ'}
 # Texts the search below does not find, because the code holds them in a variable or in the rules of a purpose.
@@ -41,7 +45,8 @@ EXTRA = ('Length {detail}  ({allowed})', 'Length {detail}: this purpose needs {a
          'A full performance, kept at the best quality', 'In review', 'Kept', 'Changed', 'Not kept', 'Not saved',
          'Playhead steps', 'Left / Right: 10 ms; Shift: 100 ms; Ctrl: 1 s; Home, End', 'Drafting...', 'Draft: check it',
          'Check after cuts', 'From script', 'From script: check it', 'Read as written',
-         'Cut recorded. The master file is unchanged.', 'stopping...')
+         'Cut recorded. The master file is unchanged.', 'stopping...', 'Ready.', 'Voice and Clip Recorder',
+         'WAV, 16-bit', 'FLAC, lossless and smaller')
 
 
 def _constants(node):

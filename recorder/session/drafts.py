@@ -18,6 +18,7 @@ from .. import clean, settings, transcript
 from ..clean import CleanError
 from ..core import reading, render
 from ..core.edits import words_key
+from ..i18n import tr
 from .measure import frozen
 from .workspace import reading_of
 
@@ -72,7 +73,7 @@ class Drafts:
             try:
                 clean.find_ffmpeg()             # the render happens later, in the drafts' lane; say at once what it lacks
             except CleanError as e:
-                self.bus.status(f'Transcript draft not started: {e}')
+                self.bus.status(tr('Transcript draft not started: {error}').format(error=e))
                 return False
         request = (object(), take.meta['transcript'], words_key(take.history))
         take.draft_request = request
@@ -96,11 +97,11 @@ class Drafts:
 
         def failed(error):
             if isinstance(error, CleanError):   # cleaning is on and FFmpeg is missing or failed: say so, change nothing
-                message = f'Transcript draft not started: {error}'
+                message = tr('Transcript draft not started: {error}').format(error=error)
             elif isinstance(error, transcript.DraftUnavailable):
                 message = str(error)
             else:
-                message = f'Transcript draft failed: {error}'
+                message = tr('Transcript draft failed: {error}').format(error=error)
             self.receive(take, None, message, replace, request)
 
         # Dropped before it runs if the take has been discarded, or a newer draft has been asked for since.
@@ -153,12 +154,14 @@ class Drafts:
     def _reading_message(take):
         check = reading_of(take)
         if check is None:
-            return 'Draft ready. Your typed transcript was kept; use Suggest from audio to replace it.'
+            return tr('Draft ready. Your typed transcript was kept; use Suggest from audio to replace it.')
         count = reading.differences(check)
         if not count:
-            return 'Reading check: the line was read as written.'
-        return (f'Reading check: {count} place{"s differ" if count != 1 else " differs"} from the script. The Clip tab shows '
-                'where. Listen: the recognizer can be wrong too.')
+            return tr('Reading check: the line was read as written.')
+        return tr('Reading check: {count} place differs from the script. The Clip tab shows where. Listen: the recognizer '
+                  'can be wrong too.' if count == 1 else
+                  'Reading check: {count} places differ from the script. The Clip tab shows where. Listen: the recognizer '
+                  'can be wrong too.').format(count=count)
 
     # ---- following the edits ------------------------------------------------------------------------------------------
 

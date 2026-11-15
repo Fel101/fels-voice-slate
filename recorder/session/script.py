@@ -12,6 +12,7 @@ from collections import namedtuple
 from pathlib import Path
 
 from .. import audio_core as ac
+from ..i18n import tr
 
 SCHEMA = 'voice-slate-script-v1'
 FILE_NAME = 'script.json'
@@ -51,7 +52,7 @@ class Script:
     def label(self):
         if not self.lines:
             return ''
-        return f'{self.index + 1} of {len(self.lines)}'
+        return tr('{number} of {count}').format(number=self.index + 1, count=len(self.lines))
 
     # ---- remembering ----
 
@@ -82,7 +83,7 @@ class Script:
         except OSError as e:
             if not self._warned:                    # the script itself is fine: only the next session will not find it
                 self._warned = True
-                self.bus.status(f'The place in the script could not be saved: {e}')
+                self.bus.status(tr('The place in the script could not be saved: {error}').format(error=e))
 
     def _changed(self):
         self._remember()
@@ -102,7 +103,7 @@ class Script:
             self.bus.notice('error', 'Script', 'The file is not plain text. Save it as UTF-8 text and load it again.')
             return False
         except OSError as e:
-            self.bus.notice('error', 'Script', f'The file could not be read: {e}')
+            self.bus.notice('error', 'Script', tr('The file could not be read: {error}').format(error=e))
             return False
         self.load_text(text)
         return True

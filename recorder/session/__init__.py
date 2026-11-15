@@ -20,6 +20,7 @@ import time
 from pathlib import Path
 
 from .. import clean, settings
+from ..i18n import tr
 from ..jobs import Jobs
 from ..store import Library
 from .advisor import Advisor
@@ -44,7 +45,7 @@ class Session:
         clean.set_ffmpeg_path(data.get('ffmpeg'))
         self.bus = Bus()
         self.jobs = jobs or Jobs()
-        self.jobs.on_unhandled = lambda error: self.bus.status(f'A background task failed: {error}')
+        self.jobs.on_unhandled = lambda error: self.bus.status(tr('A background task failed: {error}').format(error=error))
         self.workspace = Workspace(self.bus, library or Library(data.get('root') or settings.default_root()),
                                    self.settings_file, is_recording=lambda: self.capturing.recording)
         self.jobs.front = lambda: self.workspace.current        # its measurements and its draft go first
@@ -99,18 +100,18 @@ class Session:
         try:
             self.run.tick()
         except Exception as e:                  # a fault in the run ends it; the take going on is the recording's own
-            self.run.end(f'The script run has ended: {e}')
+            self.run.end(tr('The script run has ended: {error}').format(error=e))
         try:
             self.room.tick()
         except Exception as e:                  # a fault in the room check ends it, and lets what it heard go
-            self.room.end(f'The room check has stopped: {e}')
-        for name, step in (('Playback', self.transport.tick), ('Draft transcript', self.drafts.tick),
-                           ('Autosave', self.autosave.tick), ('Background task', self.jobs.drain),
-                           ('Batch', self.batch.tick)):
+            self.room.end(tr('The room check has stopped: {error}').format(error=e))
+        for name, step in ((tr('Playback'), self.transport.tick), (tr('Draft transcript'), self.drafts.tick),
+                           (tr('Autosave'), self.autosave.tick), (tr('Background task'), self.jobs.drain),
+                           (tr('Batch'), self.batch.tick)):
             try:
                 step()
             except Exception as e:              # these touch only the display; a failure must not touch the recording
-                self.bus.status(f'{name} error: {e}')
+                self.bus.status(tr('{part} error: {error}').format(part=name, error=e))
 
     # ---- actions that span parts --------------------------------------------------------------------------------------
 
@@ -178,7 +179,7 @@ class Session:
             self.jobs.close()
             return []
         except (OSError, RuntimeError) as e:
-            self.bus.status(f'Could not finish closing: {e}. The window remains open.')
+            self.bus.status(tr('Could not finish closing: {error}. The window remains open.').format(error=e))
             return [str(e)]
         finally:
             self._closing = False

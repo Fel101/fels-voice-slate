@@ -250,17 +250,20 @@ class Workspace:
         notes = []
         if self.lib.recovered:
             count = self.lib.recovered
-            notes.append(f'Recovered {count} recording{"s" if count != 1 else ""} cut short when the program stopped.')
+            notes.append(tr('Recovered {count} recording cut short when the program stopped.' if count == 1 else
+                            'Recovered {count} recordings cut short when the program stopped.').format(count=count))
         if self.lib.skipped:
             detail = '; '.join(f'{name}: {reason}' for name, reason in self.lib.skipped)
-            notes.append(f'{len(self.lib.skipped)} saved clip(s) not loaded. Their files were not changed. {detail}')
+            notes.append(tr('{count} saved clip(s) not loaded. Their files were not changed. {detail}').format(
+                count=len(self.lib.skipped), detail=detail))
         unusable = [t.autosave_problem for t in extra if t.autosave_problem]
         if unusable:
-            notes.append(f'The saved changes of {len(unusable)} take(s) could not be used, so they show as recorded. '
-                         f'The files were not changed. {"; ".join(unusable)}')
+            notes.append(tr('The saved changes of {count} take(s) could not be used, so they show as recorded. The files were '
+                            'not changed. {detail}').format(count=len(unusable), detail='; '.join(unusable)))
         restored = sum(1 for t in extra if t.restored)
         if restored:
-            notes.append(f'Picked up your saved edits and text on {restored} take{"s" if restored != 1 else ""}.')
+            notes.append(tr('Picked up your saved edits and text on {count} take.' if restored == 1 else
+                            'Picked up your saved edits and text on {count} takes.').format(count=restored))
         if notes:
             self.bus.status(' '.join(notes))
 
@@ -330,7 +333,7 @@ class Workspace:
         self.takes.insert(0, take)
         self.bus.notify('takes')
         self.open_take(take)
-        self.bus.status(f'Imported {Path(path).name}. Edit it, then Keep.')
+        self.bus.status(tr('Imported {file}. Edit it, then Keep.').format(file=Path(path).name))
         if self.on_take_added is not None:
             self.on_take_added(take)
         return take
@@ -484,7 +487,7 @@ class Workspace:
         paths = self.keep_take(take)
         self.bus.notify('takes')
         self.bus.notify('meta')
-        self.bus.status(f"Kept. Saved to {paths['export']}")
+        self.bus.status(tr('Kept. Saved to {path}').format(path=paths['export']))
         return paths
 
     def keep_take(self, take):
@@ -609,8 +612,9 @@ class Workspace:
             self.bus.notify('current')
         if take.changed:
             self.bus.notify('meta', take)           # its autosave file stayed behind: it is written again in the new place
-        self.bus.status(f'Moved to {name}.' if not left else
-                        f'Moved to {name}, but these old files could not be removed: {", ".join(p.name for p in left)}.')
+        self.bus.status(tr('Moved to {speaker}.').format(speaker=name) if not left else
+                        tr('Moved to {speaker}, but these old files could not be removed: {files}.').format(
+                            speaker=name, files=', '.join(p.name for p in left)))
         return left
 
     def discard(self, permanent=False):

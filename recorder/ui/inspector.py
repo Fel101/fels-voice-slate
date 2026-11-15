@@ -267,18 +267,20 @@ class ProcessPage(QWidget):
         lo, hi = chain_mod.LIMITS[('highpass', 'hz')]
         self.hp = StepCard('High-pass filter', 'Removes room rumble and desk thumps below the cutoff.')
         self.hp_slider = self.hp.add_slider(lo, hi)
-        self.hp.switch.toggled.connect(lambda on: self._set('highpass', f'High-pass {"on" if on else "off"}', enabled=on))
+        self.hp.switch.toggled.connect(lambda on: self._set('highpass', tr('High-pass on' if on else 'High-pass off'),
+                                                            enabled=on))
         self.hp_slider.valueChanged.connect(
-            lambda v: self._set('highpass', f'High-pass {v} Hz', merge='highpass.hz', hz=float(v)))
+            lambda v: self._set('highpass', tr('High-pass {hz} Hz').format(hz=v), merge='highpass.hz', hz=float(v)))
         layout.addWidget(self.hp)
 
         self.hum = StepCard('Hum filter', 'Notches mains hum and its harmonics. The Check tab says if hum was found.')
         self.hum_region = Segmented(['50 Hz', '60 Hz'], 1)
         self.hum_region.setAccessibleName('Mains frequency')
         self.hum.body.addWidget(self.hum_region)
-        self.hum.switch.toggled.connect(lambda on: self._set('hum', f'Hum filter {"on" if on else "off"}', enabled=on))
+        self.hum.switch.toggled.connect(lambda on: self._set('hum', tr('Hum filter on' if on else 'Hum filter off'),
+                                                             enabled=on))
         self.hum_region.currentChanged.connect(
-            lambda i: self._set('hum', f'Hum filter {(50, 60)[i]} Hz', hz=float((50, 60)[i])))
+            lambda i: self._set('hum', tr('Hum filter {hz} Hz').format(hz=(50, 60)[i]), hz=float((50, 60)[i])))
         layout.addWidget(self.hum)
 
         lo, hi = chain_mod.LIMITS[('denoise', 'nf')]
@@ -292,15 +294,16 @@ class ProcessPage(QWidget):
         self.denoise_note = self.denoise.add_note('Voice identity is not checked. Listen first.')
         self.denoise.switch.toggled.connect(self.session.editor.set_denoise)
         self.denoise_slider.valueChanged.connect(
-            lambda v: self._set('denoise', f'Noise floor {v} dB', merge='denoise.nf', nf=float(v)))
+            lambda v: self._set('denoise', tr('Noise floor {db} dB').format(db=v), merge='denoise.nf', nf=float(v)))
         layout.addWidget(self.denoise)
 
         lo, hi = chain_mod.LIMITS[('level', 'gain_db')]
-        self.level = StepCard('Level', f'Gain for the whole clip. Normalize puts the speech at {ac.TARGET_VOICED_DB:.0f} dB '
-                                       'RMS.', switch=False)
+        self.level = StepCard('Level', tr('Gain for the whole clip. Normalize puts the speech at {target} dB RMS.').format(
+            target=f'{ac.TARGET_VOICED_DB:.0f}'), switch=False)
         self.gain_slider = self.level.add_slider(lo, hi, 10)
         self.gain_slider.valueChanged.connect(
-            lambda v: self._set('level', f'Gain {v / 10:+.1f} dB', merge='level.gain', gain_db=v / 10))
+            lambda v: self._set('level', tr('Gain {gain} dB').format(gain=f'{v / 10:+.1f}'), merge='level.gain',
+                                gain_db=v / 10))
         row = hbox(spacing=6)
         self.normalize = button('Normalize', None, None, 'Set the gain so the speech sits at the target level')
         self.normalize.clicked.connect(lambda: self.session.editor.normalize_level())
@@ -316,9 +319,11 @@ class ProcessPage(QWidget):
         self.limiter = StepCard('Peak limiter', 'Catches a pop or a loud peak so Normalize can bring the speech up '
                                                 'without clipping.')
         self.ceiling_slider = self.limiter.add_slider(lo, hi, 10)
-        self.limiter.switch.toggled.connect(lambda on: self._set('limiter', f'Limiter {"on" if on else "off"}', enabled=on))
+        self.limiter.switch.toggled.connect(lambda on: self._set('limiter', tr('Limiter on' if on else 'Limiter off'),
+                                                                 enabled=on))
         self.ceiling_slider.valueChanged.connect(
-            lambda v: self._set('limiter', f'Ceiling {v / 10:.1f} dB', merge='limiter.ceiling', ceiling_db=v / 10))
+            lambda v: self._set('limiter', tr('Ceiling {db} dB').format(db=f'{v / 10:.1f}'), merge='limiter.ceiling',
+                                ceiling_db=v / 10))
         layout.addWidget(self.limiter)
 
         self.fade = StepCard('Join fade', 'A short crossfade where two parts meet after a cut, so the join does not click.',
@@ -380,11 +385,11 @@ class ProcessPage(QWidget):
     def _refresh_history(self, history):
         self.history.blockSignals(True)
         self.history.clear()
-        for i, text in enumerate(['Start'] + history.steps):
+        for i, text in enumerate([tr('Beginning')] + history.steps):        # not "Start", which is a button's word
             item = QListWidgetItem(text)
             if i > history.position:
                 item.setForeground(color('dim'))
-                item.setToolTip('Undone. Click to redo up to here.')
+                item.setToolTip(tr('Undone. Click to redo up to here.'))
             self.history.addItem(item)
         self.history.setCurrentRow(history.position)
         self.history.scrollToItem(self.history.currentItem())
@@ -920,16 +925,23 @@ class RecordCard(QFrame):
         layout = vbox(self, (16, 14, 16, 14), 8)
         layout.addWidget(caption('This take'))
         self.values = {}
-        for key, name in (('device', 'Device'), ('capture', 'Capture'), ('pre_roll', 'Pre-roll'), ('tail', 'Tail'),
-                          ('saved', 'Saved to')):
+        self.titles = []
+        for key, name in (('device', tr('Device')), ('capture', tr('Capture')), ('pre_roll', tr('Pre-roll')),
+                          ('tail', tr('Tail')), ('saved', tr('Saved to'))):
             row = hbox(spacing=10)
             title = label(name, 'dim')
-            title.setFixedWidth(70)
             value = label('', wrap=True)
             row.addWidget(title, 0, Qt.AlignmentFlag.AlignTop)
             row.addWidget(value, 1)
             layout.addLayout(row)
             self.values[key] = value
+            self.titles.append(title)
+        # as wide as the longest name in the window's language: "Enregistré dans" was cut to "Enregistré d" in 70 pixels
+        for title in self.titles:
+            title.ensurePolished()
+        width = max(70, *(title.fontMetrics().horizontalAdvance(title.text()) + 2 for title in self.titles))
+        for title in self.titles:
+            title.setFixedWidth(width)
         layout.addSpacing(6)
         layout.addWidget(label('Editing opens when you stop. The take is written to disk as it records, so a crash does not '
                                'lose it, and the original is written at Stop.', 'muted', wrap=True))
@@ -944,7 +956,8 @@ class RecordCard(QFrame):
         self.values['pre_roll'].setText(tr('{seconds} s kept before Record').format(seconds=f"{info['pre_roll']:g}")
                                         if info['pre_roll'] else tr('none for system audio'))
         self.values['tail'].setText(tr('{seconds} s after Stop').format(seconds=f"{info['tail']:g}"))
-        self.values['saved'].setText(f"{workspace.name_of(workspace.speaker) or 'My voice'}\\masters\\ at Stop")
+        folder = f"{workspace.name_of(workspace.speaker) or tr('My voice')}\\masters\\"
+        self.values['saved'].setText(tr('{folder} at Stop').format(folder=folder))
 
 
 # ---- the panel --------------------------------------------------------------------------------------------------------

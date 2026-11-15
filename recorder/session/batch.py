@@ -70,8 +70,8 @@ class Batch:
             self._keep_one(take, origin, allowed_use, stated_at, covered)
 
         def finish(stopped):
-            word = 'Kept' if not stopped else 'Stopped. Kept'
-            self.bus.status(f'{word} {self.ok} of {len(self.items)} takes.')
+            self.bus.status(tr('Kept {done} of {count} takes.' if not stopped else 'Stopped. Kept {done} of {count} takes.').format(
+                done=self.ok, count=len(self.items)))
             self.bus.notify('meta')
 
         self._start('Keeping takes', takes, step, finish)
@@ -88,7 +88,7 @@ class Batch:
             self.ok += 1
 
         def finish(stopped):
-            self.bus.status(f'Moved {self.ok} of {len(self.items)} takes to the Recycle Bin.')
+            self.bus.status(tr('Moved {done} of {count} takes to the Recycle Bin.').format(done=self.ok, count=len(self.items)))
 
         self._start('Discarding takes', takes, step, finish)
 
@@ -102,10 +102,11 @@ class Batch:
                 return
             self.ok += 1
             for path in left or ():
-                self.left_out.append((path.name, 'the old file could not be removed'))
+                self.left_out.append((path.name, tr('the old file could not be removed')))
 
         def finish(stopped):
-            self.bus.status(f'Moved {self.ok} of {len(self.items)} takes to {self.workspace.name_of(slug) or slug}.')
+            self.bus.status(tr('Moved {done} of {count} takes to {speaker}.').format(
+                done=self.ok, count=len(self.items), speaker=self.workspace.name_of(slug) or slug))
 
         self._start('Moving takes', takes, step, finish)
 
@@ -154,8 +155,8 @@ class Batch:
                 return
             left = relocation.finish()
             arrived()
-            self.bus.status(f'Moved {self.ok} files to {relocation.target}.' +
-                            (f' {len(left)} old files could not be removed.' if left else ''))
+            self.bus.status(tr('Moved {count} files to {folder}.').format(count=self.ok, folder=relocation.target) +
+                            (' ' + tr('{count} old files could not be removed.').format(count=len(left)) if left else ''))
 
         self._start('Moving your recordings', relocation.files, step, finish)
 
@@ -257,9 +258,10 @@ class Batch:
         def finish(stopped):
             drop()
             if stopped:
-                self.bus.status(f'Stopped. Imported {self.ok} of {len(self.items)} recordings.')
+                self.bus.status(tr('Stopped. Imported {done} of {count} recordings.').format(done=self.ok,
+                                                                                            count=len(self.items)))
             elif self.ok > 1:
-                self.bus.status(f'Imported {self.ok} recordings. Edit each one, then Keep.')
+                self.bus.status(tr('Imported {count} recordings. Edit each one, then Keep.').format(count=self.ok))
 
         self._start('Importing recordings', paths, step, finish)
 
@@ -273,7 +275,7 @@ class Batch:
             try:
                 parts.append(self.workspace.split_part(take, *span))
             except OSError as e:
-                self.left_out.append((f'The part at {span[0] / take.rate:.1f} s', str(e)))
+                self.left_out.append((tr('The part at {seconds} s').format(seconds=f'{span[0] / take.rate:.1f}'), str(e)))
                 self.cancel()
                 return
             self.ok += 1

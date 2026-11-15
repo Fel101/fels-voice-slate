@@ -11,6 +11,7 @@ import numpy as np
 from ..audio_io import Player, find_output
 from ..clean import CleanError
 from ..core import render
+from ..i18n import tr
 
 
 REFRESH_DELAY = 0.15            # seconds an edit waits, so a slider dragged during playback re-renders once, not per step
@@ -124,7 +125,7 @@ class Transport:
             self.player.play(begin, loop=self._loop_range() if looping else None)
         except Exception as e:                  # the sound library's own errors; a missing output device is the usual one
             self.mode = None
-            self.bus.notice('error', 'Could not play', f'The sound could not be played: {e}')
+            self.bus.notice('error', 'Could not play', tr('The sound could not be played: {error}').format(error=e))
             self.bus.notify('transport')
             return False
         return True

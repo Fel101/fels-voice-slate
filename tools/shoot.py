@@ -186,8 +186,9 @@ def reading_take(app, window):
     window.flush()
     settle(app, session)
     measure(app, window)
-    window._show_status('Reading check: 2 places differ from the script. The Clip tab shows where. Listen: the recognizer can be '
-                        'wrong too.')
+    from recorder.i18n import tr
+    window._show_status(tr('Reading check: {count} places differ from the script. The Clip tab shows where. Listen: the '
+                           'recognizer can be wrong too.').format(count=2))
 
 
 def script_take(app, window):
@@ -331,6 +332,8 @@ def main():
                           'roomspeak': lambda: room_dialog(session, 'speak'),
                           'handsfree': lambda: dialogs.HandsFreeDialog({**run.OPTIONS, 'next_line': True, 'stop_after_pause': True,
                                                                         'auto_start': True}, 'F9')}[state]()
+                from recorder.ui.translate import translate_tree
+                translate_tree(dialog)                  # as dialogs.Dialogs does before it shows one
                 dialog.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)        # drawn, but never on the person's screen
                 dialog.show()
                 for _ in range(4):
@@ -359,7 +362,7 @@ def main():
                 window.flush()
                 window._tick()
                 window.timer.stop()
-                window._show_status('Recording. Press F9 or Stop when finished.')
+                window._show_status(i18n.tr('Recording. Press {key} or Stop when finished.').format(key='F9'))
                 render(window, app, out / 'record.png', size, args.scale)
             elif state in RUN:
                 run_take(app, window, state)

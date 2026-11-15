@@ -34,6 +34,7 @@ ROW_ROLE = Qt.ItemDataRole.UserRole
 
 Row = namedtuple('Row', 'take title sub status tip named opened live reading')    # reading: None, 0 or how many differ
 ORDERS = (('newest', 'Newest first'), ('oldest', 'Oldest first'), ('script', 'Script order'))
+MONTHS = ('Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec')
 SHOWN = (('all', 'All takes'), ('not_kept', 'Not kept'), ('kept', 'Kept'), ('changed', 'Changed'), ('line', 'Current line'))
 CHOICE_TIPS = {'script': 'The takes of each script line together, in the order of the script, then the takes of no line',
                'kept': 'Takes with a kept clip, changed since or not',
@@ -79,7 +80,7 @@ def when(created, now=None):
         return ''
     now = now or dt.datetime.now().astimezone()
     days = (now.date() - moment.date()).days
-    day = tr('Today') if days == 0 else tr('Yesterday') if days == 1 else moment.strftime('%b %d').replace(' 0', ' ')
+    day = tr('Today') if days == 0 else tr('Yesterday') if days == 1 else         tr('{month} {day}').format(month=tr(MONTHS[moment.month - 1]), day=moment.day)
     return f'{day} {moment:%H:%M}'
 
 

@@ -123,11 +123,11 @@ def shortcut_text(keys):
 def key_problem(text):
     """Why a key cannot be the record key, in words the person can read, or '' when it can."""
     if hotkey.parse_key(text) is None:
-        return 'Use a function key such as F9, or a letter or number held with Ctrl or Alt.'
+        return tr('Use a function key such as F9, or a letter or number held with Ctrl or Alt.')
     wanted = QKeySequence(text)
     for name, (label, _, keys, _, _) in SPEC.items():
         if name != 'record' and any(QKeySequence(key) == wanted for key in keys):
-            return f'That key is already used for {label.rstrip(".")}.'
+            return tr('That key is already used for {command}.').format(command=tr(label).rstrip('.'))
     return ''
 
 

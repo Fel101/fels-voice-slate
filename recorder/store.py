@@ -715,9 +715,10 @@ class TooLong(ValueError):
 
 def too_long_text(fit):
     """Why a recording is refused, and what to do, after its name and a colon, as the other reasons an import fails."""
-    return (f'it is {audio_import.duration_text(fit.seconds)} long, and working on it would need about '
-            f'{fit.needed / 2**30:.1f} GB of memory; this computer has {fit.memory / 2**30:.0f} GB. Cut it into parts '
-            f'shorter than {audio_import.duration_text(fit.longest)} with another program, and import those.')
+    return tr('it is {length} long, and working on it would need about {needed} GB of memory; this computer has {memory} GB. '
+              'Cut it into parts shorter than {longest} with another program, and import those.').format(
+        length=audio_import.duration_text(fit.seconds), needed=f'{fit.needed / 2**30:.1f}',
+        memory=f'{fit.memory / 2**30:.0f}', longest=audio_import.duration_text(fit.longest))
 
 
 class Importing:

@@ -17,6 +17,7 @@ import numpy as np
 import soundfile as sf
 
 from . import audio_core as ac
+from .i18n import tr
 from .store import RESERVED_NAMES, permission_line
 
 MP3_KBPS = 128
@@ -91,7 +92,7 @@ def save_copy(source, destination, kind=DEFAULT_KIND, rate=DEFAULT_RATE):
     except OSError:
         same = False
     if same:
-        raise CopyError('That is the kept clip itself. Choose another file name.')
+        raise CopyError(tr('That is the kept clip itself. Choose another file name.'))
     _, _, name, subtype, settings = FORMATS[kind]
     if kind == 'mp3':
         settings = {**settings, 'compression_level': _mp3_quality(rate)}
@@ -111,7 +112,7 @@ def save_copy(source, destination, kind=DEFAULT_KIND, rate=DEFAULT_RATE):
     except CopyError:
         raise
     except (OSError, RuntimeError) as e:            # SoundFile's own errors are RuntimeErrors
-        raise CopyError(f'The copy could not be made: {e}') from e
+        raise CopyError(tr('The copy could not be made: {error}').format(error=e)) from e
     finally:
         try:
             tmp.unlink(missing_ok=True)

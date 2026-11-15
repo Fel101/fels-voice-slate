@@ -251,11 +251,18 @@ class ElidedCombo(QComboBox):
         option = QStyleOptionComboBox()
         self.initStyleOption(option)
         p.drawComplexControl(QStyle.ComplexControl.CC_ComboBox, option)
-        room = self.style().subControlRect(QStyle.ComplexControl.CC_ComboBox, option,
-                                           QStyle.SubControl.SC_ComboBoxEditField, self)
         option.currentText = option.fontMetrics.elidedText(option.currentText, Qt.TextElideMode.ElideMiddle,
-                                                           max(room.width() - 8, 10))
+                                                           self.room(option))
         p.drawControl(QStyle.ControlElement.CE_ComboBoxLabel, option)
+
+    def room(self, option=None):
+        """How wide a choice can be, in pixels, before it is shortened."""
+        if option is None:
+            option = QStyleOptionComboBox()
+            self.initStyleOption(option)
+        field = self.style().subControlRect(QStyle.ComplexControl.CC_ComboBox, option,
+                                            QStyle.SubControl.SC_ComboBoxEditField, self)
+        return max(field.width() - 8, 10)
 
 
 def format_clock(seconds):

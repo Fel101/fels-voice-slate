@@ -189,9 +189,21 @@ def test_a_status_line_of_one_fixed_text_is_translated(german, session):
     assert german.status_text.full_text == 'Take gespeichert. Prüfen, dann behalten.'
 
 
-def test_a_status_line_built_from_values_stays_in_english_and_does_no_harm(german, session):
-    session.bus.status('Kept 3 of 3 takes.')
-    assert german.status_text.full_text == 'Kept 3 of 3 takes.'
+def test_a_status_line_the_files_have_no_entry_for_stays_as_it_is(german, session):
+    session.bus.status('Something new, 3 of 3.')
+    assert german.status_text.full_text == 'Something new, 3 of 3.'
+
+
+def test_a_status_line_built_from_values_is_in_the_language(german, session):
+    """It was left in English: "Kept 3 of 3 takes." after Keep on three."""
+    from helpers import finish_batch
+    takes = [record(session, 12.0) for _ in range(3)]
+    for take in takes:
+        take.meta.update(transcript='Words spoken in the take.', origin='recorded here', allowed_use='my own projects')
+    session.batch.keep(takes)
+    finish_batch(session)
+    german.flush()
+    assert german.status_text.full_text == '3 von 3 Takes behalten.'
 
 
 def test_the_language_setting_is_saved(window, session, dialogs):
@@ -245,7 +257,10 @@ def test_each_tab_fits_its_panel_in_each_language(qapp, session, dialogs, speak,
 # ---- nothing left in English --------------------------------------------------------------------------------------------------
 
 WORD = re.compile(r'[A-Za-z]{3,}')
-SAME = {'dBFS', 'LUFS', 'kHz', 'RMS', 'ACX', 'Ctrl', 'Clip'}       # units and names, the same in every language here
+SAME = {'dBFS', 'LUFS', 'kHz', 'RMS', 'ACX', 'Ctrl', 'Clip',      # units and names, the same in every language here
+        'FFmpeg', 'Fel', 'Voice', 'Slate',
+        # and words one of the languages has too: German says Takes, Zoom and Format; French Gain, Notes and Silence
+        'Clips', 'clips', 'min', 'TAKES', 'Zoom', 'Format', 'Original', 'Script', 'Gain', 'Microphone', 'Notes', 'Silence'}
 
 
 def shown_texts(*widgets):
@@ -292,3 +307,107 @@ def test_the_check_tab_and_the_keep_card_say_nothing_in_english(qapp, make_sessi
     assert any(text.startswith('Speech is at') for text in english) and any('draft' in text for text in english)
     left = sorted(text for text in english & theirs if any(word not in SAME for word in WORD.findall(text)))
     assert left == []
+
+
+@pytest.mark.parametrize('code', i18n.LANGUAGES)
+def test_the_choices_of_the_take_list_fit_their_boxes(qapp, session, dialogs, speak, code):
+    """A choice wider than its box is shortened in the middle: "Plus réc…bord" for "Plus récentes d'abord", and so were
+    the other names of the order and of which takes are shown in German, Spanish and French."""
+    speak(code)
+    record(session, 5.0)
+    window = MainWindow(session=session, dialogs=dialogs)
+    window.timer.stop()
+    window.resize(1440, 900)
+    window.show()
+    window.flush()
+    ui_helpers.pump(qapp)
+    for combo in (window.library.order, window.library.shown):
+        assert combo.isVisible()
+        for index in range(combo.count()):
+            assert combo.fontMetrics().horizontalAdvance(combo.itemText(index)) <= combo.room(), combo.itemText(index)
+    window.close()
+    ui_helpers.pump(qapp)
+
+
+def edited_take(qapp, make_session, dialogs, root, code):
+    """A take with a cut, a fade, gain on a part and its level set, with a part selected, in a language: what every tab, the
+    bar under the waveform, the history, the take list's choices and the status line say."""
+    i18n.use(code)
+    session = make_session(root)
+    session.workspace.add_speaker('Zo')
+    record(session, 12.0)
+    window = MainWindow(session=session, dialogs=dialogs)
+    window.timer.stop()
+    window.resize(1440, 900)
+    window.show()
+    window.flush()
+    editor = session.editor
+    editor.set_selection(1.0, 1.5)
+    editor.cut_selection()
+    editor.set_selection(0.0, 0.3)
+    editor.fade_selection('in')
+    editor.set_selection(5.0, 6.0)
+    editor.gain_selection(3.0)
+    editor.normalize_level()
+    editor.set_selection(2.0, 3.0)
+    window.flush()
+    session.jobs.drain()
+    window.flush()
+    said = {window.status_text.full_text}
+    for tab in range(3):
+        window.inspector.show_tab(tab)
+        ui_helpers.pump(qapp)
+        said |= shown_texts(window)
+    history = window.inspector.process.history
+    said |= {history.item(row).text() for row in range(history.count())}
+    said |= {combo.itemText(index) for combo in (window.library.order, window.library.shown) for index in range(combo.count())}
+    window.close()
+    ui_helpers.pump(qapp)
+    return said
+
+
+def opened_dialogs(code):
+    """What the dialogs say as they open, in a language."""
+    from types import SimpleNamespace
+
+    from PySide6.QtWidgets import QAbstractButton, QLabel
+    i18n.use(code)
+    said = {'origin': 'Zo', 'allowed_use': 'Zo'}
+    totals = {'speaker': (48, 1234.5), 'all': (112, 3001.0)}
+    release = {'file': 'Zo.pdf', 'signed': '2026-09-02', 'expires': '2027-09-02', 'notes': 'Zo'}
+    opened = [dialog_mod.SettingsDialog({}), dialog_mod.AboutDialog(), dialog_mod.ShortcutsDialog(), dialog_mod.CopyDialog('Zo'),
+              dialog_mod.ManifestDialog('Zo', totals), dialog_mod.DatasetDialog('Zo', totals),
+              dialog_mod.SpeakerDialog('Zo', release, True), dialog_mod.KeepManyDialog('Zo', [SimpleNamespace(meta=said)] * 3, said)]
+    texts = set()
+    for dialog in opened:
+        translate_tree(dialog)
+        texts |= {dialog.windowTitle()} | {item.text() for item in dialog.findChildren(QLabel) + dialog.findChildren(QAbstractButton)
+                                            if item.text()}
+    return texts
+
+
+@pytest.mark.parametrize('code', LANGUAGES)
+def test_an_edited_take_and_the_dialogs_say_nothing_in_english(qapp, make_session, dialogs, speak, tmp_path, code):
+    """The history of edits, the bar under the waveform, the Record card, the status lines and parts of the dialogs are
+    built from values, and they were left in English."""
+    english = edited_take(qapp, make_session, dialogs, tmp_path / 'en', 'en') | opened_dialogs('en')
+    theirs = edited_take(qapp, make_session, dialogs, tmp_path / code, code) | opened_dialogs(code)
+    assert any(text.startswith('Cut 1.00 to 1.50 s') for text in english)                     # it saw the history
+    assert any(text.startswith('Released under') for text in english)                         # and the dialogs
+    left = sorted(text for text in english & theirs if any(word not in SAME for word in WORD.findall(text)))
+    assert left == []
+
+
+@pytest.mark.parametrize('code', i18n.LANGUAGES)
+def test_the_names_on_the_record_card_are_whole(qapp, session, speak, code):
+    """The names had 70 pixels in every language, and "Enregistré dans" was cut to "Enregistré d"."""
+    from recorder.ui.inspector import RecordCard
+    speak(code)
+    card = RecordCard(session)
+    card.resize(340, 300)
+    card.show()
+    card.refresh()
+    ui_helpers.pump(qapp)
+    for title in card.titles:
+        assert title.width() >= title.fontMetrics().horizontalAdvance(title.text()), title.text()
+    card.close()

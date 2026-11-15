@@ -52,7 +52,7 @@ class Advisor:
             return tr('Could not analyze the clip: {error}').format(error=advice.error)
         problems = [f for f in diagnosis.findings if f.status != 'ok']
         if not problems:
-            return 'Auto analyze: nothing to fix. The Check tab has the measurements.'
+            return tr('Auto analyze: nothing to fix. The Check tab has the measurements.')
         text = tr('Auto analyze: {count} thing to look at.' if len(problems) == 1 else
                   'Auto analyze: {count} things to look at.').format(count=len(problems))
         if diagnosis.has_fixes:

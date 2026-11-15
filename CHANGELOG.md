@@ -85,6 +85,14 @@ the project uses [Semantic Versioning](https://semver.org/).
   reduction is on calls it Noise reduction, as the Process tab does, rather than "noise cleaning". A value too long to sit
   beside its name, such as mains hum in French ("60 Hz, 46 dB au-dessus de son voisinage"), goes under it, where it would
   otherwise have made the whole tab wider than the panel again.
+- **The rest of the window and its dialogs are in the window's language too.** In German, Spanish and French, the history of
+  edits ("Cut 1.00 to 1.50 s"), the bar under the waveform, the Record card, the dates in the take list, nearly every status
+  line ("Kept 3 of 3 takes."), the questions before Discard, Split, Move and Delete, the reasons a clip, a copy or a key is
+  refused, and parts of the Keep many, Copy, Speaker, Settings and About dialogs were still in English: 223 texts in each
+  language. The script's place ("3 of 12") was too. The take list's choices of order and of which takes to show were
+  shortened in the middle in all three ("Plus réc…bord"); they now have shorter names that fit. The first entry of the
+  history is now called Beginning rather than Start, which is a button's word, and Noise reduction is called that in the
+  history as well.
 - **Every playback device plays every take.** A WASAPI device chosen in Settings refused any take that was not at the rate
   the device runs at ("Invalid sample rate"), and some WDM-KS devices refused 24 kHz and below. Windows now converts for a
   WASAPI device, a take that a device still refuses is converted to the device's own rate, and the playhead stays with the

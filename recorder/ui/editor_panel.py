@@ -40,13 +40,14 @@ class InfoRow(QWidget):
         self.zoom.setFont(theme.mono_font(11))
         layout.addWidget(self.zoom_label)
         layout.addWidget(self.zoom)
-        self.hint = ElidedLabel('Wheel zooms  ·  Shift+wheel pans', drop=True)
+        self.hint = ElidedLabel(tr('Wheel zooms  ·  Shift+wheel pans'), drop=True)
         self.hint.setProperty('role', 'dim')
         self.hint.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         layout.addWidget(self.hint, 1)
         view.changed.connect(self.refresh)
 
     def _spin(self, layout, name, short, done, tip):
+        name, short, tip = tr(name), tr(short), tr(tip)         # _apply puts them back as the room changes
         cell = hbox(spacing=5)
         title = label(name, 'dim')
         cell.addWidget(title)

@@ -14,6 +14,7 @@ from pathlib import Path
 import soundfile as sf
 
 from . import audio_core as ac
+from .i18n import tr
 from .store import KNOWN_SCHEMAS, Library, SidecarProblem, clean_label, file_sha256, kept_length
 
 FORMATS = {'jsonl': ('JSON Lines', '.jsonl'), 'csv': ('CSV', '.csv')}
@@ -45,18 +46,18 @@ def _wav_of(library, folder, data, slug):
     """The WAV of a kept clip after every check that needs none of its audio, or SidecarProblem with the reason."""
     export = data.get('export')
     if not isinstance(export, dict) or not isinstance(data.get('transcript'), str):
-        raise SidecarProblem('it is incomplete')
+        raise SidecarProblem(tr('it is incomplete'))
     if data.get('consent_confirmed') is not True:
-        raise SidecarProblem('it does not record the permission to use the voice')
+        raise SidecarProblem(tr('it does not record the permission to use the voice'))
     if library.release_problem(slug):
-        raise SidecarProblem(f'the release for this voice ran out on {library.release_ends(slug)[1]}')
+        raise SidecarProblem(tr('the release for this voice ran out on {date}').format(date=library.release_ends(slug)[1]))
     wav = Library.inside(folder, export.get('file'))
     if wav.name != export.get('file'):
-        raise SidecarProblem('its WAV is not next to it')
+        raise SidecarProblem(tr('its WAV is not next to it'))
     if not wav.is_file():
-        raise SidecarProblem('its WAV file is missing')
+        raise SidecarProblem(tr('its WAV file is missing'))
     if not isinstance(export.get('sha256'), str):
-        raise SidecarProblem('it holds no SHA-256 of its WAV')
+        raise SidecarProblem(tr('it holds no SHA-256 of its WAV'))
     return wav
 
 
@@ -100,9 +101,9 @@ def _row(library, folder, data, slug, speaker, base):
         actual = file_sha256(wav)
         info = sf.info(str(wav))
     except (OSError, RuntimeError):
-        raise SidecarProblem('its WAV could not be read') from None
+        raise SidecarProblem(tr('its WAV could not be read')) from None
     if actual != recorded.lower():
-        raise SidecarProblem('its WAV has changed since it was kept (the SHA-256 differs)')
+        raise SidecarProblem(tr('its WAV has changed since it was kept (the SHA-256 differs)'))
     release = library.release(slug) or {}
     return {
         'audio_filepath': _path_text(wav, base),
@@ -135,14 +136,14 @@ def collect(library, slugs=None, base=None):
     rows, left_out = [], []
     for slug, folder, sidecar, data in _sidecars(library, slugs):
         if data is None:
-            left_out.append((sidecar.name, 'it could not be read'))
+            left_out.append((sidecar.name, tr('it could not be read')))
             continue
         try:
             rows.append(_row(library, folder, data, slug, speakers[slug]['name'], base))
         except SidecarProblem as e:
             left_out.append((sidecar.name, str(e)))
         except (OSError, TypeError, ValueError):
-            left_out.append((sidecar.name, 'it holds a value that cannot be read'))
+            left_out.append((sidecar.name, tr('it holds a value that cannot be read')))
     rows.sort(key=lambda row: (row['speaker'].casefold(), row['speaker_id'], row['created'], row['id']))
     return rows, left_out
 

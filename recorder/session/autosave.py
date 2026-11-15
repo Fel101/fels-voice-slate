@@ -11,6 +11,7 @@ so a burst of edits is one write.
 """
 import time
 
+from ..i18n import tr
 from ..store import Take
 
 QUIET_SECONDS = 1.0         # a take that has been still this long is written
@@ -76,9 +77,10 @@ class Autosave:
             self._failed[take] = str(e)
             retry = self.clock() + RETRY_SECONDS
             self._due[take] = (retry, retry)
-            reason = f'{take.stem}: your latest changes could not be saved ({e})'
+            reason = tr('{take}: your latest changes could not be saved ({error})').format(take=take.stem, error=e)
             if first:
-                self.bus.status(f'Could not save your changes to this take: {e}. They are still in the window.')
+                self.bus.status(tr('Could not save your changes to this take: {error}. They are still in the window.').format(
+                    error=e))
             return reason
         self._due.pop(take, None)
         self._failed.pop(take, None)

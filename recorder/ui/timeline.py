@@ -580,7 +580,7 @@ class SpectrogramView(TimelineView):
         if image is None:
             p.setPen(color('dim'))
             p.setFont(theme.ui_font(12))
-            p.drawText(rect, int(Qt.AlignmentFlag.AlignCenter), 'Analyzing the spectrogram...')
+            p.drawText(rect, int(Qt.AlignmentFlag.AlignCenter), tr('Analyzing the spectrogram...'))
         else:
             frames = image.width()
             src = QRectF(self.view.t0 / spec.hop_seconds, 0, self.view.span / spec.hop_seconds, image.height())
