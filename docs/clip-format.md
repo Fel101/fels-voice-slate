@@ -119,7 +119,7 @@ A UTF-8 JSON object. An example, written compactly (the program writes it with o
 | `script_line` | Optional. The line of a script the take was read from, exactly as it stood. |
 | `words` | Optional. What the speech recognizer heard, as `[word, start, end]` rows, with times in seconds on the master's timeline. A draft: the words can be wrong, and the times are rough. Present when the take had a draft. |
 | `split_from` | Optional. On a part of a take that was split: `{ "take": "<id of the long take>", "start_seconds": ..., "end_seconds": ... }`, on that take's timeline. |
-| `dataset` | Only on the copy of a sidecar in an exported dataset: `{ "made_from": "original" }` or `"kept clip"`. There, `export` describes the WAV in the dataset, and `master` still names the file in the library, which is not part of the dataset. |
+| `dataset` | Only on the copy of a sidecar in an exported dataset: `{ "made_from": "original" }` or `"kept clip"`, and `"split": "train"` or `"validation"` when the dataset was split. There, `export` describes the WAV in the dataset, and `master` still names the file in the library, which is not part of the dataset. |
 
 ### Edits
 
@@ -230,10 +230,50 @@ my-dataset\                     LJSpeech
   manifest.jsonl                the same, with the origin and allowed use of each clip
   wavs\
     my-voice_20261020-161204_mic_3f9a1c2e.wav
+
+my-dataset\                     Hugging Face audio folder
+  manifest.jsonl
+  train\
+    metadata.csv                file_name,text,speaker_id,allowed_use
+    my-voice_20261020-161204_mic_3f9a1c2e.wav
+
+my-dataset\                     Kaldi
+  wav.scp                       my_voice-20261020-161204_mic_3f9a1c2e wavs/my-voice_20261020-161204_mic_3f9a1c2e.wav
+  text                          my_voice-20261020-161204_mic_3f9a1c2e The harbour lights came on at dusk.
+  utt2spk                       my_voice-20261020-161204_mic_3f9a1c2e my_voice
+  spk2utt                       my_voice my_voice-20261020-161204_mic_3f9a1c2e ...
+  manifest.jsonl
+  wavs\
+    my-voice_20261020-161204_mic_3f9a1c2e.wav
 ```
 
-In `metadata.csv` the first column is the file's name without `.wav`, and the second and third are the transcript on one line, with
-any `|` replaced by a space. The LJSpeech layout's WAVs are mono and 16-bit; in the other layout an audition stays 24-bit.
+In the LJSpeech `metadata.csv` the first column is the file's name without `.wav`, and the second and third are the transcript
+on one line, with any `|` replaced by a space. The LJSpeech and Kaldi layouts' WAVs are mono and 16-bit; in the other layouts
+an audition stays 24-bit.
+
+The Hugging Face `metadata.csv` is a CSV with a header row, UTF-8 with no byte-order mark. `file_name` is the path from the
+folder it is in, as the `datasets` library wants, and the transcript is on one line, exactly as it is: unlike the manifest's
+CSV, nothing is put in front of a text that starts like a formula, because a training tool needs the words as they are. The
+clips are always in a folder named for their split, `train` when there is no split, because the library also takes a split
+from a file's name: a speaker called "Test" would otherwise make their clips the test split.
+
+The Kaldi lists are what Kaldi's own data preparation describes: UTF-8, one line each, `\n` line ends, sorted by byte (as with
+`LC_ALL=C`). An utterance's id is the speaker's id, a dash, and the clip's name. A speaker's id is the folder name with each
+`-` made `_`, so that the utterances in that sort come out in the order of their speakers, which `utils/validate_data_dir.sh`
+checks. The paths in `wav.scp` are relative to the dataset's folder, with `/`.
+
+### A split
+
+With a split, some clips are put aside for validation. A clip goes aside by a hash of its speaker's folder and its file name,
+so the same clips go aside every time; the number is the share chosen of the clips, rounded, at least one when there are two
+clips or more, and never all of them. Each row of `manifest.jsonl` then has `split`, `"train"` or `"validation"`.
+
+| Layout | With a split |
+|---|---|
+| Clips with their sidecars | `train\<speaker>\` and `validation\<speaker>\` instead of `<speaker>\` |
+| LJSpeech | `metadata.csv` still lists every clip; `metadata_train.csv` and `metadata_validation.csv` list each part |
+| Hugging Face audio folder | `train\` and `validation\`, each with its own `metadata.csv` |
+| Kaldi | `train\` and `validation\`, each a data folder with its four lists; the clips stay in `wavs\` |
 
 ## Older sidecars
 

@@ -578,8 +578,8 @@ A manifest holds transcripts and notes about where each voice came from. Treat i
 ### Export a dataset
 
 A dataset is the kept clips gathered in one new folder, for a tool that trains or tests on speech. Choose **Export dataset...** in
-the gear menu, say whose clips, the layout, the sample rate and what to make the audio from, then choose an empty folder outside
-the output folder. **Holds** says how many clips go in and how long they are, as for a manifest.
+the gear menu, say whose clips, the layout, the sample rate, what to make the audio from and whether to split it, then choose an
+empty folder outside the output folder. **Holds** says how many clips go in and how long they are, as for a manifest.
 
 ![The Export dataset dialog](images/dataset.png)
 
@@ -587,8 +587,17 @@ the output folder. **Holds** says how many clips go in and how long they are, as
 |---|---|
 | **Clips with their sidecars** | A folder for each speaker, with each clip's WAV and its sidecar beside it, so the permission travels with the audio. |
 | **LJSpeech** | A `wavs` folder and a `metadata.csv` of `name\|text\|text` lines, the layout many text-to-speech tools read. It starts at 22.05 kHz, 16-bit, which is what the LJSpeech set itself is. |
+| **Hugging Face audio folder** | A `train` folder with the clips and a `metadata.csv` beside them, which the Hugging Face `datasets` library loads with `load_dataset("audiofolder", data_dir=...)`. It starts at 24 kHz, like the kept clips. |
+| **Kaldi** | The lists a Kaldi recipe reads, `wav.scp`, `text`, `utt2spk` and `spk2utt`, with the clips in a `wavs` folder. It starts at 16 kHz, 16-bit, which is what Kaldi recipes expect. The paths in `wav.scp` are relative to the dataset's folder, so run Kaldi from there or put the folder's path in front of them. The transcripts are as you typed them: a recipe that wants capitals and no punctuation has to change them. |
 
-Both also get a `manifest.jsonl` with the origin and allowed use of every clip.
+Every layout also gets a `manifest.jsonl` with the origin and allowed use of every clip.
+
+**Split** puts some clips aside for validation: clips that a model is tested on and never trains on. Choose 5, 10 or 20 in a
+hundred. The same clips go aside every time you export the same clips; adding clips can move a few between the two parts.
+With two clips or more, at least one goes aside, and never all of them. Each layout shows the split the way its tool reads it:
+two folders, `train` and `validation`, for the Hugging Face, Kaldi and clips layouts, and two more lists for LJSpeech,
+`metadata_train.csv` and `metadata_validation.csv`, beside the whole `metadata.csv`. In `manifest.jsonl` each clip says which
+part it is in.
 
 **Made from** decides what the audio is. *The original recordings* goes through each clip's own edits and settings again at the
 rate you chose, which keeps detail a 24 kHz clip no longer has; a clip with noise reduction on needs FFmpeg for this. *The kept

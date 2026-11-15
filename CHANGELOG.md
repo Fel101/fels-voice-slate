@@ -27,6 +27,10 @@ the project uses [Semantic Versioning](https://semver.org/).
   three seconds of quiet and then one spoken sentence, and says in plain words whether the room is quiet enough and whether
   the microphone is set too low or too high, with what to change, by the Check tab's own measures and limits. Nothing it
   hears is written to disk, and the sound is let go once it is measured.
+- **Two more dataset layouts, and a split.** **Export dataset...** also writes a Hugging Face audio folder (`metadata.csv`
+  beside the clips) and a Kaldi data folder (`wav.scp`, `text`, `utt2spk`, `spk2utt`), each as that tool's documentation
+  gives it, and can put 5, 10 or 20 in a hundred of the clips aside for validation, the same clips every time. Every layout
+  still gets the `manifest.jsonl` with each clip's origin and allowed use.
 
 ### Changed
 

@@ -64,7 +64,7 @@ class StubDialogs:
         self.asked = []                          # (what, details) of each question about files, in order
         self.keep_many_answer = None             # (origin, allowed use), or None to back out
         self.speaker_answer = None               # what the Speaker details dialog returns
-        self.dataset_answer = None               # (scope, layout, rate, from originals)
+        self.dataset_answer = None               # (scope, layout, rate, from originals, percent for validation)
         self.settings_answer = None
         self.settings_seen = None
         self.hands_free_answer = None             # the hands-free options chosen, or None to back out

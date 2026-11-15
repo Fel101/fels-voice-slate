@@ -103,8 +103,8 @@ class Dialogs:
         return self._ask(SpeakerDialog(name, record, has_file, self.parent))
 
     def dataset_options(self, speaker_name, totals=None):
-        """('speaker' or 'all', layout, sample rate, from the originals?) for a dataset, or None. `totals` holds (clips,
-        seconds) for each."""
+        """('speaker' or 'all', layout, sample rate, from the originals?, percent for validation) for a dataset, or None.
+        `totals` holds (clips, seconds) for each."""
         return self._ask(DatasetDialog(speaker_name, totals, self.parent))
 
     def keep_many(self, speaker_name, takes, defaults):
@@ -570,7 +570,8 @@ class ManifestDialog(QDialog):
 
 
 class DatasetDialog(QDialog):
-    """Whose clips a dataset holds, its layout, its sample rate, and what the audio is made from. The folder comes next."""
+    """Whose clips a dataset holds, its layout, its sample rate, what the audio is made from, and whether some clips are put
+    aside for validation. The folder comes next."""
 
     def __init__(self, speaker_name, totals=None, parent=None):
         super().__init__(parent)
@@ -596,6 +597,12 @@ class DatasetDialog(QDialog):
         self.source.addItem('The kept clips', False)
         self.source.setToolTip('The originals keep detail that a 24 kHz clip no longer has. The kept clips are quicker')
         form.addRow('Made from', self.source)
+        self.split = QComboBox()
+        for percent, text in dataset.SPLITS.items():
+            self.split.addItem(text, percent)
+        self.split.setToolTip('Clips put aside to test a model on, which it never trains on. The same clips go aside every '
+                              'time')
+        form.addRow('Split', self.split)
         layout.addLayout(form)
         layout.addWidget(label('A clip made from its original goes through its own edits and settings again, so it says the '
                                'same words. A clip whose file has changed since it was kept, or whose release has run out, '
@@ -617,7 +624,8 @@ class DatasetDialog(QDialog):
         self.rate.setCurrentIndex(self.rate.findData(dataset.DEFAULT_RATE[self.layout_choice.currentData()]))
 
     def values(self):
-        return self.scope.currentData(), self.layout_choice.currentData(), self.rate.currentData(), self.source.currentData()
+        return (self.scope.currentData(), self.layout_choice.currentData(), self.rate.currentData(),
+                self.source.currentData(), self.split.currentData())
 
 
 class SpeakerDialog(QDialog):

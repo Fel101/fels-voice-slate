@@ -15,7 +15,7 @@ recorder/
                  whole output folder (Relocation). A take reads its audio only when it is asked for (_Resident)
   share.py       a copy of a kept clip as WAV, FLAC, MP3 or Ogg at another sample rate (SoundFile's libsndfile, no FFmpeg)
   manifest.py    a list of the kept clips, as JSON Lines or CSV, for programs that read a whole set
-  dataset.py     the kept clips gathered in one new folder, as clips with sidecars or in the LJSpeech layout
+  dataset.py     the kept clips gathered in one new folder, in four layouts (clips, LJSpeech, Hugging Face, Kaldi)
   audio_core.py  small pure helpers, the purposes, and the rules for what can be kept
   i18n.py        the window in other languages: tr() and the tables in resources/lang
   devices.py     the lists of microphones and outputs: each device once, as WASAPI names it, and a remembered name found again
@@ -273,7 +273,9 @@ None of these changes a kept clip, and none goes online.
   the library (a name that leaves the sidecar's folder is refused), and the WAV is hashed again; a clip that does not
   check out is left out and named. The escaping is described in [Clip format](clip-format.md#manifest-files).
 - **Export dataset** is `dataset.Export`, fed the rows of `manifest.collect` one at a time by `session/batch.py`. Made from the
-  original, a clip goes through `render.export_samples` again at the rate asked for, with the recipe in its sidecar.
+  original, a clip goes through `render.export_samples` again at the rate asked for, with the recipe in its sidecar. A split is
+  `dataset.split`, before the job starts: the clips are ranked by a hash of their speaker and file name, so the same clips go to
+  validation whatever order they come in. The lists of each layout are written by `finish`, from the clips that went in.
 - **Moving an output folder** is `store.Relocation`: every file is copied and compared, and the old files go only when all of them
   have arrived. Stopped or failed on the way, the copies are removed and the old folder stays in use.
 - **Drag out** is in `ui/library.py`. A kept card pulled past `startDragDistance` emits `dragRequested`, and the panel

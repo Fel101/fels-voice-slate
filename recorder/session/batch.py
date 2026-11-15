@@ -16,6 +16,7 @@ import time
 from pathlib import Path
 
 from ..clean import CleanError
+from ..i18n import tr
 from ..store import KeepBlocked, TrashUnavailable, now_iso
 
 SLICE_SECONDS = 0.04        # how long one tick may work, so that the window keeps moving
@@ -117,8 +118,13 @@ class Batch:
             except OSError as e:
                 self.left_out.append(('The list of clips', str(e)))
                 return
-            word = 'Stopped. Wrote' if stopped else 'Wrote'
-            self.bus.status(f'{word} {count} of {len(self.items)} clips to {export.folder}')
+            text = (tr('Stopped. Wrote {count} of {total} clips to {folder}') if stopped else
+                    tr('Wrote {count} of {total} clips to {folder}')).format(count=count, total=len(self.items),
+                                                                           folder=export.folder)
+            parts = dict(export.parts())
+            if parts:
+                text += tr(': {train} for training and {validation} for validation').format(**parts)
+            self.bus.status(text)
 
         self._start('Exporting a dataset', rows, step, finish)
 

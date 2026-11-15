@@ -1205,12 +1205,12 @@ class MainWindow(QMainWindow):
         choice = self.dialogs.dataset_options(workspace.name_of(slug), self._export_totals(slug))
         if choice is None:
             return
-        scope, layout, rate, originals = choice
+        scope, layout, rate, originals, validation = choice
         folder = self.dialogs.choose_folder('Choose an empty folder for the dataset', '')
         if not folder:
             return
         try:
-            export = dataset.Export(s.lib, folder, layout, rate, originals)
+            export = dataset.Export(s.lib, folder, layout, rate, originals, validation)
         except (ValueError, OSError) as e:
             self.dialogs.notice('warning', 'Export dataset', str(e))
             return
@@ -1222,7 +1222,7 @@ class MainWindow(QMainWindow):
         if not rows:
             self.dialogs.notice('info', 'Export dataset', 'There are no kept clips to export yet.')
             return
-        s.batch.export_dataset(export, rows)
+        s.batch.export_dataset(export, export.split(rows))
         s.batch.left_out.extend(left_out)
 
     def open_folder(self):

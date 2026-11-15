@@ -81,8 +81,8 @@ SPEC = {
                   'Save a copy of this kept clip as WAV, FLAC, MP3 or Ogg, at the sample rate you choose', False),
     'export_manifest': ('Export manifest...', None, [],
                         'List the kept clips with their transcripts in a CSV or JSON Lines file, for other programs', False),
-    'export_dataset': ('Export dataset...', None, [], 'Gather the kept clips in one new folder, as clips with their sidecars or '
-                                                      'in the LJSpeech layout, at the sample rate you choose', False),
+    'export_dataset': ('Export dataset...', None, [], 'Gather the kept clips in one new folder, in the layout a speech tool '
+                                                      'reads, at the sample rate you choose', False),
     'refresh_devices': ('Refresh devices', None, [], 'Look for microphones and outputs again', False),
     'room_check': ('Check the room and level...', None, [], 'Listen to the room and to your voice for a few seconds, and say '
                                                             'whether the room is quiet enough and the microphone level '
