@@ -94,9 +94,10 @@ CTranslate2 and ONNX Runtime also need **Microsoft's Visual C++ runtime**. The s
 already have it, and the setup says where Microsoft offers it if yours does not.
 
 **The speech models** are not part of this repository either. The setup downloads one of the faster-whisper conversions
-published by SYSTRAN on Hugging Face (`Systran/faster-whisper-tiny.en`, `-base.en`, `-small.en`, or the multilingual
-`-tiny`, `-base`, `-small`) of OpenAI's Whisper models. Their model pages give the licence as MIT; check the page of the
-model you choose before you use it for anything beyond your own drafts.
+of OpenAI's Whisper models published on Hugging Face: SYSTRAN's (`Systran/faster-whisper-tiny.en`, `-base.en`, `-small.en`,
+`-medium.en`, or the multilingual `-tiny`, `-base`, `-small`, `-medium`), or Mobius Labs'
+`mobiuslabsgmbh/faster-whisper-large-v3-turbo`. Their model pages give the licence as MIT; check the page of the model you
+choose before you use it for anything beyond your own drafts.
 
 ## Programs the recorder can call, which are not part of it
 

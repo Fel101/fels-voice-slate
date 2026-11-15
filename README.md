@@ -185,10 +185,15 @@ you want and which language you speak, tells you what it will download, and wait
 |---|---|---|
 | `tiny` | about 80 MB | the fastest, and the roughest drafts |
 | `base` | about 150 MB | a good middle (the default) |
-| `small` | about 490 MB | the most accurate, and the slowest |
+| `small` | about 490 MB | more accurate, and slower |
+| `medium` | about 1,540 MB | for an accent or a language the smaller ones get wrong; slow |
+| `large-v3-turbo` | about 1,630 MB | the most accurate, in any language; slow |
 
-The model is downloaded from SYSTRAN's repositories on [Hugging Face](https://huggingface.co/Systran) into a `models`
-folder. On top of it the setup installs the recognizer itself, about 90 MB from PyPI, into a `.venv-asr` folder. Both
+For English, `tiny` to `medium` come as a model made for English alone, which suits it best; `large-v3-turbo` has only the
+model for every language. The two larger ones are for when the smaller ones keep getting your words wrong: they take
+longer over each draft and need more memory. The model is downloaded from [Hugging Face](https://huggingface.co/Systran)
+into a `models` folder: SYSTRAN's conversions of OpenAI's Whisper, and for `large-v3-turbo` the one by Mobius Labs that
+faster-whisper itself uses. On top of it the setup installs the recognizer itself, about 90 MB from PyPI, into a `.venv-asr` folder. Both
 folders stay beside the program, and Git ignores them. The only other traces are the usual download caches in your user
 folder: pip's, and a few small files in Hugging Face's. When the recognizer has run once on a second of silence, the
 setup fills in the matching lines in **Settings** for you. Start Voice Slate again, and the status bar at the bottom

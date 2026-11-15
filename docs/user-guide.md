@@ -709,7 +709,8 @@ the program wins over the one in `%APPDATA%`.
 
 **The transcript setup stops with an error.** It changes nothing in your settings when a step fails, so you can run
 `setup-transcripts.bat` again. Check the internet connection first (it needs PyPI and Hugging Face), and that the drive
-has room: about 450 MB for the recognizer and the base model, 800 MB with `small`. If the message talks about a path
+has room: about 450 MB for the recognizer and the base model, 800 MB with `small`, and about 2 GB with `medium` or
+`large-v3-turbo`. If the message talks about a path
 that is too long, the program folder is nested too deeply: move the whole folder somewhere short, such as
 `C:\VoiceSlate`, delete its `.venv-asr` folder, and run the setup again. To start over, delete the `.venv-asr` and
 `models` folders.

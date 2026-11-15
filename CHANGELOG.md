@@ -31,6 +31,10 @@ the project uses [Semantic Versioning](https://semver.org/).
   beside the clips) and a Kaldi data folder (`wav.scp`, `text`, `utt2spk`, `spk2utt`), each as that tool's documentation
   gives it, and can put 5, 10 or 20 in a hundred of the clips aside for validation, the same clips every time. Every layout
   still gets the `manifest.jsonl` with each clip's origin and allowed use.
+- **Two larger speech models for draft transcripts**, for an accent or a language the smaller ones get wrong: `medium`
+  (about 1,540 MB, with an English-only model too) and `large-v3-turbo` (about 1,630 MB, every language). The setup
+  fetches each from where faster-whisper's own list of models says it is, and does not trust a turbo model that is
+  missing the file that says how it hears.
 
 ### Changed
 

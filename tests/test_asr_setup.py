@@ -107,14 +107,15 @@ def saved():
 # ---- the answers ------------------------------------------------------------------------------------------------------
 
 @pytest.mark.parametrize('typed, size', [('', 'base'), ('1', 'tiny'), ('2', 'base'), ('3', 'small'), (' Small ', 'small'),
-                                         ('TINY', 'tiny')])
+                                         ('TINY', 'tiny'), ('4', 'medium'), ('Medium', 'medium'), ('5', 'large-v3-turbo'),
+                                         ('large-v3-turbo', 'large-v3-turbo'), ('turbo', 'large-v3-turbo')])
 def test_a_model_size_is_read_by_name_or_number(typed, size):
     assert asr_setup.size_choice(typed) == size
 
 
-@pytest.mark.parametrize('typed', ['huge', '0', '4', 'base.en', 'medium'])
+@pytest.mark.parametrize('typed', ['huge', '0', '6', 'base.en', 'large', 'large-v3', 'medium.en'])
 def test_a_size_that_is_not_offered_is_refused(typed):
-    with pytest.raises(ValueError, match='Choose one of tiny, base, small'):
+    with pytest.raises(ValueError, match='Choose one of tiny, base, small, medium, large-v3-turbo'):
         asr_setup.size_choice(typed)
 
 
@@ -136,15 +137,37 @@ def test_english_gets_the_english_only_model_and_other_languages_the_multilingua
     assert asr_setup.model_name('tiny', None) == 'tiny'
     assert asr_setup.describe('base', 'en') == 'the base model for English'
     assert asr_setup.describe('small', 'de') == asr_setup.describe('small', None) == 'the small multilingual model'
+    assert asr_setup.model_name('medium', 'en') == 'medium.en'
+
+
+def test_english_gets_the_multilingual_model_where_there_is_no_english_one():
+    """There is no large-v3-turbo.en: asking for one would fetch nothing."""
+    assert asr_setup.model_name('large-v3-turbo', 'en') == 'large-v3-turbo'
+    assert asr_setup.describe('large-v3-turbo', 'en') == 'the large-v3-turbo multilingual model'
 
 
 def test_the_models_on_offer_are_real_faster_whisper_repositories():
-    """These names, with and without .en, are the repositories SYSTRAN publishes (faster-whisper's own list has them)."""
-    assert list(asr_setup.SIZES) == ['tiny', 'base', 'small'] and asr_setup.DEFAULT_SIZE in asr_setup.SIZES
+    """Each name, with and without .en, is where faster-whisper 1.2.1's own table of models (faster_whisper/utils.py)
+    says it is: SYSTRAN's repositories, and the turbo model in Mobius Labs'."""
+    assert list(asr_setup.SIZES) == ['tiny', 'base', 'small', 'medium', 'large-v3-turbo']
+    assert asr_setup.DEFAULT_SIZE in asr_setup.SIZES
     names = [asr_setup.model_name(size, language) for size in asr_setup.SIZES for language in ('en', 'de')]
-    assert [asr_setup.REPOSITORY.format(name=name) for name in names] == [
+    assert [asr_setup.repository(name) for name in dict.fromkeys(names)] == [
         'Systran/faster-whisper-tiny.en', 'Systran/faster-whisper-tiny', 'Systran/faster-whisper-base.en',
-        'Systran/faster-whisper-base', 'Systran/faster-whisper-small.en', 'Systran/faster-whisper-small']
+        'Systran/faster-whisper-base', 'Systran/faster-whisper-small.en', 'Systran/faster-whisper-small',
+        'Systran/faster-whisper-medium.en', 'Systran/faster-whisper-medium',
+        'mobiuslabsgmbh/faster-whisper-large-v3-turbo']
+
+
+def test_each_size_is_what_its_files_on_hugging_face_add_up_to():
+    """Read on 2026-11-14 from each repository's list of files: model.bin, config.json, tokenizer.json, the vocabulary and,
+    where there is one, preprocessor_config.json, in millions of bytes, rounded up to the next ten."""
+    measured = {'medium': 1527906378 + 2257 + 2203239 + 459861,
+                'medium.en': 1527904330 + 2643 + 2128466 + 422309,
+                'large-v3-turbo': 1617884929 + 2263 + 340 + 2710337 + 1068114}
+    for name, size in (('medium', 'medium'), ('medium.en', 'medium'), ('large-v3-turbo', 'large-v3-turbo')):
+        megabytes = asr_setup.SIZES[size][0]
+        assert megabytes - 10 < measured[name] / 1e6 <= megabytes, name
 
 
 def test_the_download_asks_for_the_files_a_model_needs_and_nothing_else():
@@ -164,6 +187,17 @@ def test_a_model_folder_is_complete_only_with_its_weights_settings_tokenizer_and
     assert asr_setup.model_complete(folder)
     (folder / 'tokenizer.json').unlink()
     assert not asr_setup.model_complete(folder)
+
+
+def test_a_turbo_model_is_complete_only_with_the_settings_of_its_sound(tmp_path):
+    """Without preprocessor_config.json faster-whisper gives a large-v3 model 80 frequency bands instead of its 128, and
+    every draft fails; a download cut off before that file arrived must be fetched again, not trusted."""
+    folder = tmp_path / 'faster-whisper-large-v3-turbo'
+    Machine.make_model(folder)
+    assert asr_setup.model_complete(folder) and asr_setup.model_complete(folder, 'medium')
+    assert not asr_setup.model_complete(folder, 'large-v3-turbo')
+    (folder / 'preprocessor_config.json').write_text('{"feature_size": 128}', encoding='utf-8')
+    assert asr_setup.model_complete(folder, 'large-v3-turbo')
 
 
 def test_the_recognizer_is_ready_only_when_its_python_exists_and_loads_faster_whisper(machine):
@@ -292,6 +326,34 @@ def test_what_is_already_installed_is_only_checked_and_connected(machine, capsys
     assert asr_setup.run('base', 'en', folder=machine.folder) == 0          # no question: there is nothing to download
     assert machine.steps() == ['worker']
     assert 'already here' in capsys.readouterr().out and saved()['asr_model'].endswith('faster-whisper-base.en')
+
+
+def test_the_turbo_model_is_fetched_from_where_faster_whisper_keeps_it(machine, monkeypatch, capsys):
+    make = Machine.make_model
+
+    def with_preprocessor(folder):
+        make(folder)
+        (folder / 'preprocessor_config.json').write_text('{"feature_size": 128}', encoding='utf-8')
+
+    monkeypatch.setattr(Machine, 'make_model', staticmethod(with_preprocessor))
+    say(monkeypatch, '5', '', 'y')                        # English: there is no English-only turbo model
+    assert asr_setup.run(folder=machine.folder) == 0
+    model = machine.folder / asr_setup.MODELS / 'faster-whisper-large-v3-turbo'
+    assert machine.command('fetch')[-2:] == ['mobiuslabsgmbh/faster-whisper-large-v3-turbo', str(model)]
+    assert saved()['asr_model'] == str(model) and saved()['asr_language'] == 'en'
+    out = capsys.readouterr().out
+    assert 'the large-v3-turbo multilingual model from Hugging Face, about 1,630 MB' in out
+
+
+def test_a_turbo_download_without_the_settings_of_its_sound_is_not_trusted(machine, capsys):
+    assert asr_setup.run('turbo', 'de', yes=True, folder=machine.folder) == 1
+    assert 'missing some of its files' in capsys.readouterr().out and saved() == {}
+
+
+def test_the_space_a_large_model_needs_is_checked_before_anything_is_fetched(machine, monkeypatch, capsys):
+    monkeypatch.setattr(asr_setup.shutil, 'disk_usage', lambda folder: SimpleNamespace(free=1500 * 1024 * 1024))
+    assert asr_setup.run('medium', 'de', yes=True, folder=machine.folder) == 1
+    assert machine.calls == [] and 'not enough free space' in capsys.readouterr().out
 
 
 def test_another_model_can_be_added_beside_one_that_is_there(machine):

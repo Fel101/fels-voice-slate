@@ -32,9 +32,14 @@ RECOGNIZER_INSTALLED_MB = 300           # what the recognizer takes on disk once
 PROGRESS_SECONDS = 4                    # how often the model download says how far it has come
 SIZES = {'tiny': (80, 'the fastest, and the roughest drafts'),
          'base': (150, 'a good middle (recommended)'),
-         'small': (490, 'the most accurate, and the slowest')}
+         'small': (490, 'more accurate, and slower'),
+         'medium': (1540, 'for an accent or language the smaller ones get wrong; slow'),
+         'large-v3-turbo': (1630, 'the most accurate, in any language; slow')}
+ALIASES = {'turbo': 'large-v3-turbo'}                  # what faster-whisper itself also calls it
+MODEL_RANGE = f'{min(mb for mb, _ in SIZES.values())} to {max(mb for mb, _ in SIZES.values()):,}'
 DEFAULT_SIZE = 'base'
 ENGLISH = 'en'
+ENGLISH_ONLY = ('tiny', 'base', 'small', 'medium')      # the sizes that also come as a model for English alone
 SPARE_MB = 200                          # free space to leave over, besides what the setup itself needs
 
 # The Pythons that every package in requirements-asr.txt is built for, newest first. The program can run on a newer one,
@@ -53,6 +58,11 @@ SYSTEM_FOLDER = Path(os.environ.get('SystemRoot', r'C:\Windows')) / 'System32'
 # leave the window looking frozen for minutes on the larger models; huggingface_hub's snapshot_download shows them.
 MODEL_PATTERNS = ['config.json', 'preprocessor_config.json', 'model.bin', 'tokenizer.json', 'vocabulary.*']
 REPOSITORY = 'Systran/faster-whisper-{name}'
+# The models faster-whisper's own table (faster_whisper/utils.py) puts somewhere else than SYSTRAN's repositories.
+REPOSITORIES = {'large-v3-turbo': 'mobiuslabsgmbh/faster-whisper-large-v3-turbo'}
+# A large-v3 model hears 128 frequency bands, and only its preprocessor_config.json says so: without that file
+# faster-whisper gives it the 80 bands of the other models, and every draft fails.
+NEEDS_PREPROCESSOR = ('large-v3-turbo',)
 FETCH = ('import sys; from huggingface_hub import snapshot_download; '
          f'snapshot_download(sys.argv[1], local_dir=sys.argv[2], allow_patterns={MODEL_PATTERNS!r})')
 
@@ -63,7 +73,7 @@ Fel's Voice Slate can suggest a transcript from the audio. That needs two things
 program folder and nowhere else:
 
   1. a speech recognizer (faster-whisper and what it needs), from PyPI: about {RECOGNIZER_MB} MB, in {VENV}
-  2. a speech model, from Hugging Face: {SIZES['tiny'][0]} to {SIZES['small'][0]} MB, the one you choose, in {MODELS}
+  2. a speech model, from Hugging Face: {MODEL_RANGE} MB, the one you choose, in {MODELS}
 
 Fel's Voice Slate itself never goes online; only this setup does, now that you ran it. Nothing about you or your
 recordings is sent. A draft is a guess: you listen and correct it before a clip is kept.
@@ -71,7 +81,7 @@ recordings is sent. A draft is a guess: you listen and correct it before a clip 
 
 OFFER = (f'Draft transcripts need a speech recognizer, and this computer does not have one yet.\n\n'
          f'The setup downloads one once, from PyPI and Hugging Face, and keeps it in this program\'s folder: about '
-         f'{RECOGNIZER_MB} MB for the recognizer and {SIZES["tiny"][0]} to {SIZES["small"][0]} MB for the speech model '
+         f'{RECOGNIZER_MB} MB for the recognizer and {MODEL_RANGE} MB for the speech model '
          f'you choose. A window asks which model before anything is downloaded. Nothing you record is sent anywhere, '
          f'and the program itself never goes online.\n\nOpen the setup now?')
 
@@ -104,13 +114,15 @@ class SetupError(Exception):
 # ---- the answers ------------------------------------------------------------------------------------------------------
 
 def size_choice(text):
-    """'tiny', 'base' or 'small' from what was typed: the name, or its number in the list. Empty is the default."""
+    """One of SIZES from what was typed: the name, or its number in the list. Empty is the default."""
     text = (text or '').strip().lower()
     names = list(SIZES)
     if not text:
         return DEFAULT_SIZE
     if text in names:
         return text
+    if text in ALIASES:
+        return ALIASES[text]
     if text.isdigit() and 1 <= int(text) <= len(names):
         return names[int(text) - 1]
     raise ValueError(f'Choose one of {", ".join(names)}, or its number in the list ({text!r} is not one).')
@@ -129,13 +141,21 @@ def language_code(text):
 
 
 def model_name(size, language):
-    """The faster-whisper model: the English-only one suits English best, the multilingual one every other language."""
-    return f'{size}.en' if language == ENGLISH else size
+    """The faster-whisper model: the English-only one suits English best, the multilingual one every other language and
+    English too where there is no English-only one."""
+    return f'{size}.en' if language == ENGLISH and size in ENGLISH_ONLY else size
+
+
+def repository(name):
+    """Where the model is on Hugging Face."""
+    return REPOSITORIES.get(name, REPOSITORY.format(name=name))
 
 
 def describe(size, language):
     """The model in words for the person: 'the base model for English' or 'the small multilingual model'."""
-    return f'the {size} model for English' if language == ENGLISH else f'the {size} multilingual model'
+    if model_name(size, language).endswith('.en'):
+        return f'the {size} model for English'
+    return f'the {size} multilingual model'
 
 
 def _ask(prompt, convert):
@@ -150,7 +170,7 @@ def _ask(prompt, convert):
 def _ask_size():
     print('Which speech model?')
     for number, (name, (megabytes, about)) in enumerate(SIZES.items(), 1):
-        print(f'  {number}  {name:<6} about {megabytes:>3} MB   {about}')
+        print(f'  {number}  {name:<14} about {megabytes:>5,} MB   {about}')
     return _ask(f'Number or name [{DEFAULT_SIZE}]: ', size_choice)
 
 
@@ -203,11 +223,14 @@ def check_runtime():
         raise SetupError(NO_RUNTIME.format(missing=', '.join(missing), page=RUNTIME_PAGE))
 
 
-def model_complete(folder):
-    """True when a faster-whisper model is all in the folder: its weights, settings, tokenizer and vocabulary."""
+def model_complete(folder, name=None):
+    """True when a faster-whisper model is all in the folder: its weights, settings, tokenizer and vocabulary, and the
+    settings of its sound for a model `name` that needs them."""
     folder = Path(folder)
-    return all((folder / name).is_file() for name in ('model.bin', 'config.json', 'tokenizer.json')) \
-        and any(folder.glob('vocabulary.*'))
+    needed = ['model.bin', 'config.json', 'tokenizer.json']
+    if name in NEEDS_PREPROCESSOR:
+        needed.append('preprocessor_config.json')
+    return all((folder / each).is_file() for each in needed) and any(folder.glob('vocabulary.*'))
 
 
 def _enough_space(folder, megabytes):
@@ -279,12 +302,11 @@ def fetch_model(python, name, folder, megabytes=0):
     watcher = threading.Thread(target=_report_progress, args=(folder, megabytes, finished), daemon=True)
     watcher.start()
     try:
-        _run([str(python), '-I', '-c', FETCH, REPOSITORY.format(name=name), str(folder)], 'downloading the model',
-             env=env)
+        _run([str(python), '-I', '-c', FETCH, repository(name), str(folder)], 'downloading the model', env=env)
     finally:
         finished.set()
         watcher.join()
-    if not model_complete(folder):
+    if not model_complete(folder, name):
         raise SetupError(f'The model was downloaded but {folder} is missing some of its files.')
 
 
@@ -320,13 +342,13 @@ def _set_up(folder, size, language, yes):
         return 2
     name = model_name(size, language)
     model = folder / MODELS / f'faster-whisper-{name}'
-    get_model = not model_complete(model)
+    get_model = not model_complete(model, name)
     if get_recognizer or get_model:
         print('\nThis will download:')
         if get_recognizer:
             print(f'  - the speech recognizer from PyPI, about {RECOGNIZER_MB} MB, into {VENV}')
         if get_model:
-            print(f'  - {describe(size, language)} from Hugging Face, about {SIZES[size][0]} MB, into {MODELS}')
+            print(f'  - {describe(size, language)} from Hugging Face, about {SIZES[size][0]:,} MB, into {MODELS}')
         _enough_space(folder, (RECOGNIZER_INSTALLED_MB if get_recognizer else 0) + (SIZES[size][0] if get_model else 0))
         if not yes and not _confirm('Go ahead?'):
             print('Nothing was downloaded or changed.')

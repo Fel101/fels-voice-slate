@@ -30,7 +30,7 @@ def parse(argv):
                              'folder (the program folder), start-menu, or a path ending in .lnk')
     parser.add_argument('--setup-transcripts', nargs='?', const='', metavar='SIZE',
                         help='download a speech recognizer and a speech model for draft transcripts, after asking: '
-                             'SIZE is tiny, base or small (asked if left out)')
+                             'SIZE is tiny, base, small, medium or large-v3-turbo (asked if left out)')
     parser.add_argument('--language', metavar='CODE',
                         help='with --setup-transcripts: the language you speak, such as en or de, or auto')
     parser.add_argument('--yes', action='store_true', help='with --setup-transcripts: do not ask before downloading')
