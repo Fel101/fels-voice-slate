@@ -5,6 +5,8 @@ the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-15
+
 ### Added
 
 - **Reading a script hands-free.** Three options, each off until turned on and each remembered, under **Hands-free
@@ -463,7 +465,8 @@ The first public release.
 - The limiter's ceiling also holds for the saved 24 kHz file: resampling can push a peak over it, so the limiter runs
   once more after resampling.
 
-[Unreleased]: ../../compare/v0.6.0...HEAD
+[Unreleased]: ../../compare/v0.7.0...HEAD
+[0.7.0]: ../../compare/v0.6.0...v0.7.0
 [0.6.0]: ../../compare/v0.5.0...v0.6.0
 [0.5.0]: ../../compare/v0.4.0...v0.5.0
 [0.4.0]: ../../compare/v0.3.0...v0.4.0
