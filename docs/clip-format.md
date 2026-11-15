@@ -151,6 +151,40 @@ rate so that resampling cannot push a peak above its ceiling.
 Everything needed to rebuild the kept clip from the master is in the sidecar, but you do not need it to use the clip:
 the `.wav` file is complete.
 
+## Inside the WAV
+
+A kept clip's WAV carries one line of plain text, so that the clip still says what it may be used for when it is copied
+somewhere without its sidecar. It is in the standard information chunk (`LIST` `INFO`, as `ICMT`, the comment), after the
+audio, which is the only place Windows' own file properties look for it:
+
+```text
+Fel's Voice Slate clip 3f9a1c2e, described in 20261020-161204_mic_3f9a1c2e.json. Allowed use: my own voice references. Permission given 2026-10-20.
+```
+
+- The id and the sidecar's name are the clip's own, also in a copy or a dataset where the WAV has another name.
+- The allowed use is on one line. One longer than 400 characters is cut there and ends `... (the rest is in the sidecar)`.
+- *Permission given* is the date part of `consent_confirmed_at`, and is left out when the sidecar has none.
+- The origin is not in it: it can say who the person is. Read it from the sidecar.
+
+The line is written whenever a clip is kept or kept again, so `export.sha256` is of the file with the line in it. Clips
+kept before version 0.7 do not have it, and are not changed to add it. Copies (**Save a copy...**) and the clips of a
+dataset carry it too, made from the sidecar, whenever the clip was kept: in WAV the same chunk, in FLAC and Ogg Vorbis
+the `COMMENT` field, and in MP3 its ID3 comment.
+
+The chunk names no character set. The line is written in UTF-8, as typed. What was seen on Windows 11 with the
+allowed use "réunion d’équipe, Señora Núñez":
+
+| Read by | WAV | FLAC | Ogg Vorbis | MP3 |
+|---|---|---|---|---|
+| libsndfile (SoundFile, and the programs built on it) | as typed | as typed | as typed | without accents |
+| FFmpeg 8.1 (`ffprobe`) | as typed | as typed | | without accents |
+| Windows Explorer, *Properties > Details > Comments* | accents wrong ("rÃ©union") | not shown | as typed | without accents |
+
+Windows reads a WAV's comment as the Windows code page, so an accented letter shows as two wrong ones there; the sidecar
+has the text as it was typed. FLAC and Ogg Vorbis define their comments as UTF-8. An MP3's tag is written as Latin-1 by the
+encoder inside libsndfile, which garbled every accent in every program, so in an MP3 copy the line has its accents taken
+off ("é" becomes "e", "’" becomes "'") and any other letter outside plain ASCII is a `?`.
+
 ## Reading the clips from another program
 
 For each `*.json` file in a speaker's folder whose `schema` starts with `voice-recorder-clip-`:

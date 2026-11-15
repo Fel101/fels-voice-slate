@@ -524,8 +524,12 @@ program, or on anything else that accepts a file. The clip's WAV file is **copie
 library, and a drag cannot move it out. A small movement is still a click that opens the take, and nothing is dragged for
 a take that is not kept, or while recording.
 
-Only the audio goes. The permission and origin are in the clip's sidecar, the `.json` file with the same name next to
-it, so send that along too when the voice is not your own (see [Responsible use](responsible-use.md)).
+The WAV carries one line of text that says what the clip may be used for: the clip's id, the name of its sidecar, the
+allowed use, and the date the permission was given. Windows shows it as *Comments* in the file's *Properties > Details*,
+though with any accented letter shown wrongly, and audio programs show it as the file's comment. The origin is left out,
+since it can say who the person is. Everything else, the origin included, is in the clip's sidecar, the
+`.json` file with the same name next to it, so send that along too when the voice is not your own (see
+[Responsible use](responsible-use.md)). Clips kept before version 0.7 do not have the line until they are kept again.
 
 ### Save a copy
 
@@ -544,7 +548,9 @@ right-click a kept take. Choose the format and the sample rate, then the file na
 The sample rate can be 16, 22.05, 24, 44.1 or 48 kHz. The copy is made from the kept clip, so a rate above the clip's own adds
 no detail; it is there for programs and sites that ask for 44.1 or 48 kHz. For that detail, use a
 [dataset](#export-a-dataset) made from the originals. The copy is a plain
-audio file: it has no sidecar, Voice Slate does not list it, and the permission records stay with the kept clip. It cannot
+audio file: it has no sidecar, Voice Slate does not list it, and the permission records stay with the kept clip. It does carry
+the same line about its allowed use as the kept clip, even for a clip kept before there was one; in an MP3 the accents are
+taken off that line, because an MP3's tag would show them wrongly everywhere. It cannot
 be saved inside the output folder, so that it is not taken for a kept clip. FFmpeg is not needed. The file dialog asks
 before it replaces a file.
 
@@ -590,7 +596,8 @@ empty folder outside the output folder. **Holds** says how many clips go in and 
 | **Hugging Face audio folder** | A `train` folder with the clips and a `metadata.csv` beside them, which the Hugging Face `datasets` library loads with `load_dataset("audiofolder", data_dir=...)`. It starts at 24 kHz, like the kept clips. |
 | **Kaldi** | The lists a Kaldi recipe reads, `wav.scp`, `text`, `utt2spk` and `spk2utt`, with the clips in a `wavs` folder. It starts at 16 kHz, 16-bit, which is what Kaldi recipes expect. The paths in `wav.scp` are relative to the dataset's folder, so run Kaldi from there or put the folder's path in front of them. The transcripts are as you typed them: a recipe that wants capitals and no punctuation has to change them. |
 
-Every layout also gets a `manifest.jsonl` with the origin and allowed use of every clip.
+Every layout also gets a `manifest.jsonl` with the origin and allowed use of every clip, and each clip's WAV carries the
+line about its allowed use, as a kept clip does.
 
 **Split** puts some clips aside for validation: clips that a model is tested on and never trains on. Choose 5, 10 or 20 in a
 hundred. The same clips go aside every time you export the same clips; adding clips can move a few between the two parts.

@@ -3,16 +3,21 @@
 The copy is made from the kept clip's own WAV: that file is read, resampled to the rate asked for and encoded. Nothing is
 re-rendered from the original recording, so the copy is what was kept and no FFmpeg is needed, and the kept clip itself
 is never touched. The encoders are the ones inside SoundFile's libsndfile.
+
+The copy carries the line that says what the clip may be used for (store.permission_line), made from the sidecar beside
+the kept clip, so that a clip kept before there was such a line gets it in its copies too.
 """
+import json
 import os
 import re
+import unicodedata
 from pathlib import Path
 
 import numpy as np
 import soundfile as sf
 
 from . import audio_core as ac
-from .store import RESERVED_NAMES
+from .store import RESERVED_NAMES, permission_line
 
 MP3_KBPS = 128
 # kind: (name shown, file ending, SoundFile format, subtype, other settings of the writer)
@@ -54,6 +59,23 @@ def filename_for(text, fallback='clip'):
     return f'_{name}' if name.split('.')[0].upper() in RESERVED_NAMES else name
 
 
+def plain_letters(text):
+    """The text with its accents taken off and anything else outside plain ASCII made a question mark. An MP3's tag
+    holds Latin-1, and libsndfile hands it UTF-8, so an accented letter would come out as two wrong ones everywhere."""
+    text = text.translate({0x2018: "'", 0x2019: "'", 0x201c: '"', 0x201d: '"', 0x2013: '-', 0x2014: '-', 0x2026: '...'})
+    text = ''.join(c for c in unicodedata.normalize('NFKD', text) if not unicodedata.combining(c))
+    return text.encode('ascii', 'replace').decode('ascii')
+
+
+def copy_comment(source, kind):
+    """The permission line for a copy of the kept clip `source`, from the sidecar beside it, or None without one."""
+    try:
+        line = permission_line(json.loads(Path(source).with_suffix('.json').read_text(encoding='utf-8')))
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return None
+    return plain_letters(line) if kind == 'mp3' else line
+
+
 def save_copy(source, destination, kind=DEFAULT_KIND, rate=DEFAULT_RATE):
     """Write a copy of the kept clip `source` (a WAV file) to `destination`, as `kind` at `rate` Hz, and return the path.
 
@@ -77,9 +99,14 @@ def save_copy(source, destination, kind=DEFAULT_KIND, rate=DEFAULT_RATE):
     try:
         samples, source_rate = sf.read(str(source), dtype='float32', always_2d=False)
         audio = np.clip(ac.resample(ac.to_mono(samples), source_rate, rate), -1.0, 1.0)
+        comment = copy_comment(source, kind)
         with sf.SoundFile(str(tmp), 'w', samplerate=rate, channels=1, format=name, subtype=subtype, **settings) as out:
+            if comment and kind != 'wav':           # the other formats keep their texts in a header, written first
+                out.comment = comment
             for start in range(0, len(audio), CHUNK_FRAMES):
                 out.write(audio[start:start + CHUNK_FRAMES])
+            if comment and kind == 'wav':           # after the audio, where Windows looks (store._write_audio)
+                out.comment = comment
         os.replace(tmp, destination)
     except CopyError:
         raise

@@ -33,7 +33,7 @@ import soundfile as sf
 from . import audio_core as ac
 from . import manifest
 from .core import render
-from .store import Library, _write_audio, file_sha256
+from .store import Library, _write_audio, file_sha256, permission_line
 
 LAYOUTS = {'clips': 'Clips with their sidecars', 'ljspeech': 'LJSpeech (wavs and metadata.csv)',
            'audiofolder': 'Hugging Face audio folder (metadata.csv)', 'kaldi': 'Kaldi (wav.scp, text, utt2spk)'}
@@ -173,7 +173,7 @@ class Export:
         target = self._target(row, wav.stem)
         target.parent.mkdir(parents=True, exist_ok=True)
         audio = self._audio(wav, data)
-        _write_audio(target, audio, self.rate, self._subtype(data))
+        _write_audio(target, audio, self.rate, self._subtype(data), permission_line(data))
         sha = file_sha256(target)
         duration = round(len(audio) / self.rate, 3)
         if self.layout == 'clips':

@@ -48,7 +48,7 @@ from .core import chain as chain_mod
 from .core import render
 from .core.edits import History, validate_edits, words_key
 from .core.reading import clean_words
-from .settings import default_root
+from .settings import APP_NAME, default_root
 
 SCHEMA = 'voice-recorder-clip-v2'
 KNOWN_SCHEMAS = ('voice-recorder-clip-v1', SCHEMA)
@@ -65,6 +65,8 @@ RELEASE_FOLDER = 'release'
 RELEASE_FILE = 'release.json'
 RELEASE_SCHEMA = 'voice-slate-release-v1'
 RELEASE_WARNING_DAYS = 30           # a release this close to running out is mentioned
+# How much of the allowed use goes in the line inside a clip's audio file. libsndfile keeps all of a file's texts in 8 KB.
+PERMISSION_USE_CHARS = 400
 # What Keep works out afresh each time. Anything else among a take's flags is a fact about how it was recorded.
 WORKED_OUT_FLAGS = {'recovered', 'imported', 'clipped', 'edited', 'filtered', 'cleaned', 'level_changed', 'limited'}
 RESERVED_NAMES = {'CON', 'PRN', 'AUX', 'NUL', *(f'COM{n}' for n in range(10)), *(f'LPT{n}' for n in range(10))}
@@ -113,10 +115,36 @@ def sync_file(path):
         os.fsync(f.fileno())
 
 
-def _write_audio(path, samples, rate, subtype):
-    """Write a WAV file and put it on the disk. SoundFile reports its failures as RuntimeError; this raises OSError."""
+def permission_line(sidecar):
+    """The line of plain text that goes inside a kept clip's audio file, so that a clip dragged into another program still
+    says whose permission it rests on: its id, the name of its sidecar, the allowed use and the date the permission was
+    given (left out for a clip kept before that date was recorded). Not the origin, which can say who the person is. Made
+    from the sidecar, whose `export.file` names the clip in the library."""
+    allowed = ' '.join(str(sidecar.get('allowed_use') or '').split())
+    if len(allowed) > PERMISSION_USE_CHARS:
+        allowed = allowed[:PERMISSION_USE_CHARS].rstrip() + '... (the rest is in the sidecar)'
+    line = (f"{APP_NAME} clip {sidecar.get('id') or '?'}, described in "
+            f"{Path(sidecar['export']['file']).with_suffix('.json').name}. Allowed use: {allowed}.")
+    stated = str(sidecar.get('consent_confirmed_at') or '')
+    if re.match(r'\d{4}-\d{2}-\d{2}', stated):
+        line += f' Permission given {stated[:10]}.'
+    return line
+
+
+def _write_audio(path, samples, rate, subtype, comment=None):
+    """Write a WAV file and put it on the disk, with `comment` in its information chunk if one is given. SoundFile
+    reports its failures as RuntimeError; this raises OSError."""
     try:
-        sf.write(str(path), samples, int(rate), subtype=subtype, format='WAV')
+        if comment:
+            samples = np.asarray(samples)
+            channels = 1 if samples.ndim == 1 else samples.shape[1]
+            with sf.SoundFile(str(path), 'w', int(rate), channels, subtype, format='WAV') as out:
+                out.write(samples)
+                # Set after the audio, libsndfile puts the chunk after it, which is the only place Windows' own file
+                # properties look: before the audio it was in the file and Explorer showed no comment.
+                out.comment = comment
+        else:
+            sf.write(str(path), samples, int(rate), subtype=subtype, format='WAV')
     except RuntimeError as e:
         raise OSError(f'{path.name} could not be written: {e}') from e
     sync_file(path)
@@ -1277,7 +1305,7 @@ class Library:
         export_tmp = export_path.with_name(export_path.name + '.tmp')
         sidecar_tmp = sidecar_path.with_name(sidecar_path.name + '.tmp')
         try:
-            _write_audio(export_tmp, export, take.export_rate, purpose.subtype)
+            _write_audio(export_tmp, export, take.export_rate, purpose.subtype, permission_line(sidecar))
             sidecar['export']['sha256'] = file_sha256(export_tmp)
             sidecar_tmp.write_text(json.dumps(sidecar, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
             sync_file(sidecar_tmp)

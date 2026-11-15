@@ -272,6 +272,10 @@ None of these changes a kept clip, and none goes online.
 - **Export manifest** is `manifest.collect` and `manifest.write`. A row is built from each sidecar, read by the rules of
   the library (a name that leaves the sidecar's folder is refused), and the WAV is hashed again; a clip that does not
   check out is left out and named. The escaping is described in [Clip format](clip-format.md#manifest-files).
+- **The line inside a clip's audio file** is `store.permission_line`, made from the sidecar and written by `_write_audio`
+  into the WAV's `LIST` `INFO` chunk when a clip is kept, before its SHA-256 is taken; `share.save_copy` and
+  `dataset.Export.add` write it into copies and dataset clips. In a WAV it is set after the audio, so that libsndfile puts the
+  chunk after the data, where Windows looks. No clip already kept is rewritten to add it.
 - **Export dataset** is `dataset.Export`, fed the rows of `manifest.collect` one at a time by `session/batch.py`. Made from the
   original, a clip goes through `render.export_samples` again at the rate asked for, with the recipe in its sidecar. A split is
   `dataset.split`, before the job starts: the clips are ranked by a hash of their speaker and file name, so the same clips go to

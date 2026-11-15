@@ -35,6 +35,9 @@ the project uses [Semantic Versioning](https://semver.org/).
   (about 1,540 MB, with an English-only model too) and `large-v3-turbo` (about 1,630 MB, every language). The setup
   fetches each from where faster-whisper's own list of models says it is, and does not trust a turbo model that is
   missing the file that says how it hears.
+- **The permission travels inside the WAV.** A kept clip's WAV now carries one line of plain text in its standard
+  information chunk: the clip's id, the name of its sidecar, the allowed use and the date the permission was given, but not
+  the origin. Copies and dataset clips carry it too, also of clips kept before, which are not changed themselves.
 
 ### Changed
 
