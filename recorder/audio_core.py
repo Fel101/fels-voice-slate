@@ -11,6 +11,8 @@ from math import gcd
 import numpy as np
 from scipy.signal import resample_poly
 
+from .i18n import tr
+
 EXPORT_RATE = 24000             # the kept clip of a Reference or a Sentence; see PURPOSES
 MIN_SECONDS = 6.0               # below this a clip cannot be kept as a reference
 TARGET_MIN_SECONDS = 10.0       # the range the meter marks green
@@ -330,26 +332,32 @@ def take_warnings(stats, flags=(), purpose=None):
     seconds = stats['seconds']
     rules = purpose or PURPOSES[DEFAULT_PURPOSE]
     items = []
+    length = {'seconds': f'{seconds:.1f}', 'low': f'{rules.min_seconds:g}', 'high': f'{rules.max_seconds:g}',
+              'start': f'{rules.best_from:g}', 'end': f'{rules.best_to:g}'}
     if seconds < rules.min_seconds:
-        items.append(Issue(f'Too short ({seconds:.1f} s; {rules.min_seconds:g} s minimum): cannot be kept as {rules.a_name}',
+        key = rules.key
+        items.append(Issue(tr('Too short ({seconds} s; {low} s minimum): cannot be kept as a sentence' if key == 'sentence'
+                              else 'Too short ({seconds} s; {low} s minimum): cannot be kept as an audition'
+                              if key == 'audition' else
+                              'Too short ({seconds} s; {low} s minimum): cannot be kept as a reference').format(**length),
                            True, 'short'))
     if seconds > rules.max_seconds:
-        items.append(Issue(f'Too long ({seconds:.1f} s; {rules.max_seconds:g} s maximum): cannot be kept', True, 'long'))
+        items.append(Issue(tr('Too long ({seconds} s; {high} s maximum): cannot be kept').format(**length), True, 'long'))
     elif seconds > rules.best_to:
-        items.append(Issue(f'Long ({seconds:.1f} s): fine up to {rules.max_seconds:g} s, {rules.best_from:g} to '
-                           f'{rules.best_to:g} s works best', False, 'target'))
+        items.append(Issue(tr('Long ({seconds} s): fine up to {high} s, {start} to {end} s works best').format(
+            **length), False, 'target'))
     if stats['rms_dbfs'] < SILENT_DB:
-        items.append(Issue('Silent: cannot be kept', True, 'silent'))
+        items.append(Issue(tr('Silent: cannot be kept'), True, 'silent'))
     elif stats['rms_dbfs'] < QUIET_DB:
-        items.append(Issue(f"Quiet ({stats['rms_dbfs']:.0f} dBFS RMS): advisory", False, 'quiet'))
+        items.append(Issue(tr('Quiet ({rms} dBFS RMS): advisory').format(rms=f"{stats['rms_dbfs']:.0f}"), False, 'quiet'))
     if stats.get('clipped') or stats.get('recording_clipped'):
-        items.append(Issue('Clipped: some samples reach full scale; consider re-recording', False, 'clipped'))
+        items.append(Issue(tr('Clipped: some samples reach full scale; consider re-recording'), False, 'clipped'))
     if stats.get('silence_fraction', 0) > MOSTLY_SILENT:
-        items.append(Issue('Mostly silence', False, 'mostly_silent'))
+        items.append(Issue(tr('Mostly silence'), False, 'mostly_silent'))
     if 'interrupted' in flags:
-        items.append(Issue('Interrupted: the device stopped during this take', False, 'interrupted'))
+        items.append(Issue(tr('Interrupted: the device stopped during this take'), False, 'interrupted'))
     if 'dropouts' in flags:
-        items.append(Issue('Dropouts: the device lost some audio during this take; listen for gaps', False, 'dropouts'))
+        items.append(Issue(tr('Dropouts: the device lost some audio during this take; listen for gaps'), False, 'dropouts'))
     return items
 
 
@@ -358,12 +366,13 @@ def keep_problems(meta, warnings):
     problems = []
     text = str(meta.get('transcript') or '').strip()
     if not (TRANSCRIPT_MIN <= len(text) <= TRANSCRIPT_MAX):
-        problems.append(f'The transcript must be {TRANSCRIPT_MIN} to {TRANSCRIPT_MAX} characters.')
+        problems.append(tr('The transcript must be {low} to {high} characters.').format(low=TRANSCRIPT_MIN,
+                                                                                     high=TRANSCRIPT_MAX))
     if not str(meta.get('origin') or '').strip():
-        problems.append('Enter where the recording came from (origin).')
+        problems.append(tr('Enter where the recording came from (origin).'))
     if not str(meta.get('allowed_use') or '').strip():
-        problems.append('Enter what the voice may be used for (allowed use).')
+        problems.append(tr('Enter what the voice may be used for (allowed use).'))
     if meta.get('consent_confirmed') is not True:
-        problems.append('Tick the permission box: you have the right to use this voice for the purpose you entered.')
+        problems.append(tr('Tick the permission box: you have the right to use this voice for the purpose you entered.'))
     problems.extend(w.text for w in warnings if w.blocks)
     return problems

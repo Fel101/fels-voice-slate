@@ -19,7 +19,10 @@ FILES = [*sorted((ROOT / 'recorder' / 'ui').glob('*.py')), ROOT / 'recorder' / '
          ROOT / 'recorder' / 'session' / 'transport.py', ROOT / 'recorder' / 'session' / 'drafts.py',
          ROOT / 'recorder' / 'session' / 'advisor.py', ROOT / 'recorder' / 'session' / 'script.py',
          ROOT / 'recorder' / 'session' / 'run.py', ROOT / 'recorder' / 'session' / 'roomcheck.py',
-         ROOT / 'recorder' / 'session' / 'batch.py', ROOT / 'recorder' / 'dataset.py']
+         ROOT / 'recorder' / 'session' / 'batch.py', ROOT / 'recorder' / 'dataset.py',
+         # what the Check tab, Auto analyze and the Keep card say is worked out here, in the window's language
+         ROOT / 'recorder' / 'core' / 'analysis.py', ROOT / 'recorder' / 'core' / 'autofix.py',
+         ROOT / 'recorder' / 'audio_core.py', ROOT / 'recorder' / 'store.py']
 CALLS = {'end', 'label', 'caption', 'button', 'chip', 'set_chip', 'setToolTip', 'setPlaceholderText', 'setText', 'setWindowTitle',
          'addRow', 'addItem', 'QCheckBox', 'QPushButton', 'QLabel', 'notice', 'confirm', 'ask_text', 'choose_item', 'addAction',
          'addMenu', 'setAccessibleName', 'setAccessibleDescription', 'set_tooltips', 'Segmented', 'status', 'tr', 'Step',

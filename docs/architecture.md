@@ -335,8 +335,11 @@ None of these changes a kept clip, and none goes online.
   `tests/test_ui_access.py` measures the contrast of each theme.
 - **`i18n.py`, `ui/translate.py`** translate the window. The English text is the key. The helpers in `ui/widgets.py` translate what
   they are given, and `translate_tree` goes over a finished window or dialog, so most code simply writes English. A text built from
-  values stays in English until it is written with `{}` fields and `tr(...).format(...)`. `tools/strings.py` lists what a language
-  lacks, and the tests refuse an entry whose fields differ from the English.
+  values stays in English until it is written with `{}` fields and `tr(...).format(...)`, where it is worked out: `i18n` needs no
+  toolkit, so the measurements in `core/analysis.py` and `core/autofix.py` and the keep rules are written that way too. What is
+  stored in a file stays in English. `tools/strings.py` lists what a language lacks; it passes over a text with `_` in it, as a
+  name in the code, so a field is `{start}`, never `{best_from}`. The tests refuse an entry whose fields differ from the
+  English, and compare what the Check tab and the Keep card say in English and in each language.
 - **`ui/toolbar.py`** collapses labels, then icons, then buttons into a "more" menu as the window narrows, so nothing is
   clipped at the minimum size of 1100 by 600.
 

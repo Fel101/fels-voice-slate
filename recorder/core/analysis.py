@@ -4,7 +4,7 @@
 - spectrogram: dB magnitudes for the picture under the waveform.
 - loudness_lufs, noise_floor_db, snr_db, bandwidth_hz, detect_hum, edge_silence: the quality checks.
 - silent_runs and the two range finders behind Auto-trim and Shorten pauses.
-- quality_report: the rows of the Check tab.
+- quality_report: the rows of the Check tab, in the window's language (i18n needs no toolkit).
 - delivery: an Audition measured against the limits ACX gives for an audiobook file.
 """
 import math
@@ -14,6 +14,7 @@ import numpy as np
 from scipy.signal import lfilter, welch
 
 from .. import audio_core as ac
+from ..i18n import tr
 
 
 # ---- waveform drawing -------------------------------------------------------------------------------------------------
@@ -514,36 +515,43 @@ def quality_report(x, rate=ac.EXPORT_RATE, recorded_clipped=0.0, purpose=None):
         return 'ok' if ok(value) else 'warn' if warn(value) else 'bad'
 
     rows = [
-        Check('length', 'Length', f'{seconds:.1f} s',
+        Check('length', tr('Length'), f'{seconds:.1f} s',
               rank(seconds, lambda v: rules.best_from <= v <= rules.best_to,
                    lambda v: rules.min_seconds <= v <= rules.max_seconds),
-              f'Between {rules.min_seconds:g} and {rules.max_seconds:g} s can be kept; {rules.best_from:g} to '
-              f'{rules.best_to:g} s works best.'),
-        Check('speech', 'Speech level', f'{speech:.1f} dB', rank_speech(speech),
-              f'Loudness of the voiced parts. The target is {ac.TARGET_VOICED_DB:.0f} dB; Normalize sets it.'),
-        Check('peak', 'Peak', f"{stats['peak_dbfs']:.1f} dBFS",
+              tr('Between {low} and {high} s can be kept; {start} to {end} s works best.').format(
+                  low=f'{rules.min_seconds:g}', high=f'{rules.max_seconds:g}', start=f'{rules.best_from:g}',
+                  end=f'{rules.best_to:g}')),
+        Check('speech', tr('Speech level'), f'{speech:.1f} dB', rank_speech(speech),
+              tr('Loudness of the voiced parts. The target is {target} dB; Normalize sets it.').format(
+                  target=f'{ac.TARGET_VOICED_DB:.0f}')),
+        Check('peak', tr('Peak'), f"{stats['peak_dbfs']:.1f} dBFS",
               'ok' if stats['peak_dbfs'] <= PEAK_OK_DBFS else 'warn',
-              'Peaks above -1 dBFS leave no headroom; the limiter keeps them under the ceiling.'),
-        Check('clipping', 'Clipping', f'{clipped * 100:.3f}% of samples', 'ok' if clipped <= CLIPPED_MAX else 'bad',
-              'More than 0.1% of samples at full scale is flagged as clipped. The recording counts too: gain and the '
-              'limiter can hide clipping, but not repair it.'),
-        Check('loudness', 'Loudness', f'{loudness_lufs(x, rate):.1f} LUFS', 'info',
-              'Integrated loudness (ITU-R BS.1770). For comparison only.'),
-        Check('noise', 'Noise floor', f'{floor:.1f} dB', rank_noise(floor),
-              f'Level of the quietest tenth of the clip. Speech is about {max(speech - floor, 0):.0f} dB above it.'),
-        Check('bandwidth', 'Bandwidth', f'{band / 1000:.1f} kHz',
+              tr('Peaks above -1 dBFS leave no headroom; the limiter keeps them under the ceiling.')),
+        Check('clipping', tr('Clipping'), tr('{percent}% of samples').format(percent=f'{clipped * 100:.3f}'),
+              'ok' if clipped <= CLIPPED_MAX else 'bad',
+              tr('More than 0.1% of samples at full scale is flagged as clipped. The recording counts too: gain and the '
+                 'limiter can hide clipping, but not repair it.')),
+        Check('loudness', tr('Loudness'), f'{loudness_lufs(x, rate):.1f} LUFS', 'info',
+              tr('Integrated loudness (ITU-R BS.1770). For comparison only.')),
+        Check('noise', tr('Noise floor'), f'{floor:.1f} dB', rank_noise(floor),
+              tr('Level of the quietest tenth of the clip. Speech is about {gap} dB above it.').format(
+                  gap=f'{max(speech - floor, 0):.0f}')),
+        Check('bandwidth', tr('Bandwidth'), f'{band / 1000:.1f} kHz',
               rank(band, lambda v: v >= 4500, lambda v: v >= 3500),
-              'Frequency below which 99.9% of the speech energy lies. Phone-quality sources stop below about 4 kHz.'),
-        Check('hum', 'Mains hum',
-              'none found' if hum is None else f'{hum[0]:.0f} Hz, {hum[1]:.0f} dB above its surroundings',
+              tr('Frequency below which 99.9% of the speech energy lies. Phone-quality sources stop below about 4 kHz.')),
+        Check('hum', tr('Mains hum'),
+              tr('none found') if hum is None else
+              tr('{hz} Hz, {db} dB above its surroundings').format(hz=f'{hum[0]:.0f}', db=f'{hum[1]:.0f}'),
               'ok' if hum is None else 'warn',
-              'Turn on the hum notch in Process if it is found.'),
-        Check('ends', 'Silence at the ends', f'{lead:.2f} s before, {tail:.2f} s after',
+              tr('Turn on the Hum filter in Process if it is found.')),
+        Check('ends', tr('Silence at the ends'),
+              tr('{before} s before, {after} s after').format(before=f'{lead:.2f}', after=f'{tail:.2f}'),
               'ok' if max(lead, tail) <= 0.8 else 'warn',
-              'Long pauses at the ends are wasted reference time. Auto-trim keeps 0.15 s.'),
-        Check('silence', 'Silence overall', f"{stats['silence_fraction'] * 100:.0f}% of frames",
+              tr('Long pauses at the ends are wasted reference time. Auto-trim keeps 0.15 s.')),
+        Check('silence', tr('Silence overall'), tr('{percent}% of frames').format(
+              percent=f"{stats['silence_fraction'] * 100:.0f}"),
               'ok' if stats['silence_fraction'] <= ac.MOSTLY_SILENT else 'warn',
-              'More than 40% pauses leaves little speech.'),
+              tr('More than 40% pauses leaves little speech.')),
     ]
     return rows
 

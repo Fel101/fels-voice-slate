@@ -219,10 +219,13 @@ def test_the_whole_window_draws_in_each_language(qapp, session, dialogs, speak, 
 @pytest.mark.parametrize('code', i18n.LANGUAGES)
 def test_each_tab_fits_its_panel_in_each_language(qapp, session, dialogs, speak, code):
     """A page wider than the panel is cut off on the right, every row of it. The two Auto analyze buttons in German and
-    Spanish, the two copy buttons in Spanish and French, and in English a Check row whose value is long once made a tab so."""
+    Spanish, the two copy buttons in Spanish and French, and in English a Check row whose value is long once made a tab so;
+    so did the value of mains hum in French, "60 Hz, 46 dB au-dessus de son voisinage". The take hums, as the one in the
+    pictures does, so that the hum row has its longest value."""
+    import synthetic
     speak(code)
     session.workspace.set_purpose('audition')
-    record(session, 12.0)
+    record(session, samples=synthetic.take(14.0))
     window = MainWindow(session=session, dialogs=dialogs)
     window.timer.stop()
     window.resize(1440, 900)
@@ -237,3 +240,55 @@ def test_each_tab_fits_its_panel_in_each_language(qapp, session, dialogs, speak,
         assert scroll.widget().width() <= scroll.viewport().width(), window.inspector.TABS[tab]
     window.close()
     ui_helpers.pump(qapp)
+
+
+# ---- nothing left in English --------------------------------------------------------------------------------------------------
+
+WORD = re.compile(r'[A-Za-z]{3,}')
+SAME = {'dBFS', 'LUFS', 'kHz', 'RMS', 'ACX', 'Ctrl', 'Clip'}       # units and names, the same in every language here
+
+
+def shown_texts(*widgets):
+    """What the labels and buttons under these widgets show now."""
+    from PySide6.QtWidgets import QAbstractButton, QLabel
+    return {item.text() for widget in widgets for item in widget.findChildren(QLabel) + widget.findChildren(QAbstractButton)
+            if item.isVisibleTo(widget) and item.text()}
+
+
+def analyzed_audition(qapp, make_session, dialogs, root, code):
+    """An Audition with a draft transcript, quiet and with long pauses at its ends, after Auto analyze, in a language: what
+    the Check tab, the Keep card and the status line say."""
+    from helpers import bursts
+    i18n.use(code)
+    session = make_session(root)
+    session.workspace.add_speaker('Smoke Speaker')
+    session.workspace.set_purpose('audition')
+    take = record(session, samples=bursts(15.0, [(3.0, 6.0), (6.5, 9.5), (10.0, 12.5)], amp=0.03, noise=0.0005, f0=137.0))
+    session.drafts.receive(take, 'The harbour lights came on at dusk.', None)
+    window = MainWindow(session=session, dialogs=dialogs)
+    window.timer.stop()
+    window.resize(1440, 900)
+    window.show()
+    window.actions.auto_analyze.trigger()
+    session.jobs.drain()
+    window.flush()
+    window._request_analysis()
+    session.jobs.drain()
+    window.flush()
+    ui_helpers.pump(qapp)
+    said = shown_texts(window.inspector.check, window.inspector.ready) | {window.status_text.full_text}
+    window.close()
+    ui_helpers.pump(qapp)
+    return said
+
+
+@pytest.mark.parametrize('code', LANGUAGES)
+def test_the_check_tab_and_the_keep_card_say_nothing_in_english(qapp, make_session, dialogs, speak, tmp_path, code):
+    """The measurements, Auto analyze, the ACX rows and the advice on the Keep card are built from values, and they were all
+    left in English."""
+    english = analyzed_audition(qapp, make_session, dialogs, tmp_path / 'en', 'en')
+    theirs = analyzed_audition(qapp, make_session, dialogs, tmp_path / code, code)
+    assert any('ACX' in text for text in english) and any('Auto fix:' in text for text in english)    # it saw them all
+    assert any(text.startswith('Speech is at') for text in english) and any('draft' in text for text in english)
+    left = sorted(text for text in english & theirs if any(word not in SAME for word in WORD.findall(text)))
+    assert left == []

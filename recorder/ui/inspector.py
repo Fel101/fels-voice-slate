@@ -476,7 +476,7 @@ class AutoCard(QFrame):
         box.addLayout(head)
         box.addWidget(label(finding.detail, 'muted', wrap=True))
         if finding.fix:
-            fix = label(f'Auto fix: {finding.fix}', wrap=True)
+            fix = label(tr('Auto fix: {fix}').format(fix=finding.fix), wrap=True)
             fix.setStyleSheet(f'color: {PALETTE["accent"]};')
             box.addWidget(fix)
         return box
@@ -514,7 +514,7 @@ class AutoCard(QFrame):
         for step in done.steps:
             mark = label(f'✓  {step}', wrap=True)
             self.body.addWidget(mark)
-        self._changes('Before and after', done.changes)
+        self._changes(tr('Before and after'), done.changes)
 
     # ---- drawing ----
 
@@ -534,22 +534,23 @@ class AutoCard(QFrame):
         if not watching:
             self.body.addWidget(label(self.INTRO, 'muted', wrap=True))
         elif advice is None:
-            kind, text = 'violet', 'Analyzing...'
+            kind, text = 'violet', tr('Analyzing...')
             if done is not None:
                 self._done(done)
         elif diagnosis is None:
-            self.body.addWidget(label(f'Could not analyze the clip: {advice.error}', 'muted', wrap=True))
+            self.body.addWidget(label(tr('Could not analyze the clip: {error}').format(error=advice.error), 'muted',
+                                      wrap=True))
         else:
             if done is not None:
                 self._done(done)
                 self.body.addWidget(caption('What is left'))
             problems = [f for f in diagnosis.findings if f.status != 'ok']
             kind = 'green' if not problems else 'red' if any(f.status == 'bad' for f in problems) else 'amber'
-            text = 'Nothing to fix' if not problems else f'{len(problems)} to look at'
+            text = 'Nothing to fix' if not problems else tr('{count} to look at').format(count=len(problems))
             for finding in diagnosis.findings:
                 self.body.addLayout(self._finding(finding))
             if diagnosis.has_fixes:
-                self._changes('Auto fix will change', diagnosis.changes)
+                self._changes(tr('Auto fix will change'), diagnosis.changes)
         set_chip(self.verdict, text, kind or None)
         self.setEnabled(take is not None)
         repairable = diagnosis is None or diagnosis.has_fixes
@@ -588,7 +589,8 @@ class CheckPage(QWidget):
         if derived is None:
             self.rows.addWidget(label('Measuring...', 'dim'))
         elif derived.report is None:
-            self.rows.addWidget(label(f'Could not measure the clip: {derived.error}', 'muted', wrap=True))
+            self.rows.addWidget(label(tr('Could not measure the clip: {error}').format(error=derived.error), 'muted',
+                                      wrap=True))
         else:
             for row in derived.report:
                 self.rows.addWidget(self._row(row))
@@ -599,8 +601,10 @@ class CheckPage(QWidget):
                 for row in delivery_rows(derived.delivery):
                     self.rows.addWidget(self._row(row))
 
-    @staticmethod
-    def _row(row):
+    VALUE_BESIDE = 22               # a value longer than this many characters goes under the name, so the row never widens the tab
+
+    @classmethod
+    def _row(cls, row):
         box = card()
         layout = vbox(box, (12, 9, 12, 9), 3)
         head = hbox(spacing=8)
@@ -612,8 +616,16 @@ class CheckPage(QWidget):
         head.addWidget(name, 1)
         value = QLabel(row.value)
         value.setFont(theme.mono_font(11))
-        head.addWidget(value, 0, Qt.AlignmentFlag.AlignTop)
+        beside = len(row.value) <= cls.VALUE_BESIDE
+        if beside:
+            head.addWidget(value, 0, Qt.AlignmentFlag.AlignTop)
         layout.addLayout(head)
+        if not beside:                      # "60 Hz, 46 dB au-dessus de son voisinage" is wider than the panel allows
+            value.setWordWrap(True)
+            under = hbox(spacing=8)
+            under.addSpacing(dot.sizeHint().width())
+            under.addWidget(value, 1)
+            layout.addLayout(under)
         layout.addWidget(label(row.hint, 'dim', size=11, wrap=True))
         return box
 
@@ -713,13 +725,13 @@ GLYPHS = {'ok': ('✓', 'green'), 'todo': ('○', 'dim'), 'bad': ('✕', 'red'),
 GLYPH_WORDS = {'ok': 'Done', 'todo': 'Still to do', 'bad': 'Problem', 'advice': 'Advice'}
 
 
-def step_text(step):
-    """The checklist line for a rule: what is met, or what is still to do."""
+def step_text(step, rules):
+    """The checklist line for a rule: what is met, or what is still to do. `rules` is the purpose of the take."""
     key, detail = step.key, step.detail
     if key == 'length':
         if detail == 'measuring...':
             return tr('Measuring the clip...')
-        allowed = step.label.removeprefix('Length ')
+        allowed = tr('{low} to {high} s').format(low=f'{rules.min_seconds:g}', high=f'{rules.max_seconds:g}')
         text = 'Length {detail}  ({allowed})' if step.done else 'Length {detail}: this purpose needs {allowed}'
         return tr(text).format(detail=detail, allowed=allowed)
     if key == 'audible':
@@ -872,7 +884,7 @@ class ReadyCard(QFrame):
         for step in shown:
             state = 'ok' if step.done else 'bad' if step.key in ('length', 'audible', 'release') \
                 and step.detail != 'measuring...' else 'todo'
-            text = step_text(step)
+            text = step_text(step, take.purpose)
             if text in said:                                    # two checks waiting on the same measurement say it once
                 continue
             said.add(text)

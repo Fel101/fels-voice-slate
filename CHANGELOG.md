@@ -78,6 +78,13 @@ the project uses [Semantic Versioning](https://semver.org/).
   Spanish and French the two copy buttons on the Clip tab, were wider than the panel side by side, and in English a Check
   row with a long value was a few pixels too wide. The whole tab then became wider than the panel, and every row of it was
   cut off on the right. Such buttons now go one above the other when they do not fit, and a Check row's name wraps.
+- **The Check tab and the Keep card are in the window's language.** In German, Spanish and French, every measurement on the
+  Check tab, what Auto analyze found and would do, the ACX rows' values, the warnings and advice on the Keep card ("Speech is
+  at -29.0 dB; the target is -20 dB...") and the count of characters were still in English, because they are built from
+  numbers: 35 texts in each language. They are now translated where they are worked out. The note shown while noise
+  reduction is on calls it Noise reduction, as the Process tab does, rather than "noise cleaning". A value too long to sit
+  beside its name, such as mains hum in French ("60 Hz, 46 dB au-dessus de son voisinage"), goes under it, where it would
+  otherwise have made the whole tab wider than the panel again.
 - **Every playback device plays every take.** A WASAPI device chosen in Settings refused any take that was not at the rate
   the device runs at ("Invalid sample rate"), and some WDM-KS devices refused 24 kHz and below. Windows now converts for a
   WASAPI device, a take that a device still refuses is converted to the device's own rate, and the playhead stays with the

@@ -409,7 +409,8 @@ class Workspace:
             steps.append(Step('length', length, rules.min_seconds <= seconds <= rules.max_seconds, f'{seconds:.1f} s'))
             steps.append(Step('audible', 'Not silent', rms >= ac.SILENT_DB, f'{rms:.0f} dB'))
         steps.append(Step('transcript', f'Transcript {ac.TRANSCRIPT_MIN} to {ac.TRANSCRIPT_MAX} characters',
-                          ac.TRANSCRIPT_MIN <= len(text) <= ac.TRANSCRIPT_MAX, f'{len(text)} characters'))
+                          ac.TRANSCRIPT_MIN <= len(text) <= ac.TRANSCRIPT_MAX,
+                          tr('{count} character' if len(text) == 1 else '{count} characters').format(count=len(text))))
         if take.history.words_changed:
             steps.append(Step('checked', 'Transcript matches the kept words', not take.needs_transcript_review,
                               'Read it against the edits, then confirm'))
@@ -423,37 +424,39 @@ class Workspace:
         advice = self._advice(take, derived, text)
         state, date = self.lib.release_ends(slug) if slug else ('none', '')
         if state == 'soon':
-            advice.append(Advice('release', f'The release for this voice runs out on {date}.'))
+            advice.append(Advice('release', tr('The release for this voice runs out on {date}.').format(date=date)))
         return Readiness(steps, all(s.done for s in steps), advice)
 
     @staticmethod
     def _advice(take, derived, text):
         advice = []
         if take.unsaved:
-            advice.append(Advice('unsaved', 'The original is only in memory. Keep writes it once the folder is writable.'))
+            advice.append(Advice('unsaved', tr('The original is only in memory. Keep writes it once the folder is '
+                                               'writable.')))
         if take.changed:
-            advice.append(Advice('changed', 'Changed since it was kept. Your changes are saved, but the kept clip does not '
-                                            'have them until you update it.'))
+            advice.append(Advice('changed', tr('Changed since it was kept. Your changes are saved, but the kept clip does '
+                                               'not have them until you update it.')))
         if derived is not None and derived.stats is not None:
             advice.extend(Advice(issue.code, issue.text)
                           for issue in ac.take_warnings(derived.stats, take.flags, take.purpose) if not issue.blocks)
             speech = next((row for row in derived.report or [] if row.key == 'speech'), None)
             if speech is not None and speech.status != 'ok':
-                advice.append(Advice('level', f'Speech is at {speech.value}; the target is '
-                                              f'{ac.TARGET_VOICED_DB:.0f} dB. Process has a Normalize button.'))
+                advice.append(Advice('level', tr('Speech is at {value}; the target is {target} dB. Process has a Normalize '
+                                                 'button.').format(value=speech.value, target=f'{ac.TARGET_VOICED_DB:.0f}')))
         draft = str(take.meta.get('draft_text') or '').strip()
         if draft and text == draft:
-            advice.append(Advice('draft', 'The transcript is an automatic draft. Listen to the clip and correct any '
-                                          'wrong words.'))
+            advice.append(Advice('draft', tr('The transcript is an automatic draft. Listen to the clip and correct any '
+                                             'wrong words.')))
         check = reading_of(take)
         if check is not None and reading.differences(check):
             count = reading.differences(check)
-            advice.append(Advice('reading', f'{count} place{"s" if count != 1 else ""} in the reading '
-                                            f'{"differ" if count != 1 else "differs"} from the script. Listen before you '
-                                            'keep this take.'))
+            advice.append(Advice('reading', tr('{count} place in the reading differs from the script. Listen before you keep '
+                                               'this take.' if count == 1 else
+                                               '{count} places in the reading differ from the script. Listen before you '
+                                               'keep this take.').format(count=count)))
         if take.history.chain['denoise']['enabled']:
-            advice.append(Advice('denoise', 'Noise cleaning is on. Listen to the result: the voice identity is not '
-                                            'checked.'))
+            advice.append(Advice('denoise', tr('Noise reduction is on. Listen to the result: the voice identity is not '
+                                               'checked.')))
         return advice
 
     # ---- keeping and discarding ---------------------------------------------------------------------------------------

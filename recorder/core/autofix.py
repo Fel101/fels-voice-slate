@@ -8,7 +8,8 @@ rather than guessed. Noise cleaning can change how a voice sounds, so it is used
 the noise that clip actually has, and dropped if it takes too much of the voice along with the noise. Applied to the
 take, the whole plan is one undo step.
 
-`diagnose` takes the recipe and a function that renders it. Nothing here touches a file or a window.
+`diagnose` takes the recipe and a function that renders it. Nothing here touches a file or a window; what it says is in the
+window's language (i18n needs no toolkit).
 """
 from collections import namedtuple
 from types import SimpleNamespace
@@ -17,6 +18,7 @@ import numpy as np
 from scipy.signal import welch
 
 from .. import audio_core as ac
+from ..i18n import tr
 from . import analysis
 from . import chain as chain_mod
 from . import render
@@ -65,7 +67,8 @@ class Diagnosis:
 
     @property
     def label(self):
-        return f'Auto fix ({len(self.steps)} step{"" if len(self.steps) == 1 else "s"})'
+        return tr('Auto fix ({count} step)' if len(self.steps) == 1 else 'Auto fix ({count} steps)').format(
+            count=len(self.steps))
 
     @property
     def changes(self):
@@ -81,7 +84,7 @@ class Diagnosis:
                 out.append(Change(row.label, old.value, row.value, rank[row.status] <= rank[old.status]))
         before, after = self.snr
         if after - before >= SNR_SHOWN:
-            out.append(Change('Speech above the noise', f'{before:.0f} dB', f'{after:.0f} dB', True))
+            out.append(Change(tr('Speech above the noise'), f'{before:.0f} dB', f'{after:.0f} dB', True))
         return out
 
 
@@ -199,14 +202,16 @@ def _filters(plan, look, x, before_level):
     chain = plan.history.chain
     wanted = {}                     # finding key -> (chain change, what it does)
     if look.rumble > RUMBLE_LIMIT and not chain['highpass']['enabled']:
-        wanted['rumble'] = ({'highpass': {'enabled': True, 'hz': HIGHPASS_HZ}}, f'High-pass filter at {HIGHPASS_HZ:.0f} Hz')
+        wanted['rumble'] = ({'highpass': {'enabled': True, 'hz': HIGHPASS_HZ}},
+                            tr('High-pass filter at {hz} Hz').format(hz=f'{HIGHPASS_HZ:.0f}'))
     if look.hum is not None:
         hz = float(look.hum[0])
         if not (chain['hum']['enabled'] and round(chain['hum']['hz']) == round(hz)):
-            wanted['hum'] = ({'hum': {'enabled': True, 'hz': hz}}, f'{hz:.0f} Hz hum filter')
+            wanted['hum'] = ({'hum': {'enabled': True, 'hz': hz}}, tr('{hz} Hz hum filter').format(hz=f'{hz:.0f}'))
     if wanted:
         merged = {section: values for change, _ in wanted.values() for section, values in change.items()}
-        what = ' and '.join(text for _, text in wanted.values())
+        texts = [text for _, text in wanted.values()]
+        what = texts[0] if len(texts) == 1 else tr('{first} and {second}').format(first=texts[0], second=texts[1])
         if plan.add(list(wanted), what, chain=merged):
             return before_level(_snapshot(plan.history))
     return x
@@ -218,7 +223,7 @@ def _denoise(plan, x, rate, before_level, denoise_ok):
     if plan.snr >= SNR_NOISY or plan.history.chain['denoise']['enabled']:
         return x
     if not denoise_ok:
-        plan.skipped['noise'] = 'FFmpeg was not found, and noise reduction needs it'
+        plan.skipped['noise'] = tr('FFmpeg was not found, and noise reduction needs it')
         return x
     nf = noise_setting(analysis.noise_floor_db(x, rate))
     setting = {'denoise': {'enabled': True, 'nf': nf}}
@@ -228,12 +233,12 @@ def _denoise(plan, x, rate, before_level, denoise_ok):
         plan.skipped['noise'] = str(e)
         return x
     if _snr(cleaned, rate) - plan.snr < NOISE_MIN_GAIN:
-        plan.skipped['noise'] = 'noise cleaning did not lower it enough to be worth the change to the voice'
+        plan.skipped['noise'] = tr('noise reduction did not lower it enough to be worth the change to the voice')
         return x
     if analysis.voice_loss_db(x, cleaned, rate) > VOICE_LOSS_LIMIT:
-        plan.skipped['noise'] = 'noise cleaning would take too much of the voice along with the noise'
+        plan.skipped['noise'] = tr('noise reduction would take too much of the voice along with the noise')
         return x
-    plan.add(['noise'], f'Noise reduction (noise floor {nf:.0f} dB)', chain=setting)
+    plan.add(['noise'], tr('Noise reduction (noise floor {floor} dB)').format(floor=f'{nf:.0f}'), chain=setting)
     return cleaned
 
 
@@ -253,9 +258,10 @@ def _trim(plan, master, rate, x, before_level):
         if not ranges:
             break
         if not _fits(look.seconds, ranges, plan.rules):
-            plan.skipped['ends'] = f'the clip would be left shorter than {plan.rules.min_seconds:g} s'
+            plan.skipped['ends'] = tr('the clip would be left shorter than {seconds} s').format(
+                seconds=f'{plan.rules.min_seconds:g}')
             break
-        if not plan.add(['ends'], 'Trim the silence at the ends', ops=_cut_ops(master, rate, plan.history, ranges)):
+        if not plan.add(['ends'], tr('Trim the silence at the ends'), ops=_cut_ops(master, rate, plan.history, ranges)):
             break
         x = before_level(_snapshot(plan.history))
         look = _look(x, rate)
@@ -269,8 +275,9 @@ def _shorten(plan, master, rate, x, before_level):
     if not ranges:
         return x
     if not _fits(len(x) / rate, ranges, plan.rules):
-        plan.skipped['pauses'] = f'the clip would be left shorter than {plan.rules.min_seconds:g} s'
-    elif plan.add(['pauses'], 'Shorten the long pauses', ops=_cut_ops(master, rate, plan.history, ranges)):
+        plan.skipped['pauses'] = tr('the clip would be left shorter than {seconds} s').format(
+            seconds=f'{plan.rules.min_seconds:g}')
+    elif plan.add(['pauses'], tr('Shorten the long pauses'), ops=_cut_ops(master, rate, plan.history, ranges)):
         return before_level(_snapshot(plan.history))
     return x
 
@@ -282,13 +289,13 @@ def _level(plan, x, rate):
     if abs(speech - ac.TARGET_VOICED_DB) > LEVEL_TOLERANCE:
         low, high = chain_mod.LIMITS[('level', 'gain_db')]
         gain = min(max(ac.normalize_gain_db(x, rate, cap_peak=False), low), high)
-        change, text = {'level': {'gain_db': gain}}, f'Level {gain:+.1f} dB'
-        if not plan.history.chain['limiter']['enabled']:
+        change, limit = {'level': {'gain_db': gain}}, not plan.history.chain['limiter']['enabled']
+        if limit:
             change['limiter'] = {'enabled': True}
-            text += ' with the peak limiter'
+        text = tr('Level {gain} dB with the peak limiter' if limit else 'Level {gain} dB').format(gain=f'{gain:+.1f}')
         plan.add(['level', 'peak'], text, chain=change)
     elif peak > PEAK_CEILING and not plan.history.chain['limiter']['enabled']:
-        plan.add(['peak'], 'Peak limiter', chain={'limiter': {'enabled': True}})
+        plan.add(['peak'], tr('Peak limiter'), chain={'limiter': {'enabled': True}})
 
 
 def _repair(master, rate, history, before_level, denoise_ok, look, rules, out_rate):
@@ -315,63 +322,72 @@ def _findings(look, plan, out, final, recorded):
     def add(key, status, title, detail):
         fix = plan.done.get(key, '')
         if not fix and key in plan.skipped:
-            detail += f' Not fixed: {plan.skipped[key]}.'
+            detail += ' ' + tr('Not fixed: {reason}.').format(reason=plan.skipped[key])
         found.append(Finding(key, status, title, detail, fix))
 
     seconds, rules = out.stats['seconds'], plan.rules
+    length = {'seconds': f'{seconds:.1f}', 'low': f'{rules.min_seconds:g}', 'high': f'{rules.max_seconds:g}',
+              'start': f'{rules.best_from:g}', 'end': f'{rules.best_to:g}'}
     if seconds < rules.min_seconds:
-        add('length', 'bad', 'Too short', f'{seconds:.1f} s long. A kept clip needs {rules.min_seconds:g} to '
-            f'{rules.max_seconds:g} s, and Auto fix cannot add speech. Record more.')
+        add('length', 'bad', tr('Too short'), tr('{seconds} s long. A kept clip needs {low} to {high} s, and Auto fix cannot '
+                                             'add speech. Record more.').format(**length))
     elif seconds > rules.max_seconds:
-        add('length', 'bad', 'Too long', f'{seconds:.1f} s long. A kept clip can be at most {rules.max_seconds:g} s. '
-            'Select the part you want and use Trim to selection, or split the take at its pauses.')
+        add('length', 'bad', tr('Too long'), tr('{seconds} s long. A kept clip can be at most {high} s. Select the part you '
+                                            'want and use Trim to selection, or split the take at its pauses.').format(**length))
     elif seconds > rules.best_to:
-        add('length', 'warn', 'Long clip', f'{seconds:.1f} s long. That is fine up to {rules.max_seconds:g} s, but '
-            f'{rules.best_from:g} to {rules.best_to:g} s works best.')
+        add('length', 'warn', tr('Long clip'), tr('{seconds} s long. That is fine up to {high} s, but {start} to {end} s '
+                                              'works best.').format(**length))
     clipped = max(out.stats['clipped_fraction'], recorded)
     if clipped > 0.001:
-        add('clipping', 'bad', 'Clipping', f'{clipped * 100:.2f}% of the samples reach full scale. Clipping cannot be '
-            'repaired, and gain or the limiter only hide it: lower the microphone level and record again.')
+        add('clipping', 'bad', tr('Clipping'), tr('{percent}% of the samples reach full scale. Clipping cannot be repaired, and '
+                                              'gain or the limiter only hide it: lower the microphone level and record '
+                                              'again.').format(percent=f'{clipped * 100:.2f}'))
     if look.rumble > RUMBLE_LIMIT:
-        detail = f'There is a lot of energy under 60 Hz ({look.rumble:.0f} dB against the speech). Speech has almost ' \
-                 'none there: it is rumble, handling noise or music.'
-        add('rumble', 'warn', 'Low-frequency rumble', detail + (' The high-pass filter is already on.'
+        detail = tr('There is a lot of energy under 60 Hz ({db} dB against the speech). Speech has almost none there: it '
+                    'is rumble, handling noise or music.').format(db=f'{look.rumble:.0f}')
+        add('rumble', 'warn', tr('Low-frequency rumble'), detail + (' ' + tr('The high-pass filter is already on.')
                                                                if plan.start['highpass']['enabled'] else ''))
     if look.hum is not None:
-        detail = f'{look.hum[0]:.0f} Hz hum, {look.hum[1]:.0f} dB above its surroundings.'
-        add('hum', 'warn', 'Mains hum', detail + (' The hum filter is already on, but some hum is left.'
+        detail = tr('{hz} Hz hum, {db} dB above its surroundings.').format(hz=f'{look.hum[0]:.0f}', db=f'{look.hum[1]:.0f}')
+        add('hum', 'warn', tr('Mains hum'), detail + (' ' + tr('The hum filter is already on, but some hum is left.')
                                                   if plan.start['hum']['enabled'] and 'hum' not in plan.done else ''))
     if plan.snr < SNR_CLEAN:
-        detail = f'The speech is {plan.snr:.0f} dB above the noise; {SNR_CLEAN:.0f} dB or more is clean.'
+        detail = tr('The speech is {snr} dB above the noise; {clean} dB or more is clean.').format(
+            snr=f'{plan.snr:.0f}', clean=f'{SNR_CLEAN:.0f}')
         if plan.start['denoise']['enabled']:
-            detail += ' Noise reduction is already on.'
+            detail += ' ' + tr('Noise reduction is already on.')
         elif plan.snr >= SNR_NOISY:
-            detail += ' Noise reduction on the Process tab can help, but it can change the voice, so Auto fix leaves ' \
-                      'that to you.'
-        add('noise', 'bad' if plan.snr < SNR_NOISY else 'warn', 'Background noise', detail)
+            detail += ' ' + tr('Noise reduction on the Process tab can help, but it can change the voice, so Auto fix '
+                               'leaves that to you.')
+        add('noise', 'bad' if plan.snr < SNR_NOISY else 'warn', tr('Background noise'), detail)
     if cleaned.lead > EDGE_LIMIT or cleaned.tail > EDGE_LIMIT:
-        filtered = ' (measured with the filters on)' if 'rumble' in plan.done or 'hum' in plan.done else ''
-        add('ends', 'warn', 'Long silence at the ends',
-            f'{cleaned.lead:.1f} s before the first word and {cleaned.tail:.1f} s after the last{filtered}.')
+        filtered = 'rumble' in plan.done or 'hum' in plan.done
+        add('ends', 'warn', tr('Long silence at the ends'),
+            tr('{before} s before the first word and {after} s after the last (measured with the filters on).' if filtered
+               else '{before} s before the first word and {after} s after the last.').format(
+                before=f'{cleaned.lead:.1f}', after=f'{cleaned.tail:.1f}'))
     if cleaned.pauses:
         longest = max(b - a for a, b in cleaned.pauses)
-        add('pauses', 'warn', 'Long pauses', f'{len(cleaned.pauses)} pause{"" if len(cleaned.pauses) == 1 else "s"} '
-            f'longer than {PAUSE_LIMIT:.1f} s (the longest is {longest:.1f} s).')
+        add('pauses', 'warn', tr('Long pauses'),
+            tr('{count} pause longer than {limit} s (the longest is {longest} s).' if len(cleaned.pauses) == 1 else
+               '{count} pauses longer than {limit} s (the longest is {longest} s).').format(
+                count=len(cleaned.pauses), limit=f'{PAUSE_LIMIT:.1f}', longest=f'{longest:.1f}'))
     off = abs(out.speech - ac.TARGET_VOICED_DB)
     if off > LEVEL_TOLERANCE:
-        add('level', 'bad' if off > 8 else 'warn', 'Speech level',
-            f'The speech is at {out.speech:.1f} dB; the target is {ac.TARGET_VOICED_DB:.0f} dB.')
+        add('level', 'bad' if off > 8 else 'warn', tr('Speech level'),
+            tr('The speech is at {speech} dB; the target is {target} dB.').format(
+                speech=f'{out.speech:.1f}', target=f'{ac.TARGET_VOICED_DB:.0f}'))
     elif out.stats['peak_dbfs'] > PEAK_CEILING:
-        add('peak', 'warn', 'Peaks too high', f"The loudest peak is {out.stats['peak_dbfs']:.1f} dBFS, which leaves "
-            'no headroom.')
+        add('peak', 'warn', tr('Peaks too high'), tr('The loudest peak is {peak} dBFS, which leaves no headroom.').format(
+            peak=f"{out.stats['peak_dbfs']:.1f}"))
     if 0 < out.band < NARROW_HZ:
-        add('bandwidth', 'warn', 'Narrow bandwidth', f'The speech stops at {out.band / 1000:.1f} kHz, like a phone '
-            'call. This cannot be fixed.')
+        add('bandwidth', 'warn', tr('Narrow bandwidth'), tr('The speech stops at {khz} kHz, like a phone call. This cannot be '
+                                                        'fixed.').format(khz=f'{out.band / 1000:.1f}'))
     if final.stats['silence_fraction'] > ac.MOSTLY_SILENT:
-        add('silence', 'warn', 'Mostly pauses', f"{final.stats['silence_fraction'] * 100:.0f}% of the clip is pauses, "
-            'which leaves little speech.')
+        add('silence', 'warn', tr('Mostly pauses'), tr('{percent}% of the clip is pauses, which leaves little speech.').format(
+            percent=f"{final.stats['silence_fraction'] * 100:.0f}"))
     if not found:
-        found.append(Finding('ok', 'ok', 'Nothing to fix', 'Every check passes.', ''))
+        found.append(Finding('ok', 'ok', tr('Nothing to fix'), tr('Every check passes.'), ''))
     return sorted(found, key=lambda f: {'bad': 0, 'warn': 1, 'ok': 2}[f.status])
 
 
@@ -396,8 +412,8 @@ def diagnose(master, rate, history, before_level, denoise_ok=True, purpose=None,
     recorded = render.recorded_clipping(master, rate, history, mono)['recording_clipped_fraction']
     before = report(here, recorded)
     if look.speech < NO_SPEECH_DB:
-        finding = Finding('speech', 'bad', 'No speech found', 'The clip is silent, or too quiet to measure. There is '
-                          'nothing to fix.', '')
+        finding = Finding('speech', 'bad', tr('No speech found'), tr('The clip is silent, or too quiet to measure. There is '
+                                                                    'nothing to fix.'), '')
         return Diagnosis([finding], [], {}, [], before, before)
 
     plan = _repair(mono, rate, history, before_level, denoise_ok, look, rules, out_rate)

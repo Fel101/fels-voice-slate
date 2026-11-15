@@ -48,6 +48,7 @@ from .core import chain as chain_mod
 from .core import render
 from .core.edits import History, validate_edits, words_key
 from .core.reading import clean_words
+from .i18n import tr
 from .settings import APP_NAME, default_root, holds_recordings
 
 SCHEMA = 'voice-recorder-clip-v2'
@@ -1069,8 +1070,8 @@ class Library:
     def release_problem(self, slug, today=None):
         """Why clips of this speaker cannot be kept because of their release, or ''."""
         state, date = self.release_ends(slug, today)
-        return (f'The release for this voice ran out on {date}. Renew it, and put the new one in Speaker details.'
-                if state == 'over' else '')
+        return (tr('The release for this voice ran out on {date}. Renew it, and put the new one in Speaker details.').format(
+            date=date) if state == 'over' else '')
 
     # ---- deleting a speaker -----------------------------------------------------------------------------------------------
 
@@ -1470,7 +1471,7 @@ class Library:
         only once both files are in place, so a Keep that fails leaves it as it was, still being autosaved.
         """
         if take.needs_transcript_review:
-            raise KeepBlocked(['Confirm that the transcript still matches the words kept after the cuts.'])
+            raise KeepBlocked([tr('Confirm that the transcript still matches the words kept after the cuts.')])
         export = self.export_for(take)
         stats = self.stats_for(take, export)
         purpose = take.purpose

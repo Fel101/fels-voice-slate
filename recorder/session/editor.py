@@ -293,8 +293,8 @@ class Editor:
             if not history.add_step(diagnosis.ops, diagnosis.chain, diagnosis.label):
                 raise ValueError('Auto fix has nothing to change.')
 
-        return self._apply(run, f'{diagnosis.label} done. Undo takes all of it back in one step. '
-                                'The original recording is unchanged.')
+        return self._apply(run, tr('{name} done. Undo takes all of it back in one step. The original recording is '
+                                   'unchanged.').format(name=diagnosis.label))
 
     # ---- history ------------------------------------------------------------------------------------------------------
 
