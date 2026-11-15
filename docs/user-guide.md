@@ -446,6 +446,32 @@ The noise floor is read from the quietest stretch of the clip (the quietest tent
 second, whichever is lower), so a take needs at least a short pause to be measured. Cutting the pauses short does not
 make the clip look noisier.
 
+### Audiobook delivery
+
+For an **Audition**, the end of the Check tab also measures the clip against the limits ACX gives for every file of an
+audiobook, in its [audio submission requirements](https://help.acx.com/s/article/what-are-the-acx-audio-submission-requirements)
+(the version of April 2026). Other audiobook sellers ask for much the same.
+
+| | ACX asks for | Measured here as |
+|---|---|---|
+| **Level (RMS)** | -23 to -18 dB RMS | the RMS level of the whole clip, its pauses included |
+| **Peak** | no higher than -3 dB | the highest sample |
+| **Noise floor** | no higher than -60 dB RMS | the RMS level of the quietest half second |
+
+Each row says what to change in **Process** when a limit is not met. It is advice for an audiobook, not a rule here: it
+never stops you keeping the clip. A few things to know:
+
+- The level is not the **Speech level** above it. Normalize puts the voiced parts at -20 dB, and the pauses bring the whole
+  clip lower, often to about -23 dB. Move the **Level** slider until the row is green.
+- For the peak, turn on the **Peak limiter** with its ceiling at -3.5 dB: a little under ACX's figure, because an MP3 made
+  from the clip can peak a little higher.
+- Raising the level raises the noise floor with it. If both cannot be met, the room is too noisy for an audiobook; **Noise
+  reduction** helps, and a quieter room helps most.
+- ACX does not say how it measures the noise floor. A part you silenced is left out, because digital silence is not the
+  sound of your room.
+- ACX also wants each file as an MP3 at 192 kbit/s or more, at 44.1 kHz, with 1 to 5 seconds of room tone at each end.
+  **Save a copy** makes MP3s at 128 kbit/s, so make the file you deliver in your audio editor.
+
 ## Auto analyze and Auto fix
 
 ![Auto analyze on the Check tab](images/analyze.png)

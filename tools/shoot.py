@@ -26,7 +26,7 @@ DIALOGS = ('settings', 'about', 'shortcuts', 'copy', 'manifest', 'dataset', 'spe
            'roomcheck', 'roomspeak')
 RUN = ('countin', 'runlisten', 'runheard')
 # drawn only when asked for with --only, to look at a state the documents do not show
-CHECKS = ['unreachable', 'runlisten', 'runheard', 'roomspeak']
+CHECKS = ['unreachable', 'runlisten', 'runheard', 'roomspeak', 'delivery']
 SAMPLE = ('The morning ferry left the harbour just as the fog began to lift from the water, and the gulls followed '
           'it out past the lighthouse.')
 SCRIPT = ('The morning ferry left the harbour just as the fog began to lift.\n'
@@ -260,7 +260,8 @@ def save_picture(widget, path, scale):
     print('wrote', path)
 
 
-def render(window, app, path, size, scale):
+def render(window, app, path, size, scale, before=None):
+    """`before` runs once the window has its size, just before the picture is taken: to scroll, say."""
     from PySide6.QtCore import Qt
     window.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)
     window.resize(*size)
@@ -268,7 +269,16 @@ def render(window, app, path, size, scale):
     for _ in range(6):
         app.processEvents()
     settle(app, window.session)                  # the outlines in the list are asked for as the rows are first drawn
+    if before is not None:
+        before()
+        app.processEvents()
     save_picture(window, path, scale)
+
+
+def scroll_to_end(window):
+    """The inspector's page scrolled to its end."""
+    bar = window.inspector.pages.currentWidget().verticalScrollBar()
+    bar.setValue(bar.maximum())
 
 
 def main():
@@ -333,6 +343,8 @@ def main():
                 render(window, app, out / f'{state}.png', size, args.scale)
                 window.close()
                 continue
+            if state == 'delivery':                     # an Audition, so the Check tab also measures it against ACX
+                session.workspace.set_purpose('audition')
             seed(session, rough=state == 'analyze')
             window = make_window(app, session)
             window.flush()
@@ -367,9 +379,10 @@ def main():
                     window.flush()
                     measure(app, window)
                     window.inspector.show_tab(1)
-                elif state == 'check':
+                elif state in ('check', 'delivery'):
                     window.inspector.show_tab(2)
-                render(window, app, out / f'{state}.png', (1100, 640) if state == 'compact' else size, args.scale)
+                render(window, app, out / f'{state}.png', (1100, 640) if state == 'compact' else size, args.scale,
+                       before=(lambda: scroll_to_end(window)) if state == 'delivery' else None)    # down to the ACX rows
             window.timer.stop()
             window.close()
     finally:

@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QFrame, QLabel, QLineEdit, 
 
 from .. import audio_core as ac
 from .. import clean
+from ..core import analysis
 from ..core import chain as chain_mod
 from ..core import reading
 from ..i18n import tr
@@ -395,6 +396,38 @@ class ProcessPage(QWidget):
 
 STATUS_COLOURS = {'ok': 'green', 'warn': 'amber', 'bad': 'red', 'info': 'muted'}
 STATUS_WORDS = {'ok': 'Good', 'warn': 'Worth a look', 'bad': 'Problem', 'info': 'Note'}       # what a coloured dot means, read out
+ACX_CEILING_DB = -3.5           # the limiter ceiling to suggest: under ACX's -3 dB, as an MP3 made from the clip can peak higher
+
+
+def delivery_rows(delivery):
+    """The Check rows of an Audition against ACX's limits for an audiobook (analysis.Delivery), in the language in use.
+    A limit that is not met is worth a look and never a problem: it is advice, and Keep does not ask for it."""
+    low, high = analysis.ACX_RMS_DB
+    level = tr('ACX asks for {low} to {high} dB RMS, measured over the whole file with its pauses.').format(
+        low=f'{low:g}', high=f'{high:g}')
+    if not delivery.level_ok:
+        gain = f'{abs((low + high) / 2 - delivery.rms_db):.1f}'
+        level += ' ' + (tr('Raise the Level in Process by about {gain} dB to reach the middle of that range.')
+                        if delivery.rms_db < low else
+                        tr('Lower the Level in Process by about {gain} dB to reach the middle of that range.')).format(gain=gain)
+    peak = tr('ACX asks for peaks no higher than {peak} dB.').format(peak=f'{analysis.ACX_PEAK_DB:g}')
+    if not delivery.peak_ok:
+        peak += ' ' + tr('Turn on the Peak limiter in Process with its ceiling at {ceiling} dB: a little lower, because an '
+                         'MP3 made from the clip can peak higher.').format(ceiling=f'{ACX_CEILING_DB:g}')
+    noise = tr('ACX asks for a noise floor no higher than {noise} dB RMS. Here it is the quietest half second of the '
+               'clip.').format(noise=f'{analysis.ACX_NOISE_DB:g}')
+    if delivery.noise_db is None:
+        noise += ' ' + tr('The clip has no half second without digital silence to read it from.')
+    elif not delivery.noise_ok:
+        noise += ' ' + tr('Noise reduction in Process lowers it, and so does less gain. A quieter room lowers it most.')
+    return [
+        analysis.Check('acx_level', tr('Level (RMS)'), f'{delivery.rms_db:.1f} dB RMS',
+                       'ok' if delivery.level_ok else 'warn', level),
+        analysis.Check('acx_peak', tr('Peak'), f'{delivery.peak_db:.1f} dBFS', 'ok' if delivery.peak_ok else 'warn', peak),
+        analysis.Check('acx_noise', tr('Noise floor'),
+                       tr('not measured') if delivery.noise_db is None else f'{delivery.noise_db:.1f} dB RMS',
+                       'info' if delivery.noise_db is None else 'ok' if delivery.noise_ok else 'warn', noise),
+    ]
 
 
 class AutoCard(QFrame):
@@ -561,6 +594,12 @@ class CheckPage(QWidget):
         else:
             for row in derived.report:
                 self.rows.addWidget(self._row(row))
+            if derived.delivery is not None:
+                self.rows.addWidget(caption('Audiobook delivery (ACX)'))
+                self.rows.addWidget(label('Advice for an audiobook: the limits ACX gives in its audio submission '
+                                          'requirements (help.acx.com, April 2026). They never stop Keep.', 'muted', wrap=True))
+                for row in delivery_rows(derived.delivery):
+                    self.rows.addWidget(self._row(row))
 
     @staticmethod
     def _row(row):

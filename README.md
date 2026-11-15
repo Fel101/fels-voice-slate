@@ -39,7 +39,8 @@ what is in it and whether you had the right to record it.
 - **Process** the whole take: high-pass filter, mains-hum notch (50 or 60 Hz), noise reduction (optional, needs
   FFmpeg), a Normalize button that sets the speech to -20 dB, and a peak limiter.
 - **Check** the clip as it will be saved: length, speech level, peak, clipping, loudness, noise floor, bandwidth, hum and
-  silence, each with a verdict and a short explanation.
+  silence, each with a verdict and a short explanation. An Audition is also measured against ACX's limits for an
+  audiobook file.
 - **Auto analyze and Auto fix**: one button looks at the take and says in plain words what could be better (long
   silences, hum, rumble, noise, a quiet voice, clipping); the other repairs what can be repaired safely, in one step
   that Undo takes back. Noise reduction, which can change the voice, is only used on a clearly noisy clip, set from the

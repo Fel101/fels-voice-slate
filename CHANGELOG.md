@@ -45,6 +45,10 @@ the project uses [Semantic Versioning](https://semver.org/).
   backup...** copies one into an output folder that has no recordings yet and checks each file against that list. Both are
   long jobs with progress and **Stop**, and one that stops or fails removes what it copied. The user guide says how to move
   to another PC.
+- **An audiobook delivery check.** For an Audition, the Check tab also measures the clip against the limits in ACX's audio
+  submission requirements (April 2026): -23 to -18 dB RMS over the whole file, peaks no higher than -3 dB, and a noise floor
+  no higher than -60 dB RMS. Each row says what to change in Process when a limit is not met. It is advice, and never stops
+  Keep.
 
 ### Changed
 

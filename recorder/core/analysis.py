@@ -5,6 +5,7 @@
 - loudness_lufs, noise_floor_db, snr_db, bandwidth_hz, detect_hum, edge_silence: the quality checks.
 - silent_runs and the two range finders behind Auto-trim and Shorten pauses.
 - quality_report: the rows of the Check tab.
+- delivery: an Audition measured against the limits ACX gives for an audiobook file.
 """
 import math
 from collections import namedtuple
@@ -545,6 +546,58 @@ def quality_report(x, rate=ac.EXPORT_RATE, recorded_clipped=0.0, purpose=None):
               'More than 40% pauses leaves little speech.'),
     ]
     return rows
+
+
+# ---- audiobook delivery -----------------------------------------------------------------------------------------------
+
+# The limits ACX gives for every file of an audiobook, in "ACX audio submission requirements" on help.acx.com (the
+# version of 15 April 2026). ACX does not say how it measures the noise floor; here it is the quietest half second.
+ACX_SOURCE = 'ACX audio submission requirements, help.acx.com, April 2026'
+ACX_RMS_DB = (-23.0, -18.0)     # the RMS level of the whole file, pauses included
+ACX_PEAK_DB = -3.0              # no sample above this
+ACX_NOISE_DB = -60.0            # the noise floor, as an RMS level
+NOISE_WINDOW_SECONDS = 0.5
+DIGITAL_SILENCE_DB = -110.0     # a frame this quiet holds nothing at all: a pause cut to silence is not the room's noise
+
+
+def quietest_db(x, rate, seconds=NOISE_WINDOW_SECONDS, energy=None):
+    """The RMS level of the quietest stretch of `seconds` in the clip, or None when it has no such stretch free of
+    digital silence."""
+    energy = ac.frame_energy(x, rate) if energy is None else energy
+    width = max(1, int(round(seconds / ac.FRAME_SECONDS)))
+    if len(energy) < width:
+        return None
+    total = np.concatenate([[0.0], np.cumsum(energy)])
+    silent = np.concatenate([[0], np.cumsum(ac.energy_db(energy) <= DIGITAL_SILENCE_DB)])
+    means = (total[width:] - total[:-width]) / width
+    means = means[(silent[width:] - silent[:-width]) == 0]
+    if not means.size:
+        return None
+    return round(10.0 * math.log10(max(float(means.min()), 1e-24)), 1)
+
+
+class Delivery(namedtuple('Delivery', 'rms_db peak_db noise_db')):
+    """A clip measured against ACX_RMS_DB, ACX_PEAK_DB and ACX_NOISE_DB, each value rounded as the Check tab shows it, so
+    that what it shows and what it says agree. `noise_db` is None when there is nothing to read it from."""
+
+    @property
+    def level_ok(self):
+        return ACX_RMS_DB[0] <= self.rms_db <= ACX_RMS_DB[1]
+
+    @property
+    def peak_ok(self):
+        return self.peak_db <= ACX_PEAK_DB
+
+    @property
+    def noise_ok(self):
+        return self.noise_db is not None and self.noise_db <= ACX_NOISE_DB
+
+
+def delivery(x, rate, stats=None, energy=None):
+    """`x` measured as ACX measures an audiobook file. `stats` is ac.measure of it, when it has been worked out already."""
+    energy = ac.frame_energy(x, rate) if energy is None else energy
+    stats = ac.measure(x, rate, energy) if stats is None else stats
+    return Delivery(round(stats['rms_dbfs'], 1), round(stats['peak_dbfs'], 1), quietest_db(x, rate, energy=energy))
 
 
 # ---- the room and the level, before a session -------------------------------------------------------------------------

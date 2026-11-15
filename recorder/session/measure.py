@@ -2,7 +2,7 @@
 
 `derived(take)` returns the measurement of the take as it is now, or None while it is being computed. The result
 holds the statistics the keep rules judge (the export's, and the clipping in the recording behind it), the rows of the
-Check tab and the processed clip's length.
+Check tab and the processed clip's length, and for an Audition how it stands against ACX's limits for an audiobook.
 The spectrogram is the master's, so it does not change with the recipe.
 """
 import copy
@@ -12,7 +12,7 @@ from types import SimpleNamespace
 
 from ..core import analysis
 
-Derived = namedtuple('Derived', 'key stats report error')
+Derived = namedtuple('Derived', 'key stats report error delivery', defaults=(None,))
 THUMB_COLUMNS = 90
 PYRAMID_AT_ONCE = 1 << 24       # samples (about six minutes at 48 kHz): a longer take's peak pyramid is built in the background
 
@@ -53,7 +53,8 @@ class Measurements:
                 export = lib.export_for(take, recipe)
                 stats = lib.stats_for(take, export, recipe)
                 report = analysis.quality_report(export, take.export_rate, stats['recording_clipped_fraction'], take.purpose)
-                return Derived(key, stats, report, '')
+                delivery = analysis.delivery(export, take.export_rate, stats) if take.purpose.key == 'audition' else None
+                return Derived(key, stats, report, '', delivery)
 
             def done(result):
                 if take.cache.get('derived_requested') == key:      # a result for a recipe since changed is dropped
