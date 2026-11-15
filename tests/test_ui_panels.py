@@ -156,6 +156,48 @@ def test_a_refused_speaker_change_during_a_recording_does_not_lock_the_picker(wi
     assert window.library.speakers.isEnabled() and window.library.add_speaker.isEnabled()
 
 
+def keep_card_is_laid_out(card):
+    """Every line of the Keep card is shown, with the height its words need, in a card as tall as they make it."""
+    from PySide6.QtWidgets import QLabel
+    lines = [item for item in card.findChildren(QLabel) if item.wordWrap()]
+    return (bool(lines) and all(item.isVisible() and item.height() >= item.heightForWidth(item.width()) for item in lines)
+            and card.height() >= card.heightForWidth(card.width()))
+
+
+def test_the_keep_card_is_laid_out_as_soon_as_a_take_opens_after_stop(qapp, window, session, open_fake, clock):
+    """Qt shows a card's new lines, lays out the card, then the panel around it, each at a later turn of the event loop, and
+    the real window drew frames in between for about 80 ms after Stop: the permission statement had 26 of the 48 pixels it
+    needs, so its first and last lines were cut, and the lines above it had 1 to 4. They are now laid out at once."""
+    for _ in range(2):
+        session.capturing.start()
+        window.flush()
+        ui_helpers.pump(qapp)
+        session.capturing.stop()
+        clock.advance(1.0)                              # the stop tail passes, the take is saved and opens
+        window._tick()
+        window.flush()                                  # and no turn of the event loop before looking
+        assert keep_card_is_laid_out(window.inspector.ready)
+        ui_helpers.pump(qapp)
+    assert len(session.workspace.takes) == 2
+
+
+def test_the_keep_card_is_laid_out_as_soon_as_its_lines_change(qapp, window, session):
+    """A kept take edited: Measuring the clip..., the transcript to check and a note join the card's lines."""
+    record(session, 12.0)
+    window.flush()
+    session.jobs.drain()
+    window.flush()
+    fill(session)
+    session.keep()
+    session.jobs.drain()
+    window.flush()
+    ui_helpers.pump(qapp)
+    session.editor.set_selection(1.0, 1.5)
+    session.editor.cut_selection()
+    window.flush()
+    assert keep_card_is_laid_out(window.inspector.ready)
+
+
 def test_the_live_card_shows_what_has_been_recorded_so_far(window, session, open_fake, clock):
     session.capturing.start()
     window.flush()
@@ -179,6 +221,16 @@ def test_when_describes_a_take_by_day():
     assert library.when(yesterday, now) == 'Yesterday 21:07'
     assert library.when(older, now) == 'Oct 11 09:30'
     assert library.when('not a date', now) == '' and library.when(None, now) == ''
+
+
+def test_a_line_too_wide_for_a_take_card_is_taken_in_then_cut_with_an_ellipsis(qapp):
+    """Only a take's own label was cut with "…"; anything else ran off the edge of the card, "Syst" for "Système"."""
+    from recorder.ui import theme
+    font, fit = theme.ui_font(11), library.TakeDelegate.fit
+    assert fit('Today 09:05  ·  Mic', font, 118) == 'Today 09:05  ·  Mic'                       # as it is when it fits
+    assert fit('Yesterday 23:59  ·  System', font, 118) == 'Yesterday 23:59 · System'           # its dots taken in
+    cut = fit("Aujourd'hui 01:10  ·  Système", font, 90)
+    assert cut.endswith('…') and len(cut) < len("Aujourd'hui 01:10 · Système")
 
 
 def test_a_live_outline_has_a_fixed_number_of_columns():
@@ -296,7 +348,7 @@ def test_suggest_does_not_ask_before_replacing_the_recognizers_own_text_or_nothi
 def test_the_clip_page_shows_a_draft_on_its_way_and_waits_for_it(window, session, monkeypatch):
     held = []
     monkeypatch.setattr(transcript, 'available', lambda python, model: True)
-    monkeypatch.setattr(session.jobs, 'submit', lambda fn, done, error=None: held.append((fn, done, error)))
+    monkeypatch.setattr(session.jobs, 'submit', lambda fn, done, error=None, **where: held.append((fn, done, error)))
     monkeypatch.setattr(transcript, 'suggest', lambda *a: {'text': 'Words from the audio.'})
     take = record(session, 12.0)
     window.flush()
@@ -424,7 +476,7 @@ def test_the_history_lists_every_step_and_clicking_one_goes_back_to_it(window, s
     session.editor.silence_selection()
     window.flush()
     page = window.inspector.process
-    assert page.history.count() == 3 and page.history.item(0).text() == 'Start' and page.history.currentRow() == 2
+    assert page.history.count() == 3 and page.history.item(0).text() == 'Beginning' and page.history.currentRow() == 2
     page.history.itemClicked.emit(page.history.item(1))
     window.flush()
     assert len(take.history.edits) == 1 and page.history.currentRow() == 1
@@ -564,7 +616,7 @@ def test_while_recording_the_inspector_says_where_the_take_comes_from(window, se
 def test_the_top_bar_lists_the_devices_and_explains_when_there_are_none(window, session, monkeypatch):
     from recorder import capture as cap
     assert window.topbar.device.count() == 1 and window.topbar.device.itemText(0) == 'Test microphone'
-    monkeypatch.setattr(cap, 'list_microphones', lambda: [])
+    monkeypatch.setattr(cap, 'list_microphones', lambda every=False: [])
     monkeypatch.setattr(cap, 'default_microphone', lambda: None)
     session.capturing.refresh_devices()
     window.flush()
@@ -657,7 +709,8 @@ def test_the_settings_dialog_returns_what_was_typed_and_none_for_what_was_cleare
     dialog = dialog_mod.SettingsDialog({'root': 'C:/clips', 'tail_seconds': 0.3, 'ffmpeg': 'C:/tools/ffmpeg.exe'})
     assert dialog.values() == {'root': 'C:/clips', 'tail_seconds': 0.3, 'ffmpeg': 'C:/tools/ffmpeg.exe', 'asr_python': None,
                                'asr_model': None, 'asr_language': None, 'global_hotkey': False, 'output_device': None,
-                               'record_key': None, 'theme': 'dark', 'text_scale': None, 'language': None}
+                               'all_interfaces': False, 'record_key': None, 'theme': 'dark', 'text_scale': None,
+                               'language': None}
     dialog.ffmpeg.edit.setText('')
     dialog.root.edit.setText('D:/voice')
     dialog.tail.setValue(1.5)
@@ -781,3 +834,33 @@ def test_the_stub_and_the_real_dialogs_answer_the_same_questions(qapp):
     real = {name for name in dir(dialog_mod.Dialogs) if not name.startswith('_')}
     stub = {name for name in dir(ui_helpers.StubDialogs) if not name.startswith('_')}
     assert real <= stub, f'the test double is missing {sorted(real - stub)}'
+
+
+# ---- what Keep writes ------------------------------------------------------------------------------------------------------
+
+@pytest.mark.parametrize('purpose, rate, said', [('reference', 48000, '24 kHz, 16-bit'), ('sentence', 48000, '24 kHz, 16-bit'),
+                                                 ('audition', 48000, '48 kHz, 24-bit'), ('audition', 44100, '44.1 kHz, 24-bit')])
+def test_the_keep_tooltips_say_what_keep_writes_for_the_take_in_front(window, session, purpose, rate, said):
+    session.workspace.set_purpose(purpose)
+    session.workspace.add_take(speech(14.0, rate=rate), rate, 'mic', {})
+    fill(session)
+    window.flush()
+    settle(window, session)
+    assert window.inspector.ready.keep.isEnabled()
+    assert window.inspector.ready.keep.toolTip() == f'Writes the {said} WAV and its sidecar'
+    assert window.actions.keep.toolTip() == f'Write the {said} WAV and its sidecar (Ctrl+S)'
+    assert window.actions.keep.statusTip() == f'Write the {said} WAV and its sidecar'
+
+
+def test_the_keep_tooltip_follows_the_purpose_of_the_take_and_of_new_takes(window, session):
+    record(session, 14.0)
+    window.flush()
+    assert window.actions.keep.statusTip() == 'Write the 24 kHz, 16-bit WAV and its sidecar'
+    session.workspace.set_meta(purpose='audition')
+    window.flush()
+    assert window.actions.keep.statusTip() == 'Write the 48 kHz, 24-bit WAV and its sidecar'
+    session.workspace.current = None
+    session.bus.notify('current')
+    session.workspace.set_purpose('audition')
+    window.flush()
+    assert window.actions.keep.statusTip() == 'Write the 48 kHz, 24-bit WAV and its sidecar'

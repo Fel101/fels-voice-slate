@@ -5,6 +5,137 @@ the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-15
+
+### Added
+
+- **Reading a script hands-free.** Three options, each off until turned on and each remembered, under **Hands-free
+  reading...** (`Ctrl+Shift+H`): go to the next line when a take ends; end a take after a pause once the voice has been heard
+  (1.5 s by default); and start the next take by itself after a count-in shown on the screen (3 s by default). With the
+  count-in on, the record key starts a run through the script, and `Esc` or the record key ends it. `F8` records the line
+  just read once more, and keeps the take of it that was there. The program makes no sound, so nothing of the count-in
+  reaches a recording. A run only records: it never keeps a clip or ticks the permission box, and the microphone closes when
+  it ends unless it was armed before. The sign on top of other windows shows a run between its takes too.
+- **Choosing between takes of one line.** The list of takes can be put in script order or oldest first, and narrowed to
+  the takes not kept, kept, changed since they were kept, or of the current script line. **Show its takes** on the Script
+  tab lists the takes of the line in front, each line there says how many takes it has, and each take of a script line
+  shows its reading check in the list. **Discard the other takes of this line...** sends the takes not chosen to the
+  Recycle Bin after one question, and leaves the take open and any kept clip.
+- **Totals.** Beside **Takes**, the list says how many clips the speaker has kept and how long they are in all, or, while
+  several takes are selected, how long those are. The Script tab says what share of the lines have a kept clip and how
+  long those clips are, and the manifest and dataset dialogs say how many clips the choice holds and how long they are.
+  The totals come from the sidecars and from what the takes hold: no audio is read to add them up.
+- **A check of the room and the level before a session.** **Check the room and level...** in the gear menu listens to
+  three seconds of quiet and then one spoken sentence, and says in plain words whether the room is quiet enough and whether
+  the microphone is set too low or too high, with what to change, by the Check tab's own measures and limits. Nothing it
+  hears is written to disk, and the sound is let go once it is measured.
+- **Two more dataset layouts, and a split.** **Export dataset...** also writes a Hugging Face audio folder (`metadata.csv`
+  beside the clips) and a Kaldi data folder (`wav.scp`, `text`, `utt2spk`, `spk2utt`), each as that tool's documentation
+  gives it, and can put 5, 10 or 20 in a hundred of the clips aside for validation, the same clips every time. Every layout
+  still gets the `manifest.jsonl` with each clip's origin and allowed use.
+- **Two larger speech models for draft transcripts**, for an accent or a language the smaller ones get wrong: `medium`
+  (about 1,540 MB, with an English-only model too) and `large-v3-turbo` (about 1,630 MB, every language). The setup
+  fetches each from where faster-whisper's own list of models says it is, and does not trust a turbo model that is
+  missing the file that says how it hears. A draft of a 9-second line takes about 7 seconds with either on an 8-core
+  Ryzen 7, against under a second with `base`, and they use about 2 GB of memory; the README's table now gives every
+  model's time and memory, measured on that PC.
+- **The permission travels inside the WAV.** A kept clip's WAV now carries one line of plain text in its standard
+  information chunk: the clip's id, the name of its sidecar, the allowed use and the date the permission was given, but not
+  the origin. Copies and dataset clips carry it too, also of clips kept before, which are not changed themselves.
+- **Back up recordings, and bring a backup in.** **Back up recordings...** copies the whole output folder to a place you
+  choose, reads every file back and checks it, and writes a list of the files and their SHA-256 beside them. **Bring in a
+  backup...** copies one into an output folder that has no recordings yet and checks each file against that list. Both are
+  long jobs with progress and **Stop**, and one that stops or fails removes what it copied. The user guide says how to move
+  to another PC.
+- **An audiobook delivery check.** For an Audition, the Check tab also measures the clip against the limits in ACX's audio
+  submission requirements (April 2026): -23 to -18 dB RMS over the whole file, peaks no higher than -3 dB, and a noise floor
+  no higher than -60 dB RMS. Each row says what to change in Process when a limit is not met. It is advice, and never stops
+  Keep.
+- **Markers.** `M` marks a moment to come back to: the newest sound while recording, the moment heard while playing, or the
+  playhead; on a marker it takes it away. `Alt+Left` and `Alt+Right` go to the marker before or after, and each is a numbered
+  dashed line on the waveform. They are on the original's timeline like the edits, are saved with the take, and go into the
+  sidecar as `markers`, which on a kept clip changes alone without changing the clip. A split take's parts keep the markers
+  inside them.
+
+### Changed
+
+- **Each microphone and output is listed once, by its full name.** The lists showed every device through each of Windows'
+  four audio interfaces, so one microphone came up four times, MME's entry cut at 31 letters, and the user guide said to try
+  another entry if one gave no sound. Now each device is there once, as Windows' Sound settings name it, and the microphone
+  chosen at first is Windows' default instead of MME's sound mapper. **List every Windows audio interface** in Settings
+  brings the full lists back, and they come back by themselves when the usual interface has no device, as in a remote
+  desktop session. A microphone, input or output chosen in 0.6 is found again, or the default is used.
+- **A take is recorded at the rate the microphone runs at.** The microphone chosen at first was MME's sound mapper, which
+  reports 44.1 kHz for every microphone, so an Audition from a 48 kHz microphone was recorded and kept at 44.1 kHz after
+  Windows had resampled it. It now comes out at 48 kHz, also from a microphone chosen through MME in 0.6.
+- **System audio is recorded at full resolution.** It was asked for in 16 bits, although the original is saved in 24, so
+  everything finer than 16 bits' smallest step, about -90 dBFS, was lost. It is now recorded in floating point, as Windows mixes it, and in 16 bits only from
+  a device that refuses that. A loopback that will not open no longer leaves its silent feed running.
+- A device with more than two inputs is opened with all of them when the first two are mixed, as it already was when one
+  input is chosen, because Windows may refuse to open part of them.
+
+### Fixed
+
+- **The right panel's tabs fit the panel in every language.** In German and Spanish the two Auto analyze buttons, and in
+  Spanish and French the two copy buttons on the Clip tab, were wider than the panel side by side, and in English a Check
+  row with a long value was a few pixels too wide. The whole tab then became wider than the panel, and every row of it was
+  cut off on the right. Such buttons now go one above the other when they do not fit, and a Check row's name wraps.
+- **The Check tab and the Keep card are in the window's language.** In German, Spanish and French, every measurement on the
+  Check tab, what Auto analyze found and would do, the ACX rows' values, the warnings and advice on the Keep card ("Speech is
+  at -29.0 dB; the target is -20 dB...") and the count of characters were still in English, because they are built from
+  numbers: 35 texts in each language. They are now translated where they are worked out. The note shown while noise
+  reduction is on calls it Noise reduction, as the Process tab does, rather than "noise cleaning". A value too long to sit
+  beside its name, such as mains hum in French ("60 Hz, 46 dB au-dessus de son voisinage"), goes under it, where it would
+  otherwise have made the whole tab wider than the panel again.
+- **The rest of the window and its dialogs are in the window's language too.** In German, Spanish and French, the history of
+  edits ("Cut 1.00 to 1.50 s"), the bar under the waveform, the Record card, the dates in the take list, nearly every status
+  line ("Kept 3 of 3 takes."), the questions before Discard, Split, Move and Delete, the reasons a clip, a copy or a key is
+  refused, and parts of the Keep many, Copy, Speaker, Settings and About dialogs were still in English: 223 texts in each
+  language. The script's place ("3 of 12") was too. The take list's choices of order and of which takes to show were
+  shortened in the middle in all three ("Plus réc…bord"); they now have shorter names that fit. The first entry of the
+  history is now called Beginning rather than Start, which is a button's word, and Noise reduction is called that in the
+  history as well.
+- **A take card's lines fit the card, or end with "…".** The line under a take's name, when and where it comes from, ran off
+  the edge of the card with no sign that it was cut: "Aujourd'hui 01:10 · Syst" in French, "Hoy 01:10 · Importació" in
+  Spanish, and "Yesterday 23:59 · Sys" in English. Only a take's own label was cut with "…". Now a line too wide first has
+  the spaces around its dot taken in and is then cut with "…", and today, yesterday or any month, from any source, fits
+  whole in every language: French says "Auj." for today, and Spanish "Importada" and "sep".
+- **The Keep card no longer flickers with its lines cut as a take opens.** For about 80 ms after Stop, the Keep card was
+  drawn with its new lines squeezed into its old height: the permission statement had 26 of the 48 pixels it needs, so its
+  first and last lines were cut, and "Measuring the clip..." and the lines under it were a pixel or four high. Qt shows new
+  lines, then lays out the card, then the panel around it, each at a later turn of the event loop, and frames were drawn in
+  between. The card is now laid out as soon as its lines change, and as soon as the take opens.
+- **Every playback device plays every take.** A WASAPI device chosen in Settings refused any take that was not at the rate
+  the device runs at ("Invalid sample rate"), and some WDM-KS devices refused 24 kHz and below. Windows now converts for a
+  WASAPI device, a take that a device still refuses is converted to the device's own rate, and the playhead stays with the
+  sound. If the device chosen will not play at all, the take plays through Windows' default and the status line says so.
+  Tried with silent takes from 8 to 96 kHz on every output of a Windows 11 PC.
+- **A recordings folder that cannot be reached no longer looks like an empty one.** With the output folder on a drive that
+  was not connected, the window opened with "Ready." and no takes, and Record, Import and New speaker failed with
+  "Something went wrong: [WinError 3]". Now the window says which folder cannot be reached and why, that the recordings in it
+  are not lost, and what to do, with **Try again** and **Settings...** buttons. Record, Import, New speaker and the Folder
+  button explain instead of failing, and no microphone opens. A file standing where the folder should be is told apart the
+  same way. The program never changes the output folder by itself or starts a library somewhere else.
+- **Draft transcripts no longer hold up everything else.** Drafts shared one queue with measuring and drawing, so after
+  importing ten 14-second files, with a recognizer taking 2 s a draft, the Check tab and the spectrogram of the take in front
+  came after 18.2 s. Drafts now have a lane of their own and the take in front goes first: the same import showed them after
+  0.4 s. A draft for a take discarded meanwhile is not made, the bottom of the window says how many drafts are waiting, and
+  closing the window does not wait for them. The audio for a draft is now prepared in the background too.
+- **Long recordings no longer freeze the window or need twice the memory.** Importing a 45-minute stereo recording froze the
+  window for 2 s and splitting it for 13 s, and the program used 5.6 GB at its peak. Import and Split now go a piece at a time,
+  with how far they have got in the status line and **Stop**: the longest pause was 0.1 s, and the peak 3.1 GB. Each part of a
+  split is written to disk as it is made. The waveform of a long take is drawn in the background, and opening the take
+  after the import no longer holds the window for 2.5 s. Keep, Play, opening a take from the list and looking for the
+  pauses of a take over two minutes long show the busy cursor and say what is happening. Play after Normalize went from
+  0.36 s to 0.03 s, and each edit of a 10-minute take from 0.3 s to under 0.01 s. A recording too long for this computer's memory is refused before anything is copied, with its
+  length, what it would need and how short its parts should be. One over an hour, or that would use more than a third of the
+  memory, is asked about first. A stopped import leaves nothing behind.
+- **The Keep tooltips say what Keep writes for the take in front.** The Keep command said "Write the 24 kHz WAV" for every
+  take, and the Keep button gave the rate but not the bit depth. An Audition is kept at its own rate up to 48 kHz and in 24
+  bits; both now say so ("Write the 48 kHz, 24-bit WAV and its sidecar"), as the bottom of the window does.
+- `tools/strings.py` writes its list as UTF-8 when it is piped or redirected (`python tools/strings.py | more`). Windows gave
+  such an output its old code page, which has no "✓", and the list stopped half way with `UnicodeEncodeError`.
+
 ## [0.6.0] - 2026-11-04
 
 ### Added
@@ -334,7 +465,8 @@ The first public release.
 - The limiter's ceiling also holds for the saved 24 kHz file: resampling can push a peak over it, so the limiter runs
   once more after resampling.
 
-[Unreleased]: ../../compare/v0.6.0...HEAD
+[Unreleased]: ../../compare/v0.7.0...HEAD
+[0.7.0]: ../../compare/v0.6.0...v0.7.0
 [0.6.0]: ../../compare/v0.5.0...v0.6.0
 [0.5.0]: ../../compare/v0.4.0...v0.5.0
 [0.4.0]: ../../compare/v0.3.0...v0.4.0

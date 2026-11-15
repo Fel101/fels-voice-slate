@@ -9,6 +9,7 @@ import json
 import math
 
 from .. import audio_core as ac
+from ..i18n import tr
 from . import chain as chain_mod
 
 OPS = ('cut', 'silence', 'fade', 'gain')
@@ -48,17 +49,16 @@ def words_key(history):
 
 
 def describe(edit):
-    """One line for the edit list, e.g. "Cut 4.20 to 5.10 s"."""
-    a, b = edit['start_seconds'], edit['end_seconds']
-    span = f'{a:.2f} to {b:.2f} s'
+    """One line for the edit list and the history, e.g. "Cut 4.20 to 5.10 s", in the window's language."""
+    span = {'start': f"{edit['start_seconds']:.2f}", 'end': f"{edit['end_seconds']:.2f}"}
     op = edit.get('op', 'cut')
     if op == 'silence':
-        return f'Silence {span}'
+        return tr('Silence {start} to {end} s').format(**span)
     if op == 'fade':
-        return f"Fade {edit['direction']} {span}"
+        return tr('Fade in {start} to {end} s' if edit['direction'] == 'in' else 'Fade out {start} to {end} s').format(**span)
     if op == 'gain':
-        return f"Gain {edit['gain_db']:+.1f} dB {span}"
-    return f'Cut {span}'
+        return tr('Gain {gain} dB {start} to {end} s').format(gain=f"{edit['gain_db']:+.1f}", **span)
+    return tr('Cut {start} to {end} s').format(**span)
 
 
 class History:
@@ -157,11 +157,11 @@ class History:
     def _span(self, start, end):
         start, end = float(start), float(end)
         if not (math.isfinite(start) and math.isfinite(end)):
-            raise ValueError('Edit points must be numbers')
+            raise ValueError(tr('Edit points must be numbers'))
         if self.seconds is not None:
             start, end = max(0.0, start), min(self.seconds, end)
         if end - start < ac.MIN_SELECTION_SECONDS:
-            raise ValueError('Selection shorter than 20 ms is ignored')
+            raise ValueError(tr('Selection shorter than 20 ms is ignored'))
         return start, end
 
     def _region(self, start, end):
@@ -182,7 +182,7 @@ class History:
                 break
             covered = max(covered, cut['end_seconds'])
             if covered >= self.seconds - 1e-9:
-                raise ValueError('A cut cannot remove the whole clip')
+                raise ValueError(tr('A cut cannot remove the whole clip'))
 
     def cut(self, start, end):
         return self.add_ops([('cut', start, end, {})])[0]
@@ -192,13 +192,14 @@ class History:
 
     def fade(self, direction, start, end):
         if direction not in ('in', 'out'):
-            raise ValueError('A fade must be "in" or "out"')
+            raise ValueError(tr('A fade must be "in" or "out"'))
         return self.add_ops([('fade', start, end, {'direction': direction})])[0]
 
     def gain(self, gain_db, start, end):
         gain_db = float(gain_db)
         if not math.isfinite(gain_db) or not GAIN_LIMITS[0] <= gain_db <= GAIN_LIMITS[1]:
-            raise ValueError(f'Gain must be between {GAIN_LIMITS[0]:g} and {GAIN_LIMITS[1]:g} dB')
+            raise ValueError(tr('Gain must be between {low} and {high} dB').format(low=f'{GAIN_LIMITS[0]:g}',
+                                                                                  high=f'{GAIN_LIMITS[1]:g}'))
         return self.add_ops([('gain', start, end, {'gain_db': round(gain_db, 2)})])[0]
 
     def _extend(self, state, ops):
@@ -212,7 +213,7 @@ class History:
             edit.update(params)
             edit.update(start_seconds=round(a, 4), end_seconds=round(b, 4))
             if name == 'cut' and self.seconds is not None and b - a >= self.seconds - 1e-9:
-                raise ValueError('A cut cannot remove the whole clip')
+                raise ValueError(tr('A cut cannot remove the whole clip'))
             state['edits'].append(edit)
             added.append(edit)
         self._check_coverage(state['edits'])
@@ -223,8 +224,9 @@ class History:
         state = self._next()
         added = self._extend(state, ops)
         if not added:
-            raise ValueError('Nothing to do')
-        self._push(state, label or (describe(added[0]) if len(added) == 1 else f'{len(added)} edits'))
+            raise ValueError(tr('Nothing to do'))
+        self._push(state, label or (describe(added[0]) if len(added) == 1 else
+                                    tr('{count} edits').format(count=len(added))))
         return self.edits[-len(added):]
 
     def add_step(self, ops, chain_changes, label):
@@ -244,7 +246,7 @@ class History:
     def remove(self, index):
         state = self._next()
         removed = state['edits'].pop(index)
-        self._push(state, f'Remove: {describe(removed)}')
+        self._push(state, tr('Remove: {edit}').format(edit=describe(removed)))
 
     # ---- chain and fade -----------------------------------------------------------------------------------------------
 
@@ -267,11 +269,11 @@ class History:
     def set_fade_ms(self, ms):
         ms = float(ms)
         if not math.isfinite(ms):
-            raise ValueError('The join fade must be a number')
+            raise ValueError(tr('The join fade must be a number'))
         ms = min(max(ms, 0.0), float(ac.MAX_FADE_MS))
         if ms == self.fade_ms:
             return False
         state = self._next()
         state['fade_ms'] = ms
-        self._push(state, f'Join fade {ms:g} ms', merge='fade')
+        self._push(state, tr('Join fade {ms} ms').format(ms=f'{ms:g}'), merge='fade')
         return True

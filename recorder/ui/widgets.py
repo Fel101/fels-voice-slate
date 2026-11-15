@@ -1,10 +1,10 @@
 """Small widgets shared by the panels: layout helpers, chips, the level meter, a switch, a segmented control."""
 import time
 
-from PySide6.QtCore import QPointF, QRectF, QSize, Qt, Signal
+from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QBrush, QFont, QFontMetrics, QLinearGradient, QPainter, QPen
-from PySide6.QtWidgets import (QAbstractButton, QComboBox, QFrame, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QStyle,
-                               QStyleOptionComboBox, QStylePainter, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QAbstractButton, QComboBox, QFrame, QHBoxLayout, QLabel, QLayout, QPushButton, QSizePolicy,
+                               QStyle, QStyleOptionComboBox, QStylePainter, QVBoxLayout, QWidget)
 
 from .. import audio_core as ac
 from ..i18n import tr
@@ -28,6 +28,75 @@ def hbox(parent=None, margins=(0, 0, 0, 0), spacing=0):
     return layout
 
 
+class FlowLayout(QLayout):
+    """Widgets left to right that go on to the next line when the width runs out. A row of buttons that fits in English
+    can be too wide in German, and a row that cannot narrow makes the whole panel wider than the window gives it, which
+    cuts off everything on its right."""
+
+    def __init__(self, spacing=8):
+        super().__init__()
+        self.setContentsMargins(0, 0, 0, 0)
+        self._items = []
+        self._gap = spacing
+
+    def addItem(self, item):
+        self._items.append(item)
+
+    def count(self):
+        return len(self._items)
+
+    def itemAt(self, index):
+        return self._items[index] if 0 <= index < len(self._items) else None
+
+    def takeAt(self, index):
+        return self._items.pop(index) if 0 <= index < len(self._items) else None
+
+    def expandingDirections(self):
+        return Qt.Orientation(0)
+
+    def hasHeightForWidth(self):
+        return True
+
+    def heightForWidth(self, width):
+        return self._arrange(QRect(0, 0, width, 0), place=False)
+
+    def setGeometry(self, rect):
+        super().setGeometry(rect)
+        self._arrange(rect, place=True)
+
+    def _shown(self):
+        return [item for item in self._items if not item.isEmpty()]
+
+    def sizeHint(self):
+        """All on one line."""
+        hints = [item.sizeHint() for item in self._shown()]
+        width = sum(h.width() for h in hints) + self._gap * max(len(hints) - 1, 0)
+        return QSize(width, max((h.height() for h in hints), default=0))
+
+    def minimumSize(self):
+        """One above the other: as narrow as the widest of them."""
+        sizes = [item.minimumSize() for item in self._shown()]
+        return QSize(max((s.width() for s in sizes), default=0), max((s.height() for s in sizes), default=0))
+
+    def _arrange(self, rect, place):
+        """Lay the widgets out in `rect`, or only work out how high that would be. Returns the height."""
+        x, y, line = rect.x(), rect.y(), 0
+        for item in self._shown():
+            hint = item.sizeHint()
+            width = min(hint.width(), rect.width())
+            if x > rect.x() and x + width > rect.x() + rect.width():
+                x, y, line = rect.x(), y + line + self._gap, 0
+            if place:
+                item.setGeometry(QRect(QPoint(x, y), QSize(width, hint.height())))
+            x += width + self._gap
+            line = max(line, hint.height())
+        return y + line - rect.y()
+
+
+def flow(spacing=8):
+    return FlowLayout(spacing)
+
+
 def clear_layout(layout):
     """Empty a layout and delete what was in it. Each widget is hidden and detached at once, because `deleteLater` waits
     for the event loop and the old widget would otherwise still be painted over the new ones until then."""
@@ -41,6 +110,22 @@ def clear_layout(layout):
         elif inner is not None:
             clear_layout(inner)
             inner.deleteLater()
+
+
+def lay_out_now(widget):
+    """Show what was just put in a visible widget's layout, and lay out the widget and the layout it sits in, at once.
+    Qt waits for the event loop to do each, one after the other, and a frame drawn in between had the new lines squeezed
+    into the widget's old height: just after Stop, the permission statement on the Keep card was cut top and bottom."""
+    if not widget.isVisible():
+        return                                      # laid out as it is shown
+    for child in widget.findChildren(QWidget):
+        if child.isHidden() and not child.testAttribute(Qt.WidgetAttribute.WA_WState_ExplicitShowHide):
+            child.show()                            # added since the last turn of the event loop, and not hidden on purpose
+    widget.layout().activate()
+    widget.updateGeometry()
+    outer = widget.parentWidget().layout() if widget.parentWidget() is not None else None
+    if outer is not None:
+        outer.activate()
 
 
 def tagged(widget, **props):
@@ -182,16 +267,42 @@ class ElidedCombo(QComboBox):
         option = QStyleOptionComboBox()
         self.initStyleOption(option)
         p.drawComplexControl(QStyle.ComplexControl.CC_ComboBox, option)
-        room = self.style().subControlRect(QStyle.ComplexControl.CC_ComboBox, option,
-                                           QStyle.SubControl.SC_ComboBoxEditField, self)
         option.currentText = option.fontMetrics.elidedText(option.currentText, Qt.TextElideMode.ElideMiddle,
-                                                           max(room.width() - 8, 10))
+                                                           self.room(option))
         p.drawControl(QStyle.ControlElement.CE_ComboBoxLabel, option)
+
+    def room(self, option=None):
+        """How wide a choice can be, in pixels, before it is shortened."""
+        if option is None:
+            option = QStyleOptionComboBox()
+            self.initStyleOption(option)
+        field = self.style().subControlRect(QStyle.ComplexControl.CC_ComboBox, option,
+                                            QStyle.SubControl.SC_ComboBoxEditField, self)
+        return max(field.width() - 8, 10)
 
 
 def format_clock(seconds):
     seconds = max(0.0, float(seconds))
     return f'{int(seconds // 60):02d}:{seconds % 60:06.3f}'
+
+
+def format_total(seconds):
+    """A total length in words, to the second under an hour and to the minute after: 41 s, 4 min 05 s, 1 h 02 min."""
+    whole = int(max(0.0, float(seconds)) + 0.5)               # a half rounds up, as people round it
+    if whole < 60:
+        return tr('{seconds} s').format(seconds=whole)
+    if whole < 3600:
+        return tr('{minutes} min {seconds} s').format(minutes=whole // 60, seconds=f'{whole % 60:02d}')
+    minutes = int(whole / 60 + 0.5)
+    return tr('{hours} h {minutes} min').format(hours=minutes // 60, minutes=f'{minutes % 60:02d}')
+
+
+def clips_text(count, seconds):
+    """How many kept clips and how long they are in all."""
+    if not count:
+        return tr('No kept clips yet')
+    return (tr('1 clip, {time}') if count == 1 else tr('{count} clips, {time}')).format(count=count,
+                                                                                      time=format_total(seconds))
 
 
 # ---- the level meter --------------------------------------------------------------------------------------------------

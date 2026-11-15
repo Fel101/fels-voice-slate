@@ -88,7 +88,7 @@ def test_the_script_tab_lists_each_line_and_how_far_it_has_got(window, session):
     page = window.inspector.script
     rows = [page.lines.item(i).text() for i in range(page.lines.count())]
     assert rows[0].startswith('✓') and rows[1].startswith('○') and 'gulls' in rows[1]
-    assert page.summary.text().startswith('1 of 3 lines have a kept clip')
+    assert page.summary.text().startswith('1 of 3 lines (33%) have a kept clip, 12 s in all, for this speaker.')
     assert page.lines.currentRow() == 1
 
 
@@ -285,7 +285,7 @@ def test_split_says_how_many_takes_it_will_make_and_makes_them(window, session, 
     take = record(session, samples=bursts(18.0, [(0.3, 5.0), (5.6, 11.0), (11.6, 17.7)], amp=0.14, f0=137.0))
     window.flush()
     window.actions.split_take.trigger()
-    window.flush()
+    run_batch(window, session)
     assert 'It will become 3 new takes' in dialogs.confirmations[-1].text
     assert len(session.workspace.takes) == 4 and take in session.workspace.takes
 

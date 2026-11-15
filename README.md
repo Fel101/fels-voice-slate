@@ -15,6 +15,12 @@ what is in it and whether you had the right to record it.
 > **Record only voices you own or have permission to use.** The app will not keep a clip until you confirm that, and
 > [Responsible use](docs/responsible-use.md) explains what it means and why it asks.
 
+Version 0.7 in 3 minutes, with sound: the program itself, filmed while a script drives it through a session. Wren
+narrates and Mira is the voice being recorded. Both voices were designed in [Fel's Voice
+Lab](https://github.com/Fel101/fels-voice-lab) from written descriptions, so no person's recording is in it.
+
+https://github.com/user-attachments/assets/9c4553c8-8d69-43e4-bf3e-e3256375cf52
+
 ## What it does
 
 - **Three purposes.** A *Reference* is 6 to 40 seconds at 24 kHz, a *Sentence* is 1 to 15 seconds for a dataset or voice
@@ -24,8 +30,13 @@ what is in it and whether you had the right to record it.
   several inputs you choose which one.
 - **Import** recordings, several at once, with **Import** or by dragging them onto the window: WAV, FLAC, Ogg, MP3 and AIFF,
   and with FFmpeg also the M4A that phones and Windows' Sound Recorder make, and the sound of a video.
-- **Long sessions.** A script shows one prompt per take, remembers your place, and shows which lines have a kept clip. Keys
-  walk the takes, and several takes can be kept, discarded or moved together.
+- **Long sessions.** A script shows one prompt per take, remembers your place, and shows which lines have a kept clip. It can
+  be read hands-free: the next line comes when a take ends, a take ends after a pause, and the next one starts after a count-in
+  on the screen. Keys walk the takes, and several takes can be kept, discarded or moved together. The takes of a line can
+  be listed in script order to choose the best, and the rest sent to the Recycle Bin in one step. Beside the list, a total
+  says how many clips you have kept and how long they are.
+- **Room and level check.** Before a session it listens to a few seconds of quiet and to you reading one sentence, and
+  says whether the room is quiet enough and the microphone set right. Nothing it hears is kept.
 - **Reading check** (needs draft transcripts). A take read from a script is compared with what the recognizer heard, and the
   places that differ are shown.
 - **Never loses a take.** A take is written to disk while you record it, and the original recording is written the moment
@@ -34,11 +45,13 @@ what is in it and whether you had the right to record it.
   changed.
 - **Edit** by dragging on the waveform: cut, trim, silence, fade in and out, gain on a part, trim the pauses at the
   ends, shorten long pauses, and compare the original with the edited clip. Undo and redo have a clickable history. With a
-  draft transcript you can also cut by clicking the words, and a long take can be split at its pauses.
+  draft transcript you can also cut by clicking the words, and a long take can be split at its pauses. Press `M` to mark a
+  moment, while recording too, and `Alt+Left` or `Alt+Right` to go back to it.
 - **Process** the whole take: high-pass filter, mains-hum notch (50 or 60 Hz), noise reduction (optional, needs
   FFmpeg), a Normalize button that sets the speech to -20 dB, and a peak limiter.
 - **Check** the clip as it will be saved: length, speech level, peak, clipping, loudness, noise floor, bandwidth, hum and
-  silence, each with a verdict and a short explanation.
+  silence, each with a verdict and a short explanation. An Audition is also measured against ACX's limits for an
+  audiobook file.
 - **Auto analyze and Auto fix**: one button looks at the take and says in plain words what could be better (long
   silences, hum, rumble, noise, a quiet voice, clipping); the other repairs what can be repaired safely, in one step
   that Undo takes back. Noise reduction, which can change the voice, is only used on a clearly noisy clip, set from the
@@ -49,8 +62,10 @@ what is in it and whether you had the right to record it.
 - **Name and find takes.** Give a take a label, rename a speaker, and filter the list of takes by the words in their
   labels, transcripts and notes. A take recorded under the wrong speaker can be moved to the right one.
 - **Share.** Drag a kept clip into Explorer or another program, save a copy as WAV, FLAC, MP3 or Ogg at 16 to 48 kHz, export
-  a manifest of the kept clips (JSON Lines or CSV), or a whole dataset in one folder, as clips with sidecars or in the LJSpeech
-  layout. The kept clips are never changed.
+  a manifest of the kept clips (JSON Lines or CSV), or a whole dataset in one folder: clips with sidecars, LJSpeech, a Hugging
+  Face audio folder or a Kaldi data folder, with a split for validation if you want one. The kept clips are never changed.
+- **Back up and move.** Back up the whole output folder in one step, each file checked, and bring the backup in on another
+  PC.
 - **Draft transcripts** (optional) from a speech recognizer that runs on your own computer, set up in one step.
 - **For everyone.** Dark, light and high-contrast themes, a size setting for the whole window, screen-reader names and
   keyboard access throughout, and the window in English, German, Spanish or French.
@@ -180,14 +195,24 @@ the reading check and cutting by clicking words possible. Press **Suggest from a
 double-click **`setup-transcripts.bat`** in the program folder, or answer `y` when `setup.bat` asks). It asks which speech model
 you want and which language you speak, tells you what it will download, and waits for your yes:
 
-| Model | Download | |
-|---|---|---|
-| `tiny` | about 80 MB | the fastest, and the roughest drafts |
-| `base` | about 150 MB | a good middle (the default) |
-| `small` | about 490 MB | the most accurate, and the slowest |
+| Model | Download | A 9-second line | 50 seconds of speech | Memory | |
+|---|---|---|---|---|---|
+| `tiny` | about 80 MB | 0.5 s | 2 s | 0.3 GB | the fastest, and the roughest drafts |
+| `base` | about 150 MB | 0.9 s | 3.6 s | 0.4 GB | a good middle (the default) |
+| `small` | about 490 MB | 2.5 s | 8 s | 0.7 GB | more accurate, and slower |
+| `medium` | about 1,540 MB | 7 s | 26 s | 1.8 GB | for an accent or a language the smaller ones get wrong; slow |
+| `large-v3-turbo` | about 1,630 MB | 7.6 s | 17.5 s | 2.0 GB | the most accurate, in any language; slow |
 
-The model is downloaded from SYSTRAN's repositories on [Hugging Face](https://huggingface.co/Systran) into a `models`
-folder. On top of it the setup installs the recognizer itself, about 90 MB from PyPI, into a `.venv-asr` folder. Both
+The times are how long a draft took on a PC with an 8-core AMD Ryzen 7 8845HS processor, for speech made by Windows' own
+voice. The recognizer runs on the processor alone, not on a graphics card. The memory is the most it used. The
+first draft after Voice Slate starts also loads the model, which took from 1.5 seconds for `tiny` to 4.5 for
+`large-v3-turbo`. An older or smaller computer takes longer.
+
+For English, `tiny` to `medium` come as a model made for English alone, which suits it best; `large-v3-turbo` has only the
+model for every language. The two larger ones are for when the smaller ones keep getting your words wrong: they take
+longer over each draft and need more memory. The model is downloaded from [Hugging Face](https://huggingface.co/Systran)
+into a `models` folder: SYSTRAN's conversions of OpenAI's Whisper, and for `large-v3-turbo` the one by Mobius Labs that
+faster-whisper itself uses. On top of it the setup installs the recognizer itself, about 90 MB from PyPI, into a `.venv-asr` folder. Both
 folders stay beside the program, and Git ignores them. The only other traces are the usual download caches in your user
 folder: pip's, and a few small files in Hugging Face's. When the recognizer has run once on a second of silence, the
 setup fills in the matching lines in **Settings** for you. Start Voice Slate again, and the status bar at the bottom
@@ -236,7 +261,8 @@ Read [docs/responsible-use.md](docs/responsible-use.md) before you record anyone
 | Audition | 3 s to 10 minutes | 30 s to 3 minutes | 15 minutes | up to 48 kHz, 24-bit, never above the recording's own rate |
 
 - The window needs at least 1100 by 600 of the screen, so a very large size setting may not fit a small screen.
-- The translations cover the window, and not yet every message or the documents.
+- The translations cover the window, and not yet every message or the documents. They are machine-made and have not
+  been checked by native speakers: corrections are welcome.
 - It is a voice-clip recorder, not a general audio editor: there is one track, and no effects beyond those listed above.
 
 ## Documentation

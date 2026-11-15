@@ -8,6 +8,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont, QGuiApplication
 from PySide6.QtWidgets import QLabel, QWidget
 
+from ..i18n import tr
 from .palette import PALETTE
 from .widgets import format_clock, hbox, label
 
@@ -27,14 +28,16 @@ class RecordingBadge(QWidget):
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         layout = hbox(self, (14, 8, 14, 8), 8)
         dot = QLabel('●')
-        dot.setAccessibleName('Recording')
+        dot.setAccessibleName(tr('Recording'))
         dot.setStyleSheet(f'color: {PALETTE["red"]};')
         layout.addWidget(dot)
         self.text = label('Recording', size=13, weight=QFont.Weight.DemiBold)
         layout.addWidget(self.text)
 
-    def show_for(self, seconds, key):
-        self.text.setText(f'Recording  {format_clock(seconds)[:5]}  ·  {key} stops')
+    def show_for(self, seconds, key, text=None):
+        """Show how long the take has run, or `text`: what a script run is doing, between its takes too."""
+        self.text.setText(text or tr('Recording  {time}  ·  {key} stops').format(time=format_clock(seconds)[:5], key=key))
+        self.setAccessibleName(self.text.text())
         if not self.isVisible():
             self.adjustSize()
             screen = QGuiApplication.primaryScreen()

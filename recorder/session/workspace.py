@@ -14,7 +14,8 @@ from .. import audio_core as ac
 from .. import settings
 from ..core import analysis, reading
 from ..core.edits import words_key
-from ..store import Library, Take, now_iso
+from ..i18n import tr
+from ..store import Importing, Library, Take, clean_markers, now_iso, out_of_reach
 
 Step = namedtuple('Step', 'key label done detail')           # a rule that must be met before Keep
 Advice = namedtuple('Advice', 'key text')                     # something worth knowing that does not block Keep
@@ -23,6 +24,18 @@ Readiness = namedtuple('Readiness', 'steps ready advice')
 META_FIELDS = ('transcript', 'origin', 'allowed_use', 'source_url', 'consent_confirmed', 'notes', 'label', 'purpose')
 STATED_FIELDS = ('origin', 'allowed_use')                     # what the permission tick is a statement about
 KEPT_THROUGH_A_SPLIT = ('interrupted', 'dropouts')            # facts about the recording, which each part shares
+
+
+def kept_total(takes):
+    """(how many of `takes` are kept, how long their kept clips are in seconds), as their sidecars say: no audio is read."""
+    kept = [take for take in takes if take.kept]
+    return len(kept), sum(take.kept_seconds or 0.0 for take in kept)
+
+
+def length_total(takes):
+    """(how many takes, how long their clips are in seconds), each as it is now, from what the takes hold: no audio is
+    read."""
+    return len(takes), sum(take.clip_seconds for take in takes)
 
 
 def reading_of(take):
@@ -49,6 +62,7 @@ class Workspace:
         self.on_take_added = None       # called with each new take, once it is listed (the session asks for a draft)
         self._session_takes = {}        # (resolved folder, slug) -> that scope's takes
         self._scope = None
+        self.root_problem = out_of_reach(self.lib.root)     # why the output folder cannot be used, or None
 
     @property
     def current(self):
@@ -63,10 +77,59 @@ class Workspace:
         if take is not None:
             take.in_use = True
 
+    # ---- the output folder --------------------------------------------------------------------------------------------
+
+    def check_root(self):
+        """Look again at whether the output folder can be used. Returns why not, or None. Nothing is made or changed, and the
+        folder in the settings stays the person's choice: a library is never started somewhere else instead."""
+        problem = out_of_reach(self.lib.root)
+        if problem != self.root_problem:
+            self.root_problem = problem
+            self.bus.notify('folder')
+        return problem
+
+    def retry_root(self):
+        """Try again: the drive may have been connected, or the file in the way moved. Returns True when it can be used."""
+        if self.check_root() is not None:
+            self.bus.status(tr('The recordings folder still cannot be reached: {folder}').format(folder=self.lib.root))
+            return False
+        self.refresh_speakers()
+        self._speaker_changed()
+        self.bus.status('The recordings folder can be reached again.')
+        return True
+
+    def out_of_reach_text(self, first=None):
+        """What the person is told about an output folder that cannot be reached: `first`, or which folder it is; why; that
+        the recordings in it are not lost; and what to do. In the person's language, as it is built from values."""
+        problem = self.root_problem
+        if problem is None:
+            return ''
+        if problem.kind == 'drive':
+            why = tr('{place} is not there. The drive, memory stick or network place it is on may not be connected.')
+            do = tr('Connect it and try again, or choose another output folder in Settings.')
+        elif problem.kind == 'file':
+            why = tr('There is a file at {place}, where a folder has to be.')
+            do = tr('Move or rename that file and try again, or choose another output folder in Settings.')
+        else:
+            why = tr('Windows says: {detail}')
+            do = tr('Check the folder in File Explorer and try again, or choose another output folder in Settings.')
+        lost = tr('Your recordings are not lost: nothing in the folder has been changed, and its takes show again once it can '
+                  'be reached.')
+        return '\n\n'.join([first or str(self.lib.root), f'{why.format(place=problem.place, detail=problem.detail)} {lost}', do])
+
+    def _refused(self, first, **fields):
+        """The text of a message about something that could not be done, because the folder cannot be reached. `first` is
+        translated and given the folder and `fields`."""
+        return self.out_of_reach_text(tr(first).format(folder=self.lib.root, **fields))
+
+    def _say_out_of_reach(self):
+        if self.root_problem is not None:
+            self.bus.status(tr('Your recordings folder cannot be reached: {folder}').format(folder=self.lib.root))
+
     # ---- speakers -----------------------------------------------------------------------------------------------------
 
     def refresh_speakers(self, select=None):
-        data = self.lib.speakers()
+        data = self.lib.speakers() if self.root_problem is None else {}
         self.speakers = sorted(((slug, v['name']) for slug, v in data.items()), key=lambda item: item[1])
         slugs = [slug for slug, _ in self.speakers]
         if select in slugs:
@@ -89,7 +152,11 @@ class Workspace:
         return True
 
     def add_speaker(self, name):
-        """Register a speaker by name and select them. Returns the speaker's folder name; raises ValueError if blank."""
+        """Register a speaker by name and select them. Returns the speaker's folder name. Raises ValueError, with what to do,
+        if the name is blank or the output folder cannot be reached."""
+        if self.check_root() is not None:
+            raise ValueError(self._refused('Your recordings folder cannot be reached, so the speaker cannot be added: '
+                                           '{folder}'))
         slug = self.lib.add_speaker(name)
         self.refresh_speakers(select=slug)
         self._speaker_changed()
@@ -147,8 +214,10 @@ class Workspace:
             self.takes, self._scope, self.current = [], None, None
         self.lib = Library(path, trash=self.lib.trash)
         settings.update({'root': str(path)}, self.settings_file)
+        self.check_root()
         self.refresh_speakers()
         self._speaker_changed()
+        self._say_out_of_reach()
         self.bus.notify('settings')
         return True
 
@@ -181,22 +250,26 @@ class Workspace:
         notes = []
         if self.lib.recovered:
             count = self.lib.recovered
-            notes.append(f'Recovered {count} recording{"s" if count != 1 else ""} cut short when the program stopped.')
+            notes.append(tr('Recovered {count} recording cut short when the program stopped.' if count == 1 else
+                            'Recovered {count} recordings cut short when the program stopped.').format(count=count))
         if self.lib.skipped:
             detail = '; '.join(f'{name}: {reason}' for name, reason in self.lib.skipped)
-            notes.append(f'{len(self.lib.skipped)} saved clip(s) not loaded. Their files were not changed. {detail}')
+            notes.append(tr('{count} saved clip(s) not loaded. Their files were not changed. {detail}').format(
+                count=len(self.lib.skipped), detail=detail))
         unusable = [t.autosave_problem for t in extra if t.autosave_problem]
         if unusable:
-            notes.append(f'The saved changes of {len(unusable)} take(s) could not be used, so they show as recorded. '
-                         f'The files were not changed. {"; ".join(unusable)}')
+            notes.append(tr('The saved changes of {count} take(s) could not be used, so they show as recorded. The files were '
+                            'not changed. {detail}').format(count=len(unusable), detail='; '.join(unusable)))
         restored = sum(1 for t in extra if t.restored)
         if restored:
-            notes.append(f'Picked up your saved edits and text on {restored} take{"s" if restored != 1 else ""}.')
+            notes.append(tr('Picked up your saved edits and text on {count} take.' if restored == 1 else
+                            'Picked up your saved edits and text on {count} takes.').format(count=restored))
         if notes:
             self.bus.status(' '.join(notes))
 
-    def add_take(self, samples, rate, source, device, flags=(), script_line=None):
-        """A finished capture becomes a take: its original goes to the masters folder, then it is listed and opened."""
+    def add_take(self, samples, rate, source, device, flags=(), script_line=None, markers=()):
+        """A finished capture becomes a take: its original goes to the masters folder, then it is listed and opened.
+        `markers` are the moments marked while it was recorded, in seconds from its start."""
         samples = np.asarray(samples, dtype=np.float32)
         if samples.size == 0:
             self.bus.notice('warning', 'Nothing captured',
@@ -212,6 +285,7 @@ class Workspace:
                           'transcript_status': 'read_from_script' if script_line else 'typed',
                           'origin': '', 'allowed_use': '', 'consent_confirmed': False, 'source_url': '',
                           'notes': '', 'script_line': script_line})
+        take.meta['markers'] = clean_markers(markers, take.seconds)
         self.takes.insert(0, take)      # own the audio before any registry read, disk write, or window update can fail
         try:
             take.meta.update(self.lib.speaker_defaults(slug))
@@ -227,17 +301,39 @@ class Workspace:
         return take
 
     def import_file(self, path):
-        """Copy a recording from anywhere into the speaker's folder as a take. Returns None, with a notice, on failure."""
-        slug = self.speaker or self.ensure_speaker()
+        """Copy a recording from anywhere into the speaker's folder as a take, all at once. Returns None, with a notice, on
+        failure. Batch.import_files does the same a block at a time, for a long recording."""
+        importing = self.start_import(path)
+        if importing is None:
+            return None
         try:
-            take = self.lib.import_file(slug, path, self.purpose.key)
+            importing.run()
         except Exception as e:                  # unreadable or unsupported file: say so, keep running
+            importing.cancel()
             self.bus.notice('error', 'Could not import', f'{Path(path).name}: {e}')
             return None
+        return self.finish_import(importing)
+
+    def start_import(self, path):
+        """Begin copying a recording in (store.Importing). None, with a notice, when it cannot begin."""
+        if self.check_root() is not None:
+            self.bus.notice('error', 'Could not import', self._refused(
+                'Your recordings folder cannot be reached, so there is nowhere to put {name}: {folder}', name=Path(path).name))
+            return None
+        try:
+            slug = self.speaker or self.ensure_speaker()
+        except (OSError, ValueError) as e:
+            self.bus.notice('error', 'Could not import', f'{Path(path).name}: {e}')
+            return None
+        return Importing(self.lib, slug, path, self.purpose.key)
+
+    def finish_import(self, importing):
+        """List and open the take of a finished import, and ask for its draft."""
+        take, path = importing.take, importing.path
         self.takes.insert(0, take)
         self.bus.notify('takes')
         self.open_take(take)
-        self.bus.status(f'Imported {Path(path).name}. Edit it, then Keep.')
+        self.bus.status(tr('Imported {file}. Edit it, then Keep.').format(file=Path(path).name))
         if self.on_take_added is not None:
             self.on_take_added(take)
         return take
@@ -316,7 +412,8 @@ class Workspace:
             steps.append(Step('length', length, rules.min_seconds <= seconds <= rules.max_seconds, f'{seconds:.1f} s'))
             steps.append(Step('audible', 'Not silent', rms >= ac.SILENT_DB, f'{rms:.0f} dB'))
         steps.append(Step('transcript', f'Transcript {ac.TRANSCRIPT_MIN} to {ac.TRANSCRIPT_MAX} characters',
-                          ac.TRANSCRIPT_MIN <= len(text) <= ac.TRANSCRIPT_MAX, f'{len(text)} characters'))
+                          ac.TRANSCRIPT_MIN <= len(text) <= ac.TRANSCRIPT_MAX,
+                          tr('{count} character' if len(text) == 1 else '{count} characters').format(count=len(text))))
         if take.history.words_changed:
             steps.append(Step('checked', 'Transcript matches the kept words', not take.needs_transcript_review,
                               'Read it against the edits, then confirm'))
@@ -330,37 +427,39 @@ class Workspace:
         advice = self._advice(take, derived, text)
         state, date = self.lib.release_ends(slug) if slug else ('none', '')
         if state == 'soon':
-            advice.append(Advice('release', f'The release for this voice runs out on {date}.'))
+            advice.append(Advice('release', tr('The release for this voice runs out on {date}.').format(date=date)))
         return Readiness(steps, all(s.done for s in steps), advice)
 
     @staticmethod
     def _advice(take, derived, text):
         advice = []
         if take.unsaved:
-            advice.append(Advice('unsaved', 'The original is only in memory. Keep writes it once the folder is writable.'))
+            advice.append(Advice('unsaved', tr('The original is only in memory. Keep writes it once the folder is '
+                                               'writable.')))
         if take.changed:
-            advice.append(Advice('changed', 'Changed since it was kept. Your changes are saved, but the kept clip does not '
-                                            'have them until you update it.'))
+            advice.append(Advice('changed', tr('Changed since it was kept. Your changes are saved, but the kept clip does '
+                                               'not have them until you update it.')))
         if derived is not None and derived.stats is not None:
             advice.extend(Advice(issue.code, issue.text)
                           for issue in ac.take_warnings(derived.stats, take.flags, take.purpose) if not issue.blocks)
             speech = next((row for row in derived.report or [] if row.key == 'speech'), None)
             if speech is not None and speech.status != 'ok':
-                advice.append(Advice('level', f'Speech is at {speech.value}; the target is '
-                                              f'{ac.TARGET_VOICED_DB:.0f} dB. Process has a Normalize button.'))
+                advice.append(Advice('level', tr('Speech is at {value}; the target is {target} dB. Process has a Normalize '
+                                                 'button.').format(value=speech.value, target=f'{ac.TARGET_VOICED_DB:.0f}')))
         draft = str(take.meta.get('draft_text') or '').strip()
         if draft and text == draft:
-            advice.append(Advice('draft', 'The transcript is an automatic draft. Listen to the clip and correct any '
-                                          'wrong words.'))
+            advice.append(Advice('draft', tr('The transcript is an automatic draft. Listen to the clip and correct any '
+                                             'wrong words.')))
         check = reading_of(take)
         if check is not None and reading.differences(check):
             count = reading.differences(check)
-            advice.append(Advice('reading', f'{count} place{"s" if count != 1 else ""} in the reading '
-                                            f'{"differ" if count != 1 else "differs"} from the script. Listen before you '
-                                            'keep this take.'))
+            advice.append(Advice('reading', tr('{count} place in the reading differs from the script. Listen before you keep '
+                                               'this take.' if count == 1 else
+                                               '{count} places in the reading differ from the script. Listen before you '
+                                               'keep this take.').format(count=count)))
         if take.history.chain['denoise']['enabled']:
-            advice.append(Advice('denoise', 'Noise cleaning is on. Listen to the result: the voice identity is not '
-                                            'checked.'))
+            advice.append(Advice('denoise', tr('Noise reduction is on. Listen to the result: the voice identity is not '
+                                               'checked.')))
         return advice
 
     # ---- keeping and discarding ---------------------------------------------------------------------------------------
@@ -388,7 +487,7 @@ class Workspace:
         paths = self.keep_take(take)
         self.bus.notify('takes')
         self.bus.notify('meta')
-        self.bus.status(f"Kept. Saved to {paths['export']}")
+        self.bus.status(tr('Kept. Saved to {path}').format(path=paths['export']))
         return paths
 
     def keep_take(self, take):
@@ -425,38 +524,63 @@ class Workspace:
         ranges = self.split_ranges(take) if take is not None else []
         if len(ranges) < 2:
             return []
+        parts = []
+        try:
+            for first, end in ranges:
+                parts.append(self.split_part(take, first, end))
+        finally:
+            self.split_done(take, parts, len(ranges), stopped=len(parts) < len(ranges))
+        return parts
+
+    def split_part(self, take, first, end):
+        """Make the part of `take` from sample `first` to `end` a take of its own, with its original written to disk, and
+        list it. Its audio is let go of once it is written: it is read back when it is opened. Raises OSError, with nothing
+        listed, when the original cannot be written."""
         started = dt.datetime.fromisoformat(take.created)
         words = take.meta.get('draft_words') or []
-        parts = []
-        for first, end in ranges:
-            begin, stop = first / take.rate, end / take.rate
-            created = (started + dt.timedelta(seconds=begin)).isoformat(timespec='seconds')
-            part = Take(source=take.source, samples=np.array(take.samples[first:end]), rate=take.rate, created=created,
-                        device=dict(take.device), speaker=take.speaker, unsaved=True,
-                        flags=[flag for flag in take.flags if flag in KEPT_THROUGH_A_SPLIT] + ['split'],
-                        meta={'origin': take.meta.get('origin', ''), 'allowed_use': take.meta.get('allowed_use', ''),
-                              'purpose': take.purpose.key,
-                              'split_from': {'take': take.id, 'start_seconds': round(begin, 3), 'end_seconds': round(stop, 3)}})
-            heard = reading.words_between(words, begin, stop)
-            if heard:
-                part.meta.update(transcript=heard, draft_text=heard, transcript_status='asr_draft',
-                                 draft_heard=words_key(part.history),
-                                 draft_words=[(word, round(a - begin, 3), round(b - begin, 3)) for word, a, b in words
-                                              if begin <= (a + b) / 2 < stop])
-                part.draft_key = words_key(part.history)
-            self.lib.save_master(take.speaker or self.speaker, part)
-            self.lib.autosave(part)
-            parts.append(part)
-            self.takes.append(part)
+        begin, stop = first / take.rate, end / take.rate
+        created = (started + dt.timedelta(seconds=begin)).isoformat(timespec='seconds')
+        part = Take(source=take.source, samples=np.array(take.samples[first:end]), rate=take.rate, created=created,
+                    device=dict(take.device), speaker=take.speaker, unsaved=True,
+                    flags=[flag for flag in take.flags if flag in KEPT_THROUGH_A_SPLIT] + ['split'],
+                    meta={'origin': take.meta.get('origin', ''), 'allowed_use': take.meta.get('allowed_use', ''),
+                          'purpose': take.purpose.key,
+                          'split_from': {'take': take.id, 'start_seconds': round(begin, 3), 'end_seconds': round(stop, 3)}})
+        part.meta['markers'] = clean_markers([moment - begin for moment in take.meta.get('markers') or ()
+                                              if begin <= moment < stop], part.seconds)
+        heard = reading.words_between(words, begin, stop)
+        if heard:
+            part.meta.update(transcript=heard, draft_text=heard, transcript_status='asr_draft',
+                             draft_heard=words_key(part.history),
+                             draft_words=[(word, round(a - begin, 3), round(b - begin, 3)) for word, a, b in words
+                                          if begin <= (a + b) / 2 < stop])
+            part.draft_key = words_key(part.history)
+        self.lib.save_master(take.speaker or self.speaker, part)
+        self.lib.autosave(part)
+        if part.can_let_go:
+            part.let_go()
+        self.takes.append(part)
+        return part
+
+    def split_done(self, take, parts, total, stopped=False):
+        """Show the parts of a split (split_part), the first one in front, and ask for a draft of each part the long take's
+        draft had no words for. `total` is how many parts there were to be."""
         self.takes.sort(key=lambda t: t.created, reverse=True)
         self._remember_takes()
         self.bus.notify('takes')
+        if not parts:
+            self.bus.status(tr('The take was not split.'))
+            return
         self.open_take(parts[0])
         for part in parts:
-            if not part.meta['transcript'] and self.on_take_added is not None:
+            if not part.meta['transcript'] and self.on_take_added is not None and not self.closing:
                 self.on_take_added(part)
-        self.bus.status(f'Split into {len(parts)} takes. The long take is still there: discard it once you have what you want.')
-        return parts
+        if stopped or len(parts) < total:
+            self.bus.status(tr('Stopped after {count} of {total} parts. The parts made are in the list, and the long take is '
+                               'still there.').format(count=len(parts), total=total))
+        else:
+            self.bus.status(tr('Split into {count} takes. The long take is still there: discard it once you have what you '
+                               'want.').format(count=len(parts)))
 
     def move_take(self, slug, take=None):
         """File a take (the open one unless another is given) under another speaker. Returns the old files that could
@@ -488,8 +612,9 @@ class Workspace:
             self.bus.notify('current')
         if take.changed:
             self.bus.notify('meta', take)           # its autosave file stayed behind: it is written again in the new place
-        self.bus.status(f'Moved to {name}.' if not left else
-                        f'Moved to {name}, but these old files could not be removed: {", ".join(p.name for p in left)}.')
+        self.bus.status(tr('Moved to {speaker}.').format(speaker=name) if not left else
+                        tr('Moved to {speaker}, but these old files could not be removed: {files}.').format(
+                            speaker=name, files=', '.join(p.name for p in left)))
         return left
 
     def discard(self, permanent=False):
@@ -504,6 +629,7 @@ class Workspace:
     def discard_take(self, take, permanent=False):
         """Move a take's files to the Recycle Bin (or delete them) and drop it. Raises TrashUnavailable."""
         self.lib.discard(take, permanent=permanent)
+        take.draft_request = None       # a draft still waiting for it is dropped, not made
         if take in self.takes:
             self.takes.remove(take)
         was_open = take is self.current

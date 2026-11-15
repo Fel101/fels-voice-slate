@@ -8,7 +8,8 @@ This guide goes through Voice Slate from the first start to a kept clip. For ins
 [Moving a take](#moving-a-take-to-another-speaker) · [Naming and finding takes](#naming-and-finding-takes) ·
 [Several takes at once](#several-takes-at-once) · [Editing](#editing) · [Splitting a long take](#splitting-a-long-take) ·
 [Process](#process-the-whole-take) · [Check](#check) · [Auto analyze and Auto fix](#auto-analyze-and-auto-fix) ·
-[Keeping a clip](#keeping-a-clip) · [Sharing your clips](#sharing-your-clips) · [Settings](#settings) ·
+[Keeping a clip](#keeping-a-clip) · [Sharing your clips](#sharing-your-clips) ·
+[Backing up, and moving to another PC](#backing-up-and-moving-to-another-pc) · [Settings](#settings) ·
 [Using it without a mouse, and with a screen reader](#using-it-without-a-mouse-and-with-a-screen-reader) ·
 [Keyboard shortcuts](#keyboard-shortcuts) · [Troubleshooting](#troubleshooting)
 
@@ -60,7 +61,8 @@ Check tab, Auto fix and Keep all follow them.
 
 A recording can run past what can be kept, so it never stops in the middle of a sentence. The take can then be trimmed, or
 [split](#splitting-a-long-take). An audition is never kept above the rate it was recorded at, because that adds no detail: a
-44.1 kHz microphone gives a 44.1 kHz clip.
+44.1 kHz microphone gives a 44.1 kHz clip. Voice Slate records at the rate Windows runs the microphone at. To change it,
+open the microphone in Windows' *Settings > System > Sound* and choose another **Format**, such as 48000 Hz.
 
 The **Clip** tab changes the purpose of one take, beside its label. Changing it on a kept clip counts as a change, and
 **Update kept clip** writes the clip again in the new format.
@@ -68,10 +70,11 @@ The **Clip** tab changes the purpose of one take, beside its label. Changing it 
 ## Recording
 
 1. Choose a **source** at the top.
-   - **Microphone** lists the input devices Windows reports. The same microphone can appear more than once, once for each
-     Windows audio interface (WASAPI, MME, DirectSound, WDM-KS); if one entry gives no sound, try another.
-   - **System audio** records what the computer is playing through the chosen output (WASAPI loopback). Use it only for
-     audio you own or may use; see [Responsible use](responsible-use.md). It records only while something plays.
+   - **Microphone** lists each input device once, by its full name, as Windows' Sound settings show it. The one chosen at
+     first is Windows' default microphone, and it records at the rate the microphone runs at.
+   - **System audio** records what the computer is playing through the chosen output (WASAPI loopback), at the full
+     resolution Windows plays it at. Use it only for audio you own or may use; see [Responsible use](responsible-use.md).
+     It records only while something plays.
 2. Click **Arm** (`Ctrl+M`) to open the input before you record. The level meter becomes live, and Voice Slate keeps
    the last half second, so when you press Record the beginning of the first word is already included. It stays armed
    after each take until you click **Arm** again, so every take of a session starts the same way. Arming is optional:
@@ -121,6 +124,31 @@ sidecar.
 
 Use **Re-record** to throw a take away (it goes to the Recycle Bin) and start another straight away.
 
+### Checking the room and the level
+
+Before a session, **Check the room and level...** in the gear menu tells you whether the room is quiet enough and whether
+the microphone is set right, before you have recorded anything to find out. Press **Start**, stay quiet for three seconds
+while it listens to the room, then read the sentence it shows, at your usual distance and loudness. It stops by itself a
+second after you finish.
+
+![The room and level check](images/roomcheck.png)
+
+It says, in plain words and with what to change:
+
+- **The microphone level**: how loud your voice was against the target of -20 dB. Too low, and Normalize has to raise it
+  later, which raises the noise of the room with it; too high, and the loudest words come close to clipping. The input level
+  is in Windows Settings > System > Sound, under Input.
+- **The room**: how loud the room will measure once your voice is at the target level. A quiet voice in a quiet room can still
+  leave the room too loud, once the voice is raised.
+- **The loudest words**: whether they clipped, or came close to full scale.
+- **Mains hum**, when it hears it in the quiet.
+
+It judges by the measures and limits of the [Check tab](#check), so what it says is what the Check tab would say of a take
+recorded just then. It uses the microphone chosen beside Record, and closes it when it is done, or opens it again if it was
+armed. **Nothing it hears is saved**: no file is written and no take is made, and once it has worked out the measures, the
+sound is let go. `Esc`, **Stop**, closing its window or the record key stop it at any time. It needs the **Microphone**
+source, and waits while a recording runs.
+
 ## Script mode
 
 Script mode shows one prompt per take, which is handy for reading a list of sentences.
@@ -134,14 +162,59 @@ Script mode shows one prompt per take, which is handy for reading a list of sent
    change it). After you **Keep** the take of the line on screen, the script moves to the next line that has no kept clip.
    Updating a kept clip, or keeping an older take of another line, leaves the script where it is.
 
-The **Script** tab lists every line with a mark: ✓ has a kept clip, ● has a take, ○ not yet. It is worked out from the takes of
-the speaker in front, so the same script can be read by several people. Click a line to go to it. **Next line to record**
-(`Ctrl+Shift+Down`) goes to the next line with no kept clip.
+The **Script** tab lists every line with a mark: ✓ has a kept clip, ● has a take, ○ not yet. A line read more than once
+says how many takes it has, as *3×*. Above the list, it says how far the script has got: how many lines have a kept clip,
+as a share of all of them, and how long those clips are in all. It is worked out from the takes of the speaker in front, so the same script can be read
+by several people. Click a line to go to it. **Next line to record** (`Ctrl+Shift+Down`) goes to the next line with no kept
+clip.
+
+### Choosing between takes of one line
+
+When you read a line several times, **Show its takes** on the **Script** tab lists only the takes of the current line, so
+you can play them one after another. The list keeps showing the takes of the current line as you move along the script;
+choose **All takes** above the list to see every take again. With a draft transcript set up, each take of a script line
+has a mark after its state: a green ✓ when it was read as written, an amber ! when the reading check found places that
+differ. Its tooltip says how many.
+
+Once you have chosen, keep that take. **Discard the other takes of this line...**, in the take's right-click menu and the
+gear menu, sends the rest to the Recycle Bin after one question. It leaves the take open, and any kept clip of the line:
+a kept clip goes only when you discard it on its own.
 
 The script and your place in it are remembered, in a small `script.json` beside the settings, so a long list can be read over
 several sittings. **Clear script** in the gear menu stops using it.
 
 ![The Script tab](images/script.png)
+
+### Reading a script hands-free
+
+For a long list of lines, the program can move on by itself, so your hands can stay off the mouse. Choose
+**Hands-free reading...** beside the line, or in the gear menu (`Ctrl+Shift+H`), and turn on what you want. Each choice is
+remembered, and each is off until you turn it on.
+
+- **Go to the next line when a take ends**, and not only after Keep.
+- **End a take by itself after a pause** (1.5 seconds unless you choose otherwise). It waits until your voice has been heard,
+  so a take never ends before you have read the line, and a click or a bump does not count as your voice. The stop tail is
+  added after the pause, as after Stop.
+- **Start the next take by itself after a count-in** (3 seconds unless you choose otherwise). With this on, the record key
+  (`F9`) starts a **run**: the line is counted in on the screen, recorded, ended by the pause after it, and the next line is
+  counted in, until the script ends. The count-in is shown, never heard: the program makes no sound, so nothing of it gets
+  into the recording.
+
+`Esc` or the record key ends a run at once. A take being recorded then stops as Stop stops it and is saved as a take, and the
+microphone closes, unless you had armed it before the run began. `F8` (**Read the line again**) records the line you have just
+read once more, whether you are in the middle of it or it is being counted in: the take you had stays, so you can choose
+between them afterwards. (If your record key is `F8`, this is `F7`.)
+
+![Counting in the next line of a script run](images/countin.png)
+
+While a run goes on, the large line above the waveform says what is happening: *Next line in 3*, *Recording: read the line*, and
+once your voice has been heard, *Recording: it ends after 1.5 s of quiet*. The status line says the same for a screen reader,
+and the sign on top of other windows shows the run between takes too.
+
+**A run only records.** It never keeps a clip and never ticks the permission box. When you have read the script, select the
+takes you want in the list and use **Keep selected takes**, where you make the statement of permission for them.
+
+![The Hands-free reading options](images/handsfree.png)
 
 ### The reading check
 
@@ -165,6 +238,16 @@ With [FFmpeg](../README.md#optional-extras) installed, the import also reads the
 make, AAC, AMR, WMA and WebM, and the sound of a video (MP4, MOV or 3GP). FFmpeg turns the sound into a temporary WAV for
 the import, which is deleted after. Without FFmpeg, such a file is refused with a message that says how to get it; or save
 the recording as WAV first.
+
+A few minutes of audio come in at once. More than that, or a file FFmpeg reads, comes in a piece at a time: the status line
+says how far it has got, and **Stop** at the bottom of the window stops it. What is already in stays; the recording being
+copied when you stop is left out, and nothing of it is left behind. Each take opens as it arrives.
+
+A recording over an hour long, or one that would use more than about a third of this computer's memory, is asked about first:
+everything on a take that long (measuring, playing, keeping) takes a while. One that would need more than about 70% of the
+memory is refused, with how long it is, what it would need, and how short its parts should be; cut it into parts with another
+program and import those. The length of a file FFmpeg reads is known only once FFmpeg has read it, so such a file is not asked
+about, only refused if it is too long.
 
 ## Speakers
 
@@ -223,9 +306,23 @@ field at the top of the **Clip** tab, press `F2`, or right-click the take and ch
 80 characters) replaces the number in the list. It is saved with the take: in its autosave file until the clip is kept,
 and then in the sidecar. Changing the label of a kept clip is saved at once, without pressing Keep.
 
+Beside **Takes**, the list says how many kept clips the speaker has and how long they are in all, as *12 kept ·
+4 min 05 s*. While several takes are selected it says how many and how long they are instead, as each is now, after its
+cuts. These totals come from what the takes already hold, and from the sidecars of the kept clips: no audio is read to
+add them up, so they are there at once however long the list.
+
 The box above the list filters the current speaker's takes. Type some words, and only the takes whose label, transcript or
 notes contain all of them are shown, in any order and whatever the capitals; the counter beside **Takes** says how many of
 how many. The numbers do not change while a filter is on. Clear the box to see every take again.
+
+The two lists under the box choose the order of the takes and which of them to show:
+
+- **Newest first** (as the program starts), **Oldest first**, or **Script order**: the takes of each script line together,
+  in the order of the script and in the order they were read, then the takes of no line, newest first.
+- **All takes**, **Not kept**, **Kept**, **Changed** (kept clips with changes that **Update kept clip** has not written
+  yet), or, while a script is loaded, **Current line**: the takes of the line shown above the waveform.
+
+The filter box works inside what these show.
 
 ## Several takes at once
 
@@ -300,6 +397,24 @@ If you cut or silence a part that might hold spoken words, the transcript has to
 the clip: read it against the clip and choose **It matches**. Fades, gain and the Process settings change no words, so they
 do not ask, and neither does undoing back to the cuts you confirmed.
 
+### Markers
+
+A marker notes a moment to come back to: a slip in a long reading, say, or the start of the line you liked best. Press `M`:
+
+- **while recording**, it marks the newest sound, and the take keeps the marker when it ends. It counts the half second kept
+  from before you pressed Record, as the take does. The live waveform shows each one.
+- **while listening**, it marks the moment you hear.
+- **otherwise**, it marks the playhead.
+
+Each marker is a dashed line across the waveform, numbered in order at the top. `Alt+Right` moves the playhead to the next marker
+and `Alt+Left` to the one before, and the sound goes with it if it is playing; the status line says which marker it is. Press `M`
+on a marker to take it away.
+
+Markers are on the original recording's timeline, like the edits, so a cut does not move them; a marker inside a cut stays where
+it was. They are saved with the take, and when it is kept, in its sidecar (`markers`, see the
+[clip format](clip-format.md)). They say nothing about the sound, so adding one to a kept clip writes it into the sidecar at
+once and leaves the clip as it was kept: there is nothing to update. Undo does not take back a marker; `M` does.
+
 ## Splitting a long take
 
 **Split at pauses** (the toolbar's **...** menu or the gear menu) makes a new take of each part of a long take, cut in the middle
@@ -309,8 +424,11 @@ the speaker stopped. A last part too short to keep joins the one before.
 
 The long take stays as it is, so nothing is lost, and each part starts from the original recording, without the long take's
 edits. If the long take had a draft transcript, each part gets its share of the words; otherwise each is drafted by itself if you
-set that up. Each part is an ordinary take: edit it, keep it or discard it. Its sidecar says which take it came from
+set that up. Each part also gets the markers that fall inside it. Each part is an ordinary take: edit it, keep it or discard it. Its sidecar says which take it came from
 (`split_from`). When you have what you want, discard the long take.
+
+The parts are made one at a time, each written to the `masters` folder as it is made, with how far it has got in the status line.
+**Stop** at the bottom of the window stops it: the parts already made stay in the list, and the long take is still there.
 
 ## Process the whole take
 
@@ -345,6 +463,32 @@ count, because it is no longer in the clip.
 The noise floor is read from the quietest stretch of the clip (the quietest tenth of it, or the quietest fifth of a
 second, whichever is lower), so a take needs at least a short pause to be measured. Cutting the pauses short does not
 make the clip look noisier.
+
+### Audiobook delivery
+
+For an **Audition**, the end of the Check tab also measures the clip against the limits ACX gives for every file of an
+audiobook, in its [audio submission requirements](https://help.acx.com/s/article/what-are-the-acx-audio-submission-requirements)
+(the version of April 2026). Other audiobook sellers ask for much the same.
+
+| | ACX asks for | Measured here as |
+|---|---|---|
+| **Level (RMS)** | -23 to -18 dB RMS | the RMS level of the whole clip, its pauses included |
+| **Peak** | no higher than -3 dB | the highest sample |
+| **Noise floor** | no higher than -60 dB RMS | the RMS level of the quietest half second |
+
+Each row says what to change in **Process** when a limit is not met. It is advice for an audiobook, not a rule here: it
+never stops you keeping the clip. A few things to know:
+
+- The level is not the **Speech level** above it. Normalize puts the voiced parts at -20 dB, and the pauses bring the whole
+  clip lower, often to about -23 dB. Move the **Level** slider until the row is green.
+- For the peak, turn on the **Peak limiter** with its ceiling at -3.5 dB: a little under ACX's figure, because an MP3 made
+  from the clip can peak a little higher.
+- Raising the level raises the noise floor with it. If both cannot be met, the room is too noisy for an audiobook; **Noise
+  reduction** helps, and a quieter room helps most.
+- ACX does not say how it measures the noise floor. A part you silenced is left out, because digital silence is not the
+  sound of your room.
+- ACX also wants each file as an MP3 at 192 kbit/s or more, at 44.1 kHz, with 1 to 5 seconds of room tone at each end.
+  **Save a copy** makes MP3s at 128 kbit/s, so make the file you deliver in your audio editor.
 
 ## Auto analyze and Auto fix
 
@@ -388,7 +532,9 @@ The **Ready to keep?** card lists what is still needed, with a count of the prob
   take is added and its transcript is empty (the Clip tab says *Drafting...* while it is made), and **Suggest from
   audio** asks again from the edited clip. While the text is still exactly the recognizer's own, it follows your cuts:
   a moment after you stop cutting, a new draft of the edited clip replaces it. Text you typed or corrected is never
-  replaced that way. A draft is a guess: listen and correct it;
+  replaced that way. Drafts are made one at a time, the take in front first, and nothing else waits for them: after a
+  big import the bottom of the window says how many are still waiting, and closing the window does not wait for them. A
+  draft is a guess: listen and correct it;
 - the **origin** (where the recording came from) is entered;
 - the **allowed use** (what the voice may be used for) is entered;
 - you ticked **the permission box**, right above the Keep button: you have the right to use this voice for the allowed use
@@ -423,8 +569,12 @@ program, or on anything else that accepts a file. The clip's WAV file is **copie
 library, and a drag cannot move it out. A small movement is still a click that opens the take, and nothing is dragged for
 a take that is not kept, or while recording.
 
-Only the audio goes. The permission and origin are in the clip's sidecar, the `.json` file with the same name next to
-it, so send that along too when the voice is not your own (see [Responsible use](responsible-use.md)).
+The WAV carries one line of text that says what the clip may be used for: the clip's id, the name of its sidecar, the
+allowed use, and the date the permission was given. Windows shows it as *Comments* in the file's *Properties > Details*,
+though with any accented letter shown wrongly, and audio programs show it as the file's comment. The origin is left out,
+since it can say who the person is. Everything else, the origin included, is in the clip's sidecar, the
+`.json` file with the same name next to it, so send that along too when the voice is not your own (see
+[Responsible use](responsible-use.md)). Clips kept before version 0.7 do not have the line until they are kept again.
 
 ### Save a copy
 
@@ -443,7 +593,9 @@ right-click a kept take. Choose the format and the sample rate, then the file na
 The sample rate can be 16, 22.05, 24, 44.1 or 48 kHz. The copy is made from the kept clip, so a rate above the clip's own adds
 no detail; it is there for programs and sites that ask for 44.1 or 48 kHz. For that detail, use a
 [dataset](#export-a-dataset) made from the originals. The copy is a plain
-audio file: it has no sidecar, Voice Slate does not list it, and the permission records stay with the kept clip. It cannot
+audio file: it has no sidecar, Voice Slate does not list it, and the permission records stay with the kept clip. It does carry
+the same line about its allowed use as the kept clip, even for a clip kept before there was one; in an MP3 the accents are
+taken off that line, because an MP3's tag would show them wrongly everywhere. It cannot
 be saved inside the output folder, so that it is not taken for a kept clip. FFmpeg is not needed. The file dialog asks
 before it replaces a file.
 
@@ -452,7 +604,9 @@ before it replaces a file.
 A manifest is one file that lists the kept clips with their transcripts, so that a program that trains or tests on speech
 can read the whole set instead of walking the folders. Choose **Export manifest...** in the gear menu, say whether it
 should list the open speaker's clips or everyone's, and choose **JSON Lines** (`.jsonl`, one JSON object per line) or
-**CSV** (`.csv`, for spreadsheets and data tools), then the file name.
+**CSV** (`.csv`, for spreadsheets and data tools), then the file name. **Holds** says how many clips the choice lists and
+how long they are in all, read from their sidecars. A clip whose WAV has changed is still counted there, as that takes
+reading the WAV, and is left out when the manifest is written.
 
 ![The Export manifest dialog](images/manifest.png)
 
@@ -475,8 +629,8 @@ A manifest holds transcripts and notes about where each voice came from. Treat i
 ### Export a dataset
 
 A dataset is the kept clips gathered in one new folder, for a tool that trains or tests on speech. Choose **Export dataset...** in
-the gear menu, say whose clips, the layout, the sample rate and what to make the audio from, then choose an empty folder outside
-the output folder.
+the gear menu, say whose clips, the layout, the sample rate, what to make the audio from and whether to split it, then choose an
+empty folder outside the output folder. **Holds** says how many clips go in and how long they are, as for a manifest.
 
 ![The Export dataset dialog](images/dataset.png)
 
@@ -484,14 +638,55 @@ the output folder.
 |---|---|
 | **Clips with their sidecars** | A folder for each speaker, with each clip's WAV and its sidecar beside it, so the permission travels with the audio. |
 | **LJSpeech** | A `wavs` folder and a `metadata.csv` of `name\|text\|text` lines, the layout many text-to-speech tools read. It starts at 22.05 kHz, 16-bit, which is what the LJSpeech set itself is. |
+| **Hugging Face audio folder** | A `train` folder with the clips and a `metadata.csv` beside them, which the Hugging Face `datasets` library loads with `load_dataset("audiofolder", data_dir=...)`. It starts at 24 kHz, like the kept clips. |
+| **Kaldi** | The lists a Kaldi recipe reads, `wav.scp`, `text`, `utt2spk` and `spk2utt`, with the clips in a `wavs` folder. It starts at 16 kHz, 16-bit, which is what Kaldi recipes expect. The paths in `wav.scp` are relative to the dataset's folder, so run Kaldi from there or put the folder's path in front of them. The transcripts are as you typed them: a recipe that wants capitals and no punctuation has to change them. |
 
-Both also get a `manifest.jsonl` with the origin and allowed use of every clip.
+Every layout also gets a `manifest.jsonl` with the origin and allowed use of every clip, and each clip's WAV carries the
+line about its allowed use, as a kept clip does.
+
+**Split** puts some clips aside for validation: clips that a model is tested on and never trains on. Choose 5, 10 or 20 in a
+hundred. The same clips go aside every time you export the same clips; adding clips can move a few between the two parts.
+With two clips or more, at least one goes aside, and never all of them. Each layout shows the split the way its tool reads it:
+two folders, `train` and `validation`, for the Hugging Face, Kaldi and clips layouts, and two more lists for LJSpeech,
+`metadata_train.csv` and `metadata_validation.csv`, beside the whole `metadata.csv`. In `manifest.jsonl` each clip says which
+part it is in.
 
 **Made from** decides what the audio is. *The original recordings* goes through each clip's own edits and settings again at the
 rate you chose, which keeps detail a 24 kHz clip no longer has; a clip with noise reduction on needs FFmpeg for this. *The kept
 clips* resamples what was kept, which is quicker. The clips that go in are the ones a manifest would list, so one that has changed
 since it was kept, or whose release has run out, is left out and named. The job runs a few clips at a time, and **Stop** in the
 status bar stops it, keeping what is done.
+
+## Backing up, and moving to another PC
+
+Everything Voice Slate keeps is in the output folder: the speakers, every original recording, the kept clips and their
+sidecars, the releases, and the work on takes not kept yet. A copy of that folder is a whole backup.
+
+**Back up recordings...** in the gear menu copies the whole output folder to a place you choose, such as a USB drive or
+another disk: choose an empty folder outside the output folder. Each file is copied, then read back and checked against
+what was read, and at the end a list of every file with its SHA-256 is written beside them, as `voice-slate-backup.json`.
+Nothing in the output folder changes. It runs a file at a time, a long recording a part at a time, and **Stop** in the
+status bar stops it; a backup that was stopped, or that met a file it could not copy, removes what it had copied, so half a
+backup is never left to be taken for a whole one. A backup on the same disk as the output folder does not survive that disk:
+put it somewhere else. Recording waits while it runs.
+
+**Bring in a backup...** does the opposite, into an output folder that has no recordings yet. Choose the backup's folder,
+say yes, and each file is copied into the output folder and checked against the backup's own list, so a file that changed
+or was damaged since the backup was made is found: then nothing is brought in, the output folder is left empty, and the
+message names the file. The backup itself is never changed. A copy of an output folder made by hand, with no list, can be
+brought in too; each file is then checked against what was read.
+
+**To move to another PC:**
+
+1. On the old PC, choose **Back up recordings...** and back up to a USB drive or a shared folder.
+2. On the new PC, install Fel's Voice Slate and start it. Its output folder is empty.
+3. Choose **Bring in a backup...** and choose the backup on the drive. When it is done, the speakers and takes are there,
+   kept and not kept alike.
+
+If the new PC's output folder already has recordings, choose an empty folder in **Settings > Output folder** first. Settings
+such as the theme, the keys and the speech recognizer are not in the output folder and do not move; set them again on the
+new PC. You can also leave the backup where it is and point **Settings > Output folder** at a copy of it, which uses it as it
+is, with no copying.
 
 ## Settings
 
@@ -504,7 +699,8 @@ Open them with the gear at the top right, or `Ctrl+,`.
 | **Output folder** | Where speakers, originals and kept clips are stored. By default `C:\Users\<you>\Recordings\voice-clips`. A copy from before 0.5 goes on using the `voice-clips` folder in its program folder if it has recordings in it. Choose another folder and, if the old one has recordings and the new one is empty, it offers to move them: each file is copied and checked, and the old ones go only when all of them have arrived. Keep it out of synced folders unless you want a cloud copy of the recordings. |
 | **Stop tail** | How long recording carries on after you press Stop, 0 to 1 second. |
 | **Look** | The theme (dark, light, high contrast, or as in Windows), the size of the whole window from 100% to 200%, and the language. They are used the next time the program starts. Without a size chosen it follows Windows' own *Text size* setting, and without a language it follows Windows, if there is a translation. |
-| **Playback device** | Where takes are played. Windows' default, unless you choose one. A device that is not connected stays in the list, and playback goes to the default until it is back. |
+| **Playback device** | Where takes are played. Windows' default, unless you choose one. Any take plays on any device in the list: one that will not take the take's own sample rate gets it converted. A device that is not connected stays in the list, and playback goes to the default until it is back. If the device chosen will not play at all, the take plays through Windows' default and the status line says so. |
+| **Devices** | Each microphone and output is listed once, by its full name. **List every Windows audio interface** shows each of them once for each way Windows offers it (MME, DirectSound, WASAPI and WDM-KS), with the interface after the name, for the rare computer where a device is missing otherwise. A device chosen before 0.7 is found again in either list. |
 | **Record key** | The key that starts and stops recording: a function key, or a letter or number held with Ctrl or Alt, so that it cannot be typed by accident. The box below it lets it work while another program is in front, which is off until you turn it on. Windows tells Voice Slate when that one key is pressed; it is not a keyboard hook, and no other key is seen. While it is on, other programs do not receive the key. If another program already holds it, the status line says so at start-up and it works only in this window. |
 | **FFmpeg** | Path of `ffmpeg.exe`. Leave it empty to search `PATH` and the WinGet folders. |
 | **Speech recognizer: Python** and **model** | The optional draft-transcript setup: a `python.exe` that has [faster-whisper](https://github.com/SYSTRAN/faster-whisper) installed, and a faster-whisper model folder. Both are needed. `setup-transcripts.bat` installs both and fills these in for you (see the README); you only type them here to use a recognizer you already have. |
@@ -525,7 +721,8 @@ the tooltip of *Draft transcripts* at the bottom of the window.
 Everything can be reached with `Tab`. In the list of takes, `Up` and `Down` open a take, `Shift` with them selects several, and the
 key for a context menu (or `Shift+F10`) opens the menu of the row. On the waveform, `Left` and `Right` move the playhead, `[` and `]`
 set the start and end of a selection, and `Delete` cuts it. `Alt+Down` and `Alt+Up` walk the takes from anywhere. The words under
-the waveform are links: `Tab` moves between them, and `Enter` selects one.
+the waveform are links: `Tab` moves between them, and `Enter` selects one. A script can be read with no mouse at all: see
+[Reading a script hands-free](#reading-a-script-hands-free).
 
 Every control has a name a screen reader can read, the rows of the list say what each take is, and what the status line says
 is read out as it changes: *Recording*, *Take saved*, *Kept*. The marks in the checklist and the script are read as words,
@@ -573,7 +770,10 @@ Move the whole folder somewhere short, such as `C:\VoiceSlate`, delete its `.ven
 
 **My microphone is not listed, or the meter does not move.** In Windows, open *Settings > Privacy & security >
 Microphone* and make sure access is on, including *Let desktop apps access your microphone*. Then choose **Refresh
-devices** in the gear menu. If the device is listed under several names, try the others.
+devices** in the gear menu. If it is still missing, or a device that is listed gives no sound, turn on **List every
+Windows audio interface** in Settings: each device then appears once for each way Windows offers it (MME, DirectSound,
+WASAPI and WDM-KS), and one of the others may work. In a remote desktop session the lists show every interface by
+themselves, because the usual one offers no microphone there.
 
 **System audio says "Nothing captured", or lists no device.** Something has to be playing on the chosen output while you
 record. Some setups, such as a remote desktop session, may not offer a loopback device at all.
@@ -592,7 +792,8 @@ the program wins over the one in `%APPDATA%`.
 
 **The transcript setup stops with an error.** It changes nothing in your settings when a step fails, so you can run
 `setup-transcripts.bat` again. Check the internet connection first (it needs PyPI and Hugging Face), and that the drive
-has room: about 450 MB for the recognizer and the base model, 800 MB with `small`. If the message talks about a path
+has room: about 450 MB for the recognizer and the base model, 800 MB with `small`, and about 2 GB with `medium` or
+`large-v3-turbo`. If the message talks about a path
 that is too long, the program folder is nested too deeply: move the whole folder somewhere short, such as
 `C:\VoiceSlate`, delete its `.venv-asr` folder, and run the setup again. To start over, delete the `.venv-asr` and
 `models` folders.
@@ -624,6 +825,21 @@ be set high. The window needs at least 1100 by 600 at its own scale. Choose a sm
 **My recordings seem to have gone after an update.** Since 0.5 a new copy looks in `C:\Users\<you>\Recordings\voice-clips`. If your
 recordings are in a `voice-clips` folder in the old program folder, choose it as the **Output folder** in Settings, or move it.
 
+**It says "Your recordings folder cannot be reached".** The **Output folder** in Settings is on a drive, memory stick or network
+place that is not connected now, or a file stands where the folder should be. Your recordings are not lost: the program has not
+changed anything there, and does not start a new library somewhere else. The window says which folder it is. Connect the drive (or
+move the file) and choose **Try again**, or choose another folder in Settings. Until then Record, Import and New speaker say why they
+cannot work, instead of failing.
+
+**It says a recording is too long to import.** Working on a take needs it in memory several times over (the recording, its mix,
+and what playing, measuring and keeping work out from it), so a recording past a certain length would starve Windows. The
+message says how long the recording is, how much memory it would need, how much this computer has, and how short the parts
+should be. Cut it into parts with an audio editor (Audacity, say) and import those.
+
+**The pointer turns into an hourglass when I press Keep or Play.** On a take over two minutes long, getting the clip ready
+takes a moment, and the status line says what is being done. Noise reduction takes the longest. It is back as soon as the clip
+is ready. Opening a long take from the list does the same, and its waveform may take a moment longer to appear.
+
 **A saved clip is missing from the list.** The program lists a message in the status line when a sidecar cannot be used,
 and does not change the files. Common reasons are a moved or deleted original, or a sidecar edited by hand. The other clips
 load as usual, and the files stay where they are.
@@ -632,8 +848,11 @@ load as usual, and the files stay where they are.
 the reason, usually a full disk or a clip open in another program. Your work on the take goes on being saved. Fix the
 problem and press Keep again.
 
-**It says "Could not play".** The sound could not reach an output device. Check that one is connected and chosen as the
-default in Windows' sound settings.
+**It says "Could not play".** The sound could not reach any output device, not even Windows' default. Check that one is
+connected and chosen as the default in Windows' sound settings.
+
+**It says it is playing through Windows' default.** The playback device chosen in Settings would not play the take, so it
+went to Windows' default instead. Choose another device under **Playback device** in Settings, or Windows' default.
 
 **A message says "Something went wrong".** The program ran into something it did not expect. It says what, and the details
 are in `voice-slate.log`. Your recordings are not affected, but the last thing you did may not have finished, so check it.

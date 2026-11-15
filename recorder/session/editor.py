@@ -10,9 +10,13 @@ from ..clean import CleanError
 from ..core import analysis, autofix, chain as chain_mod
 from ..core import render
 from ..core.edits import WORD_OPS, words_key
+from ..i18n import tr
+from ..store import clean_markers
 
 Normalized = namedtuple('Normalized', 'gain_db wanted_db capped')
 GAIN_STEP_LIMITS = chain_mod.LIMITS[('level', 'gain_db')]
+MARKER_REACH = 0.05             # seconds: a marker this near the moment marked is the one taken away instead
+MARKER_PASSED = 0.001           # a marker this near the playhead is the one it is on, not the next
 
 
 class Editor:
@@ -48,6 +52,50 @@ class Editor:
     def set_playhead(self, t):
         self.playhead = self._clamp(t)
         self.bus.notify('playhead')
+
+    # ---- markers --------------------------------------------------------------------------------------------------------
+
+    def markers(self):
+        take = self.take
+        return list(take.meta.get('markers') or []) if take is not None else []
+
+    def toggle_marker(self, t=None):
+        """Drop a marker at `t` (the playhead if not given), or take away the one already there. Markers are saved with the
+        take, and with a kept clip in its sidecar alone: they do not change the sound, so the clip stays as it was kept."""
+        take = self.take
+        if take is None:
+            return
+        t = self._clamp(self.playhead if t is None else t)
+        markers = self.markers()
+        near = min(markers, key=lambda m: abs(m - t), default=None)
+        if near is not None and abs(near - t) <= MARKER_REACH:
+            markers.remove(near)
+            message = tr('Marker taken away at {seconds} s.').format(seconds=f'{near:.2f}')
+        else:
+            markers.append(t)
+            ordered = clean_markers(markers, take.seconds)
+            message = tr('Marker {number} of {count} at {seconds} s. Press M on it to take it away.').format(
+                number=ordered.index(round(t, 3)) + 1, count=len(ordered), seconds=f'{t:.2f}')
+        take.meta['markers'] = clean_markers(markers, take.seconds)
+        self.bus.notify('meta', take)
+        self.bus.status(message)
+
+    def marker_beside(self, t, forward):
+        """The first marker after `t`, or the last one before it; None when there is none that way."""
+        markers = self.markers()
+        if forward:
+            return next((m for m in markers if m > t + MARKER_PASSED), None)
+        return next((m for m in reversed(markers) if m < t - MARKER_PASSED), None)
+
+    def went_to_marker(self, moment, forward):
+        """Say which marker the playhead went to, or with `moment` None that there is none that way."""
+        markers = self.markers()
+        if moment is None or moment not in markers:
+            self.bus.status(tr('There is no marker after the playhead.') if forward else
+                            tr('There is no marker before the playhead.'))
+            return
+        self.bus.status(tr('Marker {number} of {count}, at {seconds} s.').format(
+            number=markers.index(moment) + 1, count=len(markers), seconds=f'{moment:.2f}'))
 
     def set_selection(self, a, b):
         """Select a range (in either order). A range of no length clears the selection."""
@@ -118,7 +166,7 @@ class Editor:
             n = len(take.samples)
             cuts = ac.cut_ranges(take.history.edits, take.rate, n, take.mono)
             if not ac.kept_segments(cuts, n):       # the snapped ranges can remove more than the times suggest
-                raise ValueError('A cut cannot remove the whole clip')
+                raise ValueError(tr('A cut cannot remove the whole clip'))
         except ValueError as e:
             take.history = before
             self.bus.status(str(e))
@@ -142,12 +190,12 @@ class Editor:
 
     def _need_selection(self, what):
         if self.sel is None:
-            self.bus.status(f'Select a range on the waveform first ({what}).')
+            self.bus.status(tr('Select a range on the waveform first ({what}).').format(what=what))
             return None
         return self.sel
 
     def cut_selection(self):
-        sel = self._need_selection('drag across it')
+        sel = self._need_selection(tr('drag across it'))
         if sel:
             self._apply(lambda h: h.cut(*sel), 'Cut recorded. The master file is unchanged.')
 
@@ -165,7 +213,7 @@ class Editor:
         self._apply(lambda h: h.cut(start, take.seconds), 'Cut recorded. The master file is unchanged.')
 
     def keep_only_selection(self):
-        sel = self._need_selection('the part to keep')
+        sel = self._need_selection(tr('the part to keep'))
         take = self.take
         if not sel or take is None:
             return
@@ -177,24 +225,25 @@ class Editor:
                 ops.append(('cut', 0.0, a, {}))
             if b < take.seconds - 1e-6:
                 ops.append(('cut', b, take.seconds, {}))
-            history.add_ops(ops, label='Keep only the selection')
+            history.add_ops(ops, label=tr('Keep only the selection'))
 
         self._apply(run, 'Cut recorded. The master file is unchanged.')
 
     def silence_selection(self):
-        sel = self._need_selection('the part to silence')
+        sel = self._need_selection(tr('the part to silence'))
         if sel:
             self._apply(lambda h: h.silence(*sel), 'Silenced. The words in that part are gone from the clip.')
 
     def fade_selection(self, direction):
-        sel = self._need_selection(f'for the fade {direction}')
+        sel = self._need_selection(tr('for the fade in' if direction == 'in' else 'for the fade out'))
         if sel:
-            self._apply(lambda h: h.fade(direction, *sel), f'Fade {direction} added.')
+            self._apply(lambda h: h.fade(direction, *sel), tr('Fade in added.' if direction == 'in' else 'Fade out added.'))
 
     def gain_selection(self, gain_db):
-        sel = self._need_selection('the part to change')
+        sel = self._need_selection(tr('the part to change'))
         if sel:
-            self._apply(lambda h: h.gain(gain_db, *sel), f'Gain {float(gain_db):+.1f} dB on the selection.')
+            self._apply(lambda h: h.gain(gain_db, *sel),
+                        tr('Gain {gain} dB on the selection.').format(gain=f'{float(gain_db):+.1f}'))
 
     # ---- operations found by analysis ---------------------------------------------------------------------------------
 
@@ -203,7 +252,7 @@ class Editor:
         take = self.take
         lib = self.workspace.lib
         audio = lib.before_level(take)
-        segments = render.segments_of(take.samples, take.rate, take.history.edits)
+        segments = render.segments_of(take.mono, take.rate, take.history.edits)
         return audio, segments
 
     def _to_master(self, ranges, segments, rate):
@@ -214,12 +263,12 @@ class Editor:
 
     def auto_trim(self, margin=0.15):
         """Cut the pauses at both ends of the clip down to `margin` seconds."""
-        self._analysed_cuts('Auto-trim', 'Nothing to trim: the ends are already tight.',
+        self._analysed_cuts(tr('Auto-trim'), tr('Nothing to trim: the ends are already tight.'),
                             lambda audio, rate: analysis.auto_trim_ranges(audio, rate, margin))
 
     def shorten_pauses(self, keep_seconds=0.5):
         """Cut long pauses inside the clip down to `keep_seconds` each."""
-        self._analysed_cuts('Shorten pauses', 'No pause is longer than that.',
+        self._analysed_cuts(tr('Shorten pauses'), tr('No pause is longer than that.'),
                             lambda audio, rate: analysis.shorten_pause_ranges(audio, rate, keep_seconds))
 
     def _analysed_cuts(self, label, nothing, finder):
@@ -236,17 +285,20 @@ class Editor:
             self.bus.status(nothing)
             return
         ops = [('cut', a, b, {}) for a, b in ranges]
-        self._apply(lambda h: h.add_ops(ops, label=f'{label} ({len(ops)} cut{"s" if len(ops) > 1 else ""})'),
-                    f'{label}: {len(ops)} cut{"s" if len(ops) > 1 else ""} recorded.')
+        one = len(ops) == 1
+        step = tr('{name} ({count} cut)' if one else '{name} ({count} cuts)').format(name=label, count=len(ops))
+        self._apply(lambda h: h.add_ops(ops, label=step),
+                    tr('{name}: {count} cut recorded.' if one else '{name}: {count} cuts recorded.').format(
+                        name=label, count=len(ops)))
 
     def apply_auto_fix(self, diagnosis):
         """Apply an Auto fix plan (core/autofix.py) as one undo step. Returns True if it was applied."""
         def run(history):
             if not history.add_step(diagnosis.ops, diagnosis.chain, diagnosis.label):
-                raise ValueError('Auto fix has nothing to change.')
+                raise ValueError(tr('Auto fix has nothing to change.'))
 
-        return self._apply(run, f'{diagnosis.label} done. Undo takes all of it back in one step. '
-                                'The original recording is unchanged.')
+        return self._apply(run, tr('{name} done. Undo takes all of it back in one step. The original recording is '
+                                   'unchanged.').format(name=diagnosis.label))
 
     # ---- history ------------------------------------------------------------------------------------------------------
 
@@ -275,7 +327,7 @@ class Editor:
             take.history.remove(index)
             if not ac.kept_segments(ac.cut_ranges(take.history.edits, take.rate, len(take.samples), take.mono),
                                     len(take.samples)):
-                raise ValueError('A cut cannot remove the whole clip')
+                raise ValueError(tr('A cut cannot remove the whole clip'))
         except (ValueError, IndexError) as e:
             take.history = before
             self.bus.status(str(e))
@@ -306,7 +358,7 @@ class Editor:
         return changed
 
     def set_denoise(self, enabled):
-        changed = self.set_chain('denoise', 'Noise cleaning on' if enabled else 'Noise cleaning off', enabled=enabled)
+        changed = self.set_chain('denoise', tr('Noise reduction on' if enabled else 'Noise reduction off'), enabled=enabled)
         if changed and enabled:
             self.bus.status('Cleaning background noise. This runs FFmpeg on the clip.')
         return changed
@@ -325,9 +377,9 @@ class Editor:
             self.bus.status(str(e))
             return None
         nf = autofix.noise_setting(floor)
-        self.set_chain('denoise', f'Noise floor {nf:.0f} dB, from this clip', enabled=True, nf=nf)
-        self.bus.status(f'Noise floor of this clip: {floor:.0f} dB. Noise reduction is set {nf - floor:.0f} dB above it. '
-                        'Listen to the result.')
+        self.set_chain('denoise', tr('Noise floor {db} dB, from this clip').format(db=f'{nf:.0f}'), enabled=True, nf=nf)
+        self.bus.status(tr('Noise floor of this clip: {floor} dB. Noise reduction is set {above} dB above it. Listen to the '
+                           'result.').format(floor=f'{floor:.0f}', above=f'{nf - floor:.0f}'))
         return nf
 
     def normalize_level(self, limit=None):
@@ -349,15 +401,16 @@ class Editor:
         changes = {'level': {'gain_db': gain}}
         if use_limiter and not take.history.chain['limiter']['enabled']:
             changes['limiter'] = {'enabled': True}
-        take.history.update_chain(changes, f'Normalize {gain:+.1f} dB')
+        take.history.update_chain(changes, tr('Normalize {gain} dB').format(gain=f'{gain:+.1f}'))
         capped = not use_limiter and wanted - gain > 1.0
         self.bus.notify('edits')
-        message = f'Level set to {gain:+.1f} dB. The original recording is unchanged.'
+        message = tr('Level set to {gain} dB. The original recording is unchanged.').format(gain=f'{gain:+.1f}')
         if capped:
-            message += f' A loud peak holds it below the {wanted:+.1f} dB the speech needs: turn on the limiter.'
+            message += ' ' + tr('A loud peak holds it below the {wanted} dB the speech needs: turn on the limiter.').format(
+                wanted=f'{wanted:+.1f}')
         self.bus.status(message)
         return Normalized(gain, wanted, capped)
 
     def reset_level(self):
-        if self.set_chain('level', 'Level reset', gain_db=0.0):
+        if self.set_chain('level', tr('Level reset'), gain_db=0.0):
             self.bus.status('Level reset to the recorded level.')

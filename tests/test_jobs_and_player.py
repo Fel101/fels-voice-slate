@@ -74,12 +74,21 @@ class FakeStream:
 
 
 class Rig:
-    def __init__(self):
-        self.streams = []
-        self.player = Player(stream_factory=self.make)
+    """A player on a stand-in sound card. `refuse(rate, device)` says which streams will not open, as an output that
+    takes only its own rate does, and `own_rate` is the rate each device says it runs at."""
 
-    def make(self, rate, callback):
+    def __init__(self, refuse=lambda rate, device: False, own_rate=48000):
+        self.streams = []
+        self.tried = []
+        self.refuse = refuse
+        self.player = Player(stream_factory=self.make, own_rate=lambda device: own_rate)
+
+    def make(self, rate, callback, device):
+        self.tried.append((rate, device))
+        if self.refuse(rate, device):
+            raise OSError(f'Error opening OutputStream: Invalid sample rate, device {device} at {rate}')
         stream = FakeStream(rate, callback)
+        stream.device = device
         self.streams.append(stream)
         return stream
 
@@ -191,3 +200,112 @@ def test_a_device_that_will_not_close_does_not_raise(rig):
     rig.streams[-1].stop = lambda: (_ for _ in ()).throw(OSError('device removed'))
     rig.player.stop()
     assert isinstance(rig.player.error, OSError) and not rig.player.active
+
+
+# ---- an output that will not take the take's rate -----------------------------------------------------------------------
+
+def tone(seconds, rate, freq=5.0):
+    return np.sin(2 * np.pi * freq * np.arange(int(seconds * rate)) / rate).astype(np.float32)
+
+
+def test_an_output_that_refuses_the_takes_rate_plays_it_at_its_own():
+    """A WASAPI or WDM-KS output that runs at 2000 here, given a take at 1000: the take is resampled, and the position,
+    seeking and the loop are still in seconds of the take."""
+    rig = Rig(refuse=lambda rate, device: rate != 2000, own_rate=2000)
+    rig.player.device = 5
+    rig.player.load(tone(1.0, 1000), 1000)
+    rig.player.play(start=0.25)
+    assert rig.tried == [(1000, 5), (2000, 5)] and rig.streams[-1].device == 5 and rig.player.fallback is None
+    assert rig.player.seconds == pytest.approx(1.0) and rig.player.position == pytest.approx(0.25)
+    heard = rig.pull(400)
+    assert np.allclose(heard, tone(1.0, 2000)[500:900], atol=0.01)       # the same sound, twice as many samples
+    assert rig.player.position == pytest.approx(0.45)
+    rig.player.seek(0.8)
+    assert np.allclose(rig.pull(10), tone(1.0, 2000)[1600:1610], atol=0.01)
+    rig.player.set_loop((0.5, 0.6))
+    rig.player.seek(0.55)
+    rig.pull(150)
+    assert rig.player.position == pytest.approx(0.525)     # to the loop's end at 0.6, then 0.025 s from its start
+
+
+def test_the_resampled_take_is_made_once_for_each_load(monkeypatch):
+    import recorder.audio_io as audio_io
+    made = []
+    real = audio_io.resample
+    monkeypatch.setattr(audio_io, 'resample', lambda x, a, b: made.append(b) or real(x, a, b))
+    rig = Rig(refuse=lambda rate, device: rate != 2000, own_rate=2000)
+    rig.player.load(tone(1.0, 1000), 1000)
+    rig.player.play()
+    rig.player.play(start=0.5)
+    assert made == [2000]
+    rig.player.load(tone(1.0, 1000), 1000)
+    rig.player.play()
+    assert made == [2000, 2000]
+
+
+def test_a_b_carries_on_at_the_rate_the_output_took():
+    rig = Rig(refuse=lambda rate, device: rate != 2000, own_rate=2000)
+    rig.player.load(tone(1.0, 1000), 1000)
+    rig.player.play()
+    rig.pull(100)
+    other = tone(1.0, 1000, freq=3.0)
+    rig.player.swap(other, 1000, 0.5)
+    assert rig.player.position == pytest.approx(0.5)
+    assert np.allclose(rig.pull(10), tone(1.0, 2000, freq=3.0)[1000:1010], atol=0.01)
+    with pytest.raises(ValueError):
+        rig.player.swap(other, 2000, 0.0)       # what the output runs at is not the take's rate
+
+
+def test_an_output_that_opens_at_no_rate_gives_way_to_windows_default():
+    rig = Rig(refuse=lambda rate, device: device == 5)
+    rig.player.device = 5
+    rig.player.load(counting(), 1000)
+    rig.player.play()
+    assert rig.tried == [(1000, 5), (48000, 5), (1000, None)]
+    assert rig.streams[-1].device is None and rig.streams[-1].started and rig.player.playing
+    assert 'device 5 at 1000' in str(rig.player.fallback)
+    assert np.array_equal(rig.pull(10), counting()[:10])
+    rig.refuse = lambda rate, device: False
+    rig.player.play()
+    assert rig.player.fallback is None and rig.streams[-1].device == 5
+
+
+def test_a_stream_that_opens_but_will_not_start_is_closed_and_the_next_tried():
+    rig = Rig()
+    rig.player.device = 5
+    opened = []
+    make = rig.make
+
+    def will_not_start(rate, callback, device):
+        stream = make(rate, callback, device)
+        opened.append(stream)
+        if device == 5:
+            stream.start = lambda: (_ for _ in ()).throw(OSError('Error starting stream: Invalid device'))
+        return stream
+
+    rig.player._factory = will_not_start
+    rig.player.load(counting(), 1000)
+    rig.player.play()
+    assert [s.device for s in opened] == [5, 5, None]
+    assert all(s.closed for s in opened[:2]) and opened[2].started and not opened[2].closed
+    assert 'Invalid device' in str(rig.player.fallback)
+
+
+def test_with_no_output_at_all_the_chosen_ones_own_error_is_raised():
+    rig = Rig(refuse=lambda rate, device: True)
+    rig.player.device = 5
+    rig.player.load(counting(), 1000)
+    with pytest.raises(OSError, match='device 5 at 1000'):
+        rig.player.play()
+    assert not rig.player.active and rig.streams == []
+
+
+def test_a_device_that_cannot_be_described_still_gets_its_take_rate_tried():
+    def unknown(device):
+        raise OSError('Error querying device -1')
+
+    rig = Rig()
+    rig.player._own_rate = unknown
+    rig.player.load(counting(), 1000)
+    rig.player.play()
+    assert rig.tried == [(1000, None)] and rig.player.playing

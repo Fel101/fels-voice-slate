@@ -8,14 +8,17 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QFrame, QLabel, QLineEdit, 
 
 from .. import audio_core as ac
 from .. import clean
+from ..core import analysis
 from ..core import chain as chain_mod
 from ..core import reading
 from ..i18n import tr
-from ..session.workspace import reading_of
+from ..session.workspace import kept_total, reading_of
 from ..store import LABEL_MAX
 from . import theme
+from .library import reading_said
 from .palette import PALETTE, color
-from .widgets import Segmented, Switch, button, caption, card, chip, clear_layout, hbox, label, set_chip, vbox
+from .widgets import (Segmented, Switch, button, caption, card, chip, clear_layout, flow, format_total, hbox, label,
+                      lay_out_now, set_chip, vbox)
 
 
 # ---- the Clip page ----------------------------------------------------------------------------------------------------
@@ -135,14 +138,13 @@ class ClipPage(QWidget):
         self.source_url = self._field(layout, 'Source URL (optional)', 'A link to the original, if there is one',
                                       'source_url')
         layout.addSpacing(4)
-        row = hbox(spacing=4)
+        row = flow(spacing=4)                                   # two lines when a translation is too wide for one
         self.copy_text = button('Copy transcript', 'ghost', 'copy')
         self.copy_text.clicked.connect(lambda: self.copyRequested.emit('transcript'))
         self.copy_path = button('Copy file path', 'ghost', 'copy', 'The kept WAV file')
         self.copy_path.clicked.connect(lambda: self.copyRequested.emit('path'))
         row.addWidget(self.copy_text)
         row.addWidget(self.copy_path)
-        row.addStretch(1)
         layout.addLayout(row)
         layout.addStretch(1)
 
@@ -199,9 +201,7 @@ class ClipPage(QWidget):
         self.reading.setVisible(check is not None)
         if check is not None:
             count = reading.differences(check)
-            self.reading_title.setText(tr('Reading check: read as written') if not count else
-                                       tr('Reading check: {count} place differs' if count == 1 else
-                                          'Reading check: {count} places differ').format(count=count))
+            self.reading_title.setText(reading_said(count))
             self.reading_text.setText(reading_html(check))
             self.reading_text.setVisible(bool(count))
             heard = str(take.meta.get('draft_text') or '').strip()
@@ -267,18 +267,20 @@ class ProcessPage(QWidget):
         lo, hi = chain_mod.LIMITS[('highpass', 'hz')]
         self.hp = StepCard('High-pass filter', 'Removes room rumble and desk thumps below the cutoff.')
         self.hp_slider = self.hp.add_slider(lo, hi)
-        self.hp.switch.toggled.connect(lambda on: self._set('highpass', f'High-pass {"on" if on else "off"}', enabled=on))
+        self.hp.switch.toggled.connect(lambda on: self._set('highpass', tr('High-pass on' if on else 'High-pass off'),
+                                                            enabled=on))
         self.hp_slider.valueChanged.connect(
-            lambda v: self._set('highpass', f'High-pass {v} Hz', merge='highpass.hz', hz=float(v)))
+            lambda v: self._set('highpass', tr('High-pass {hz} Hz').format(hz=v), merge='highpass.hz', hz=float(v)))
         layout.addWidget(self.hp)
 
         self.hum = StepCard('Hum filter', 'Notches mains hum and its harmonics. The Check tab says if hum was found.')
         self.hum_region = Segmented(['50 Hz', '60 Hz'], 1)
         self.hum_region.setAccessibleName('Mains frequency')
         self.hum.body.addWidget(self.hum_region)
-        self.hum.switch.toggled.connect(lambda on: self._set('hum', f'Hum filter {"on" if on else "off"}', enabled=on))
+        self.hum.switch.toggled.connect(lambda on: self._set('hum', tr('Hum filter on' if on else 'Hum filter off'),
+                                                             enabled=on))
         self.hum_region.currentChanged.connect(
-            lambda i: self._set('hum', f'Hum filter {(50, 60)[i]} Hz', hz=float((50, 60)[i])))
+            lambda i: self._set('hum', tr('Hum filter {hz} Hz').format(hz=(50, 60)[i]), hz=float((50, 60)[i])))
         layout.addWidget(self.hum)
 
         lo, hi = chain_mod.LIMITS[('denoise', 'nf')]
@@ -292,15 +294,16 @@ class ProcessPage(QWidget):
         self.denoise_note = self.denoise.add_note('Voice identity is not checked. Listen first.')
         self.denoise.switch.toggled.connect(self.session.editor.set_denoise)
         self.denoise_slider.valueChanged.connect(
-            lambda v: self._set('denoise', f'Noise floor {v} dB', merge='denoise.nf', nf=float(v)))
+            lambda v: self._set('denoise', tr('Noise floor {db} dB').format(db=v), merge='denoise.nf', nf=float(v)))
         layout.addWidget(self.denoise)
 
         lo, hi = chain_mod.LIMITS[('level', 'gain_db')]
-        self.level = StepCard('Level', f'Gain for the whole clip. Normalize puts the speech at {ac.TARGET_VOICED_DB:.0f} dB '
-                                       'RMS.', switch=False)
+        self.level = StepCard('Level', tr('Gain for the whole clip. Normalize puts the speech at {target} dB RMS.').format(
+            target=f'{ac.TARGET_VOICED_DB:.0f}'), switch=False)
         self.gain_slider = self.level.add_slider(lo, hi, 10)
         self.gain_slider.valueChanged.connect(
-            lambda v: self._set('level', f'Gain {v / 10:+.1f} dB', merge='level.gain', gain_db=v / 10))
+            lambda v: self._set('level', tr('Gain {gain} dB').format(gain=f'{v / 10:+.1f}'), merge='level.gain',
+                                gain_db=v / 10))
         row = hbox(spacing=6)
         self.normalize = button('Normalize', None, None, 'Set the gain so the speech sits at the target level')
         self.normalize.clicked.connect(lambda: self.session.editor.normalize_level())
@@ -316,9 +319,11 @@ class ProcessPage(QWidget):
         self.limiter = StepCard('Peak limiter', 'Catches a pop or a loud peak so Normalize can bring the speech up '
                                                 'without clipping.')
         self.ceiling_slider = self.limiter.add_slider(lo, hi, 10)
-        self.limiter.switch.toggled.connect(lambda on: self._set('limiter', f'Limiter {"on" if on else "off"}', enabled=on))
+        self.limiter.switch.toggled.connect(lambda on: self._set('limiter', tr('Limiter on' if on else 'Limiter off'),
+                                                                 enabled=on))
         self.ceiling_slider.valueChanged.connect(
-            lambda v: self._set('limiter', f'Ceiling {v / 10:.1f} dB', merge='limiter.ceiling', ceiling_db=v / 10))
+            lambda v: self._set('limiter', tr('Ceiling {db} dB').format(db=f'{v / 10:.1f}'), merge='limiter.ceiling',
+                                ceiling_db=v / 10))
         layout.addWidget(self.limiter)
 
         self.fade = StepCard('Join fade', 'A short crossfade where two parts meet after a cut, so the join does not click.',
@@ -380,11 +385,11 @@ class ProcessPage(QWidget):
     def _refresh_history(self, history):
         self.history.blockSignals(True)
         self.history.clear()
-        for i, text in enumerate(['Start'] + history.steps):
+        for i, text in enumerate([tr('Beginning')] + history.steps):        # not "Start", which is a button's word
             item = QListWidgetItem(text)
             if i > history.position:
                 item.setForeground(color('dim'))
-                item.setToolTip('Undone. Click to redo up to here.')
+                item.setToolTip(tr('Undone. Click to redo up to here.'))
             self.history.addItem(item)
         self.history.setCurrentRow(history.position)
         self.history.scrollToItem(self.history.currentItem())
@@ -395,6 +400,38 @@ class ProcessPage(QWidget):
 
 STATUS_COLOURS = {'ok': 'green', 'warn': 'amber', 'bad': 'red', 'info': 'muted'}
 STATUS_WORDS = {'ok': 'Good', 'warn': 'Worth a look', 'bad': 'Problem', 'info': 'Note'}       # what a coloured dot means, read out
+ACX_CEILING_DB = -3.5           # the limiter ceiling to suggest: under ACX's -3 dB, as an MP3 made from the clip can peak higher
+
+
+def delivery_rows(delivery):
+    """The Check rows of an Audition against ACX's limits for an audiobook (analysis.Delivery), in the language in use.
+    A limit that is not met is worth a look and never a problem: it is advice, and Keep does not ask for it."""
+    low, high = analysis.ACX_RMS_DB
+    level = tr('ACX asks for {low} to {high} dB RMS, measured over the whole file with its pauses.').format(
+        low=f'{low:g}', high=f'{high:g}')
+    if not delivery.level_ok:
+        gain = f'{abs((low + high) / 2 - delivery.rms_db):.1f}'
+        level += ' ' + (tr('Raise the Level in Process by about {gain} dB to reach the middle of that range.')
+                        if delivery.rms_db < low else
+                        tr('Lower the Level in Process by about {gain} dB to reach the middle of that range.')).format(gain=gain)
+    peak = tr('ACX asks for peaks no higher than {peak} dB.').format(peak=f'{analysis.ACX_PEAK_DB:g}')
+    if not delivery.peak_ok:
+        peak += ' ' + tr('Turn on the Peak limiter in Process with its ceiling at {ceiling} dB: a little lower, because an '
+                         'MP3 made from the clip can peak higher.').format(ceiling=f'{ACX_CEILING_DB:g}')
+    noise = tr('ACX asks for a noise floor no higher than {noise} dB RMS. Here it is the quietest half second of the '
+               'clip.').format(noise=f'{analysis.ACX_NOISE_DB:g}')
+    if delivery.noise_db is None:
+        noise += ' ' + tr('The clip has no half second without digital silence to read it from.')
+    elif not delivery.noise_ok:
+        noise += ' ' + tr('Noise reduction in Process lowers it, and so does less gain. A quieter room lowers it most.')
+    return [
+        analysis.Check('acx_level', tr('Level (RMS)'), f'{delivery.rms_db:.1f} dB RMS',
+                       'ok' if delivery.level_ok else 'warn', level),
+        analysis.Check('acx_peak', tr('Peak'), f'{delivery.peak_db:.1f} dBFS', 'ok' if delivery.peak_ok else 'warn', peak),
+        analysis.Check('acx_noise', tr('Noise floor'),
+                       tr('not measured') if delivery.noise_db is None else f'{delivery.noise_db:.1f} dB RMS',
+                       'info' if delivery.noise_db is None else 'ok' if delivery.noise_ok else 'warn', noise),
+    ]
 
 
 class AutoCard(QFrame):
@@ -419,14 +456,13 @@ class AutoCard(QFrame):
         self.verdict = chip('', 'gray')
         head.addWidget(self.verdict)
         layout.addLayout(head)
-        row = hbox(spacing=8)                                   # above the findings, so the buttons never scroll away
+        row = flow(spacing=8)               # above the findings, so the buttons never scroll away; two lines if need be
         self.analyze = button('Auto analyze', None, 'analyze', 'Measure the clip and say what could be better')
         self.fix = button('Auto fix', 'primary', 'wand', 'Repair what Auto analyze finds, as one undo step')
         self.analyze.clicked.connect(self.analyzeRequested)
         self.fix.clicked.connect(self.fixRequested)
         row.addWidget(self.analyze)
         row.addWidget(self.fix)
-        row.addStretch(1)
         layout.addLayout(row)
         self.body = vbox(spacing=8)
         layout.addLayout(self.body)
@@ -445,7 +481,7 @@ class AutoCard(QFrame):
         box.addLayout(head)
         box.addWidget(label(finding.detail, 'muted', wrap=True))
         if finding.fix:
-            fix = label(f'Auto fix: {finding.fix}', wrap=True)
+            fix = label(tr('Auto fix: {fix}').format(fix=finding.fix), wrap=True)
             fix.setStyleSheet(f'color: {PALETTE["accent"]};')
             box.addWidget(fix)
         return box
@@ -483,7 +519,7 @@ class AutoCard(QFrame):
         for step in done.steps:
             mark = label(f'✓  {step}', wrap=True)
             self.body.addWidget(mark)
-        self._changes('Before and after', done.changes)
+        self._changes(tr('Before and after'), done.changes)
 
     # ---- drawing ----
 
@@ -503,22 +539,23 @@ class AutoCard(QFrame):
         if not watching:
             self.body.addWidget(label(self.INTRO, 'muted', wrap=True))
         elif advice is None:
-            kind, text = 'violet', 'Analyzing...'
+            kind, text = 'violet', tr('Analyzing...')
             if done is not None:
                 self._done(done)
         elif diagnosis is None:
-            self.body.addWidget(label(f'Could not analyze the clip: {advice.error}', 'muted', wrap=True))
+            self.body.addWidget(label(tr('Could not analyze the clip: {error}').format(error=advice.error), 'muted',
+                                      wrap=True))
         else:
             if done is not None:
                 self._done(done)
                 self.body.addWidget(caption('What is left'))
             problems = [f for f in diagnosis.findings if f.status != 'ok']
             kind = 'green' if not problems else 'red' if any(f.status == 'bad' for f in problems) else 'amber'
-            text = 'Nothing to fix' if not problems else f'{len(problems)} to look at'
+            text = 'Nothing to fix' if not problems else tr('{count} to look at').format(count=len(problems))
             for finding in diagnosis.findings:
                 self.body.addLayout(self._finding(finding))
             if diagnosis.has_fixes:
-                self._changes('Auto fix will change', diagnosis.changes)
+                self._changes(tr('Auto fix will change'), diagnosis.changes)
         set_chip(self.verdict, text, kind or None)
         self.setEnabled(take is not None)
         repairable = diagnosis is None or diagnosis.has_fixes
@@ -557,26 +594,43 @@ class CheckPage(QWidget):
         if derived is None:
             self.rows.addWidget(label('Measuring...', 'dim'))
         elif derived.report is None:
-            self.rows.addWidget(label(f'Could not measure the clip: {derived.error}', 'muted', wrap=True))
+            self.rows.addWidget(label(tr('Could not measure the clip: {error}').format(error=derived.error), 'muted',
+                                      wrap=True))
         else:
             for row in derived.report:
                 self.rows.addWidget(self._row(row))
+            if derived.delivery is not None:
+                self.rows.addWidget(caption('Audiobook delivery (ACX)'))
+                self.rows.addWidget(label('Advice for an audiobook: the limits ACX gives in its audio submission '
+                                          'requirements (help.acx.com, April 2026). They never stop Keep.', 'muted', wrap=True))
+                for row in delivery_rows(derived.delivery):
+                    self.rows.addWidget(self._row(row))
 
-    @staticmethod
-    def _row(row):
+    VALUE_BESIDE = 22               # a value longer than this many characters goes under the name, so the row never widens the tab
+
+    @classmethod
+    def _row(cls, row):
         box = card()
         layout = vbox(box, (12, 9, 12, 9), 3)
         head = hbox(spacing=8)
         dot = QLabel('●')
         dot.setAccessibleName(tr(STATUS_WORDS[row.status]))
         dot.setStyleSheet(f'color: {PALETTE[STATUS_COLOURS[row.status]]}; font-size: 12px;')
-        head.addWidget(dot)
-        head.addWidget(label(row.label, size=13, weight=QFont.Weight.DemiBold))
-        head.addStretch(1)
+        head.addWidget(dot, 0, Qt.AlignmentFlag.AlignTop)
+        name = label(row.label, size=13, weight=QFont.Weight.DemiBold, wrap=True)       # under itself beside a long value
+        head.addWidget(name, 1)
         value = QLabel(row.value)
         value.setFont(theme.mono_font(11))
-        head.addWidget(value)
+        beside = len(row.value) <= cls.VALUE_BESIDE
+        if beside:
+            head.addWidget(value, 0, Qt.AlignmentFlag.AlignTop)
         layout.addLayout(head)
+        if not beside:                      # "60 Hz, 46 dB au-dessus de son voisinage" is wider than the panel allows
+            value.setWordWrap(True)
+            under = hbox(spacing=8)
+            under.addSpacing(dot.sizeHint().width())
+            under.addWidget(value, 1)
+            layout.addLayout(under)
         layout.addWidget(label(row.hint, 'dim', size=11, wrap=True))
         return box
 
@@ -584,9 +638,10 @@ class CheckPage(QWidget):
 # ---- the Script page --------------------------------------------------------------------------------------------------
 
 class ScriptPage(QWidget):
-    """Every line of the script and how far it has got: click a line to go to it."""
+    """Every line of the script, how many takes it has and how far it has got: click a line to go to it."""
 
     loadRequested = Signal()
+    showTakesRequested = Signal()
 
     MARKS = (('kept', '✓'), ('recorded', '●'), ('open', '○'))
 
@@ -603,10 +658,17 @@ class ScriptPage(QWidget):
         self.lines.itemClicked.connect(lambda item: self.session.script.go_to(self.lines.row(item)))
         self.lines.itemActivated.connect(lambda item: self.session.script.go_to(self.lines.row(item)))
         layout.addWidget(self.lines, 1)
-        row = hbox(spacing=8)
+        row = hbox(spacing=8)                   # two rows: three buttons do not fit side by side in the narrow tab
         self.next = button('Next line to record', None, None, 'Go to the next line that has no kept clip (Ctrl+Shift+Down)')
         self.next.clicked.connect(self._next)
         row.addWidget(self.next)
+        self.show_takes = button('Show its takes', 'ghost', None, 'List only the takes of the current line, to choose between '
+                                                                  'them')
+        self.show_takes.clicked.connect(self.showTakesRequested)
+        row.addWidget(self.show_takes)
+        row.addStretch(1)
+        layout.addLayout(row)
+        row = hbox(spacing=8)
         self.load = button('Load script...', 'ghost', None, 'Read prompts from a text file, one line per take')
         self.load.clicked.connect(self.loadRequested)
         row.addWidget(self.load)
@@ -620,14 +682,17 @@ class ScriptPage(QWidget):
 
     @staticmethod
     def _row(line):
+        """The mark, the number, how many takes the line has when it has more than one, and the line."""
         mark = '✓' if line.kept else '●' if line.takes else '○'
-        return f'{mark}  {line.number}.  {line.text}'
+        count = f'{line.takes}×  ' if line.takes > 1 else ''
+        return f'{mark}  {line.number}.  {count}{line.text}'
 
     @staticmethod
     def _spoken(line):
         """The line as a screen reader says it, where the eye has the mark."""
         state = tr('Kept') if line.kept else tr('Recorded') if line.takes else tr('Not recorded yet')
-        return f'{state}. {line.number}. {line.text}'
+        takes = f' {tr("{count} takes").format(count=line.takes)}.' if line.takes > 1 else ''
+        return f'{state}.{takes} {line.number}. {line.text}'
 
     def refresh(self):
         session = self.session
@@ -645,13 +710,18 @@ class ScriptPage(QWidget):
             self.lines.setCurrentRow(script.index)
             self.lines.scrollToItem(self.lines.currentItem())
         self.lines.blockSignals(False)
-        self.summary.setText(tr('{done} of {total} lines have a kept clip, for this speaker. ✓ kept, ● recorded, ○ not yet.')
-                             .format(done=done, total=len(progress)) if progress else
+        lines = set(script.lines)
+        seconds = kept_total([take for take in session.workspace.takes if take.meta.get('script_line') in lines])[1]
+        self.summary.setText(tr('{done} of {total} lines ({percent}%) have a kept clip, {time} in all, for this speaker. '
+                                '✓ kept, ● recorded, ○ not yet; 3× has three takes.')
+                             .format(done=done, total=len(progress), percent=int(100 * done / len(progress)),
+                                     time=format_total(seconds)) if progress else
                              tr('A script is a text file with one prompt on each line. Each take then gets a line as its '
                                 'transcript, and this list shows how far you have got. Your place is remembered when you '
                                 'close the program.'))
         self.lines.setVisible(bool(progress))
         self.next.setVisible(bool(progress))
+        self.show_takes.setVisible(bool(progress))
 
 
 # ---- the Keep checklist -----------------------------------------------------------------------------------------------
@@ -660,13 +730,13 @@ GLYPHS = {'ok': ('✓', 'green'), 'todo': ('○', 'dim'), 'bad': ('✕', 'red'),
 GLYPH_WORDS = {'ok': 'Done', 'todo': 'Still to do', 'bad': 'Problem', 'advice': 'Advice'}
 
 
-def step_text(step):
-    """The checklist line for a rule: what is met, or what is still to do."""
+def step_text(step, rules):
+    """The checklist line for a rule: what is met, or what is still to do. `rules` is the purpose of the take."""
     key, detail = step.key, step.detail
     if key == 'length':
         if detail == 'measuring...':
             return tr('Measuring the clip...')
-        allowed = step.label.removeprefix('Length ')
+        allowed = tr('{low} to {high} s').format(low=f'{rules.min_seconds:g}', high=f'{rules.max_seconds:g}')
         text = 'Length {detail}  ({allowed})' if step.done else 'Length {detail}: this purpose needs {allowed}'
         return tr(text).format(detail=detail, allowed=allowed)
     if key == 'audible':
@@ -747,7 +817,8 @@ class ReadyCard(QFrame):
 
     @staticmethod
     def _keep_tip(take):
-        return tr('Writes the {rate} kHz WAV and its sidecar').format(rate=f'{take.export_rate / 1000:g}')
+        return tr('Writes the {rate} kHz, {bits}-bit WAV and its sidecar').format(rate=f'{take.export_rate / 1000:g}',
+                                                                                  bits=take.purpose.bit_depth)
 
     def _line(self, state, text, action=None):
         row = hbox(spacing=9)
@@ -818,7 +889,7 @@ class ReadyCard(QFrame):
         for step in shown:
             state = 'ok' if step.done else 'bad' if step.key in ('length', 'audible', 'release') \
                 and step.detail != 'measuring...' else 'todo'
-            text = step_text(step)
+            text = step_text(step, take.purpose)
             if text in said:                                    # two checks waiting on the same measurement say it once
                 continue
             said.add(text)
@@ -840,6 +911,7 @@ class ReadyCard(QFrame):
         self.keep.setToolTip(self._keep_tip(take) if readiness.ready else tr('Fix the items above first'))
         self.discard.setEnabled(take is not None)
         self.rerecord.setEnabled(take is not None)
+        lay_out_now(self)
 
 
 # ---- while recording --------------------------------------------------------------------------------------------------
@@ -854,16 +926,23 @@ class RecordCard(QFrame):
         layout = vbox(self, (16, 14, 16, 14), 8)
         layout.addWidget(caption('This take'))
         self.values = {}
-        for key, name in (('device', 'Device'), ('capture', 'Capture'), ('pre_roll', 'Pre-roll'), ('tail', 'Tail'),
-                          ('saved', 'Saved to')):
+        self.titles = []
+        for key, name in (('device', tr('Device')), ('capture', tr('Capture')), ('pre_roll', tr('Pre-roll')),
+                          ('tail', tr('Tail')), ('saved', tr('Saved to'))):
             row = hbox(spacing=10)
             title = label(name, 'dim')
-            title.setFixedWidth(70)
             value = label('', wrap=True)
             row.addWidget(title, 0, Qt.AlignmentFlag.AlignTop)
             row.addWidget(value, 1)
             layout.addLayout(row)
             self.values[key] = value
+            self.titles.append(title)
+        # as wide as the longest name in the window's language: "Enregistré dans" was cut to "Enregistré d" in 70 pixels
+        for title in self.titles:
+            title.ensurePolished()
+        width = max(70, *(title.fontMetrics().horizontalAdvance(title.text()) + 2 for title in self.titles))
+        for title in self.titles:
+            title.setFixedWidth(width)
         layout.addSpacing(6)
         layout.addWidget(label('Editing opens when you stop. The take is written to disk as it records, so a crash does not '
                                'lose it, and the original is written at Stop.', 'muted', wrap=True))
@@ -878,7 +957,8 @@ class RecordCard(QFrame):
         self.values['pre_roll'].setText(tr('{seconds} s kept before Record').format(seconds=f"{info['pre_roll']:g}")
                                         if info['pre_roll'] else tr('none for system audio'))
         self.values['tail'].setText(tr('{seconds} s after Stop').format(seconds=f"{info['tail']:g}"))
-        self.values['saved'].setText(f"{workspace.name_of(workspace.speaker) or 'My voice'}\\masters\\ at Stop")
+        folder = f"{workspace.name_of(workspace.speaker) or tr('My voice')}\\masters\\"
+        self.values['saved'].setText(tr('{folder} at Stop').format(folder=folder))
 
 
 # ---- the panel --------------------------------------------------------------------------------------------------------
@@ -914,6 +994,7 @@ class Inspector(QWidget):
     autoAnalyzeRequested = Signal()
     autoFixRequested = Signal()
     loadScriptRequested = Signal()
+    showLineTakesRequested = Signal()
 
     REVIEW, RECORDING, IDLE = 0, 1, 2
     CLIP_TAB, PROCESS_TAB, CHECK_TAB, SCRIPT_TAB = 0, 1, 2, 3
@@ -938,6 +1019,7 @@ class Inspector(QWidget):
         self.check = CheckPage(session)
         self.script = ScriptPage(session)
         self.script.loadRequested.connect(self.loadScriptRequested)
+        self.script.showTakesRequested.connect(self.showLineTakesRequested)
         self.pages = QStackedWidget()
         for page in (self.clip, self.process, self.check):
             self.pages.addWidget(scrolling(page))
@@ -995,6 +1077,8 @@ class Inspector(QWidget):
             self.record_card.refresh()
         self._mode = mode
         self.modes.setCurrentIndex(mode)
+        if mode == self.REVIEW:
+            lay_out_now(self.ready)                 # its lines changed while it was hidden, as a take is recorded
 
     def show_tab(self, index):
         self.tabs.set_current(index)

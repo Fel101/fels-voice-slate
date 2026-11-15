@@ -215,18 +215,29 @@ class HeldJobs:
 
     def __init__(self):
         self.queue = []
+        self.lanes = []                         # (lane, about, wanted) of each job, as Jobs.submit takes them
+        self.ran = set()
         self.on_unhandled = None
+        self.front = lambda: None
 
     @property
     def pending(self):
         return len(self.queue)
 
-    def submit(self, fn, on_done, on_error=None):
+    def waiting(self, lane):
+        return sum(1 for index, (named, _, _) in enumerate(self.lanes) if named == lane and index not in self.ran)
+
+    def submit(self, fn, on_done, on_error=None, lane='work', about=None, wanted=None):
         self.queue.append((fn, on_done, on_error))
+        self.lanes.append((lane, about, wanted))
 
     def run(self, index):
-        """Run one held job and deliver its result straight away."""
+        """Run one held job and deliver its result straight away. One no longer wanted is dropped, as Jobs drops it."""
         fn, on_done, on_error = self.queue[index]
+        self.ran.add(index)
+        wanted = self.lanes[index][2]
+        if wanted is not None and not wanted():
+            return
         try:
             result = fn()
         except Exception as e:
@@ -251,6 +262,18 @@ def fill(session, transcript='The harbour lights came on at dusk.', consent=True
 def record(session, seconds=12.0, source='mic', samples=None, **kwargs):
     """Put a finished capture into the session, as Stop does. Returns the new take."""
     return session.workspace.add_take(speech(seconds) if samples is None else samples, RATE, source, {}, **kwargs)
+
+
+def finish_batch(session, limit=10.0):
+    """Run the batch job under way to its end, as the window's ticks do. A step waiting for FFmpeg's own thread is given
+    the time it needs, up to `limit` seconds."""
+    import time
+    give_up = time.monotonic() + limit
+    while session.batch.running:
+        session.batch.tick()
+        if session.batch.running:
+            assert time.monotonic() < give_up, 'the batch did not finish'
+            time.sleep(0.002)
 
 
 def settle(session):

@@ -2,7 +2,7 @@
 
 `derived(take)` returns the measurement of the take as it is now, or None while it is being computed. The result
 holds the statistics the keep rules judge (the export's, and the clipping in the recording behind it), the rows of the
-Check tab and the processed clip's length.
+Check tab and the processed clip's length, and for an Audition how it stands against ACX's limits for an audiobook.
 The spectrogram is the master's, so it does not change with the recipe.
 """
 import copy
@@ -12,8 +12,9 @@ from types import SimpleNamespace
 
 from ..core import analysis
 
-Derived = namedtuple('Derived', 'key stats report error')
+Derived = namedtuple('Derived', 'key stats report error delivery', defaults=(None,))
 THUMB_COLUMNS = 90
+PYRAMID_AT_ONCE = 1 << 24       # samples (about six minutes at 48 kHz): a longer take's peak pyramid is built in the background
 
 
 def frozen(history):
@@ -52,7 +53,8 @@ class Measurements:
                 export = lib.export_for(take, recipe)
                 stats = lib.stats_for(take, export, recipe)
                 report = analysis.quality_report(export, take.export_rate, stats['recording_clipped_fraction'], take.purpose)
-                return Derived(key, stats, report, '')
+                delivery = analysis.delivery(export, take.export_rate, stats) if take.purpose.key == 'audition' else None
+                return Derived(key, stats, report, '', delivery)
 
             def done(result):
                 if take.cache.get('derived_requested') == key:      # a result for a recipe since changed is dropped
@@ -64,7 +66,7 @@ class Measurements:
                     take.cache['derived'] = Derived(key, None, None, str(error))
                     self.bus.notify('analysis')
 
-            self.jobs.submit(work, done, failed)
+            self.jobs.submit(work, done, failed, about=take)
         return None
 
     def spectrogram(self, take):
@@ -81,15 +83,28 @@ class Measurements:
                 self.bus.notify('analysis')
 
             self.jobs.submit(lambda: analysis.spectrogram(take.mono, take.rate), done,
-                             lambda error: take.cache.update(spectrogram_requested=False))
+                             lambda error: take.cache.update(spectrogram_requested=False), about=take)
         return None
 
     def pyramid(self, take):
-        """The master's peak pyramid for drawing, built once per take."""
+        """The master's peak pyramid for drawing, built once per take: at once for a take of a few minutes, and in the
+        background for a longer one, which has none (None) until it arrives."""
         pyramid = take.cache.get('pyramid')                 # read once: another thread can drop it (store._Resident)
-        if pyramid is None:
+        if pyramid is not None:
+            return pyramid
+        if take.frames <= PYRAMID_AT_ONCE:
             pyramid = take.cache['pyramid'] = analysis.PeakPyramid(take.mono)
-        return pyramid
+            return pyramid
+        if not take.cache.get('pyramid_requested'):
+            take.cache['pyramid_requested'] = True
+
+            def done(result):
+                take.cache['pyramid'] = result
+                self.bus.notify('analysis')
+
+            self.jobs.submit(lambda: analysis.PeakPyramid(take.mono), done,
+                             lambda error: take.cache.update(pyramid_requested=False), about=take)
+        return None
 
     def thumbnail(self, take):
         """The take's outline for the list, as (highs, lows) in THUMB_COLUMNS columns, or None until it has been worked out.
@@ -99,7 +114,7 @@ class Measurements:
             take.cache['thumb_requested'] = True
 
             def work():
-                pyramid = analysis.PeakPyramid(take.mono)
+                pyramid = take.cache.get('pyramid') or analysis.PeakPyramid(take.mono)
                 lo, hi = pyramid.columns(0, pyramid.n, THUMB_COLUMNS)
                 return hi, lo
 
@@ -107,5 +122,5 @@ class Measurements:
                 take.cache['thumb'] = result
                 self.bus.notify('thumb', take)
 
-            self.jobs.submit(work, done, lambda error: None)        # no outline is no harm: the file says so when it is opened
+            self.jobs.submit(work, done, lambda error: None, about=take)    # no outline is no harm: opening the file says why
         return outline

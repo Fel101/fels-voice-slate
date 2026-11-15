@@ -31,6 +31,7 @@ import os
 import re
 import shutil
 import threading
+import time
 import uuid
 import weakref
 from collections import OrderedDict
@@ -47,7 +48,8 @@ from .core import chain as chain_mod
 from .core import render
 from .core.edits import History, validate_edits, words_key
 from .core.reading import clean_words
-from .settings import default_root
+from .i18n import tr
+from .settings import APP_NAME, default_root, holds_recordings
 
 SCHEMA = 'voice-recorder-clip-v2'
 KNOWN_SCHEMAS = ('voice-recorder-clip-v1', SCHEMA)
@@ -60,13 +62,21 @@ SPOOL_SUFFIX = '.spool'
 AUTOSAVE_TEXT_MAX = 20000           # a text field in an autosave file is cut to this when it is read back
 TRANSCRIPT_STATUSES = ('typed', 'read_from_script', 'asr_draft', 'edited')
 LABEL_MAX = 80
+MARKERS_MAX = 1000                  # markers kept on one take: far more than anyone drops, few enough to read at once
 RELEASE_FOLDER = 'release'
 RELEASE_FILE = 'release.json'
 RELEASE_SCHEMA = 'voice-slate-release-v1'
 RELEASE_WARNING_DAYS = 30           # a release this close to running out is mentioned
+# How much of the allowed use goes in the line inside a clip's audio file. libsndfile keeps all of a file's texts in 8 KB.
+PERMISSION_USE_CHARS = 400
 # What Keep works out afresh each time. Anything else among a take's flags is a fact about how it was recorded.
 WORKED_OUT_FLAGS = {'recovered', 'imported', 'clipped', 'edited', 'filtered', 'cleaned', 'level_changed', 'limited'}
 RESERVED_NAMES = {'CON', 'PRN', 'AUX', 'NUL', *(f'COM{n}' for n in range(10)), *(f'LPT{n}' for n in range(10))}
+BACKUP_FILE = 'voice-slate-backup.json'             # the list of a backup's files and their SHA-256, beside them
+BACKUP_SCHEMA = 'voice-slate-backup-v1'
+# How much of a file a backup copies or checks in one step. Each block is put on the disk before the next, so that no step
+# waits for a whole long recording to be flushed: a USB stick that takes 20 MB a second still answers within a tenth.
+COPY_BLOCK = 2 << 20
 
 
 class KeepBlocked(ValueError):
@@ -112,10 +122,36 @@ def sync_file(path):
         os.fsync(f.fileno())
 
 
-def _write_audio(path, samples, rate, subtype):
-    """Write a WAV file and put it on the disk. SoundFile reports its failures as RuntimeError; this raises OSError."""
+def permission_line(sidecar):
+    """The line of plain text that goes inside a kept clip's audio file, so that a clip dragged into another program still
+    says whose permission it rests on: its id, the name of its sidecar, the allowed use and the date the permission was
+    given (left out for a clip kept before that date was recorded). Not the origin, which can say who the person is. Made
+    from the sidecar, whose `export.file` names the clip in the library."""
+    allowed = ' '.join(str(sidecar.get('allowed_use') or '').split())
+    if len(allowed) > PERMISSION_USE_CHARS:
+        allowed = allowed[:PERMISSION_USE_CHARS].rstrip() + '... (the rest is in the sidecar)'
+    line = (f"{APP_NAME} clip {sidecar.get('id') or '?'}, described in "
+            f"{Path(sidecar['export']['file']).with_suffix('.json').name}. Allowed use: {allowed}.")
+    stated = str(sidecar.get('consent_confirmed_at') or '')
+    if re.match(r'\d{4}-\d{2}-\d{2}', stated):
+        line += f' Permission given {stated[:10]}.'
+    return line
+
+
+def _write_audio(path, samples, rate, subtype, comment=None):
+    """Write a WAV file and put it on the disk, with `comment` in its information chunk if one is given. SoundFile
+    reports its failures as RuntimeError; this raises OSError."""
     try:
-        sf.write(str(path), samples, int(rate), subtype=subtype, format='WAV')
+        if comment:
+            samples = np.asarray(samples)
+            channels = 1 if samples.ndim == 1 else samples.shape[1]
+            with sf.SoundFile(str(path), 'w', int(rate), channels, subtype, format='WAV') as out:
+                out.write(samples)
+                # Set after the audio, libsndfile puts the chunk after it, which is the only place Windows' own file
+                # properties look: before the audio it was in the file and Explorer showed no comment.
+                out.comment = comment
+        else:
+            sf.write(str(path), samples, int(rate), subtype=subtype, format='WAV')
     except RuntimeError as e:
         raise OSError(f'{path.name} could not be written: {e}') from e
     sync_file(path)
@@ -126,6 +162,21 @@ def audio_shape(path):
     RuntimeError, for a file that cannot be read."""
     info = sf.info(str(path))
     return int(info.frames), int(info.samplerate), int(info.channels)
+
+
+def kept_length(export, path=None):
+    """How long a kept clip is, in seconds: what its sidecar says (`export` is the sidecar's "export" entry), or else what
+    the header of its WAV at `path` says. None when neither can be read. No audio is read either way."""
+    seconds = export.get('duration_seconds') if isinstance(export, dict) else None
+    if isinstance(seconds, (int, float)) and not isinstance(seconds, bool) and math.isfinite(seconds) and seconds >= 0:
+        return float(seconds)
+    if path is None:
+        return None
+    try:
+        frames, rate, channels = audio_shape(path)
+    except (OSError, RuntimeError):
+        return None
+    return frames / rate if rate else None
 
 
 def _remove(path):
@@ -166,8 +217,34 @@ def _label_of(data):
     return clean_label(label) if isinstance(label, str) else ''
 
 
+def clean_markers(values, seconds=None):
+    """A take's markers as they are kept: moments in seconds on its original's timeline, to the millisecond, each once,
+    in order, and inside the recording when its length `seconds` is given. Anything that is not such a moment is dropped."""
+    kept = set()
+    for value in values or ():
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+            continue
+        moment = round(float(value), 3)
+        if moment >= 0.0 and (seconds is None or moment <= seconds):
+            kept.add(moment)
+    return sorted(kept)[:MARKERS_MAX]
+
+
+def _markers_of(data, seconds=None):
+    """The `markers` of a sidecar or autosave file, [{"seconds": 4.21}, ...], as a take keeps them."""
+    found = data.get('markers')
+    if not isinstance(found, list):
+        return []
+    return clean_markers([item.get('seconds') for item in found if isinstance(item, dict)], seconds)
+
+
+def _markers_json(markers):
+    return [{'seconds': moment} for moment in markers]
+
+
 def _work_of(take):
-    """What Keep writes of a take, apart from its label, which reaches the sidecar by its own way. Every card in the list
+    """What Keep writes of a take, apart from its label and markers, which reach the sidecar by their own way: they say
+    nothing about the sound, so changing them on a kept clip leaves it as it was kept. Every card in the list
     asks this on every keystroke, so nothing is copied: a state of the recipe is replaced and never changed in place."""
     history, meta = take.history, take.meta
     text = ('transcript', 'origin', 'allowed_use', 'source_url', 'notes')
@@ -199,7 +276,7 @@ class _Resident:
     use always stays, however large, and so does a take whose original is not on disk."""
 
     MAX_BYTES = 256 << 20
-    FROM_THE_AUDIO = ('mono', 'pyramid', 'spectrogram', 'spectrogram_image', 'spectrogram_requested')
+    FROM_THE_AUDIO = ('mono', 'pyramid', 'pyramid_requested', 'spectrogram', 'spectrogram_image', 'spectrogram_requested')
 
     def __init__(self):
         self._lock = threading.Lock()
@@ -255,6 +332,7 @@ class Take:
     confirmed_words: str = field(default=None, repr=False)     # the cuts and silences the transcript was checked against
     kept_work: dict = field(default=None, repr=False)          # what the sidecar holds, to tell when a kept take has changed
     kept_sha256: str = field(default=None, repr=False)         # the kept WAV's SHA-256, which names the Keep it came from
+    kept_seconds: float = field(default=None, repr=False)      # how long the kept clip is, as its sidecar says
     spool: Path = field(default=None, repr=False)              # the recording on disk, until its original is written
     frames: int = 0                   # how long the original is, known without reading it
     channels: int = 1
@@ -268,6 +346,7 @@ class Take:
             self.history = History(seconds=self.seconds)
         self.meta.setdefault('purpose', ac.DEFAULT_PURPOSE)
         self.meta.setdefault('label', '')
+        self.meta.setdefault('markers', [])
         self.meta.setdefault('transcript', '')
         self.meta.setdefault('transcript_status', 'typed')
         self.meta.setdefault('origin', '')
@@ -279,6 +358,16 @@ class Take:
     @property
     def seconds(self):
         return self.frames / self.rate if self.rate else 0.0
+
+    @property
+    def clip_seconds(self):
+        """How long the clip is: the kept clip while the take is as it was kept, else the original less its cuts. Worked out
+        from what the take holds, with no audio read, so the cuts are not snapped to zero crossings: it can be a few
+        milliseconds out, which a total in seconds does not show."""
+        if self.kept and self.kept_seconds is not None and not self.changed:
+            return self.kept_seconds
+        cut = sum(b - a for a, b in ac.cut_ranges(self.history.edits, self.rate, self.frames)) if self.rate else 0
+        return (self.frames - cut) / self.rate if self.rate else 0.0
 
     @property
     def purpose(self):
@@ -450,6 +539,417 @@ class Relocation:
         shutil.rmtree(self.target, ignore_errors=True)
 
 
+def _not_inside(source, target):
+    source, target = Path(source).resolve(), Path(target).resolve()
+    if target == source or source in target.parents or target in source.parents:
+        raise ValueError('The two folders must not be inside each other.')
+
+
+def _files_of(folder):
+    """Every file in the folder that a backup holds: not one still being written (`.tmp`), nor a backup's own list."""
+    folder = Path(folder)
+    return sorted(path for path in folder.rglob('*')
+                  if path.is_file() and path.suffix != '.tmp' and path != folder / BACKUP_FILE)
+
+
+class FolderCopy:
+    """The files of one folder copied into another, a block at a time so that a long recording does not hold the window
+    up, and each one checked: what arrived is read back and must be what was read, and, where `expected` gives a SHA-256
+    for it, that too. A file goes in under its own name only once it has passed. Nothing in the source is changed.
+
+    `step(path)` does one block and returns True once that file is in place. `undo()` removes every file it put there.
+    """
+
+    def __init__(self, source, target, files, expected=None):
+        self.source, self.target = Path(source), Path(target)
+        self.files = files
+        self.expected = expected or {}
+        self.arrived = {}               # the relative name of each file in place, with its SHA-256
+        self.gone = []                  # files that were removed from the source before they could be copied
+        self.part = None                # how far the file being copied has got, from 0 to 1
+        self._made_folders = []
+        self._current = None            # (path, the copying of it)
+
+    def name_of(self, path):
+        return path.relative_to(self.source).as_posix()
+
+    def step(self, path):
+        if self._current is None or self._current[0] != path:
+            self._stop_current()
+            self._current = (path, self._copying(path))
+        try:
+            next(self._current[1])
+        except StopIteration:
+            self._current, self.part = None, None
+            return True
+        except BaseException:
+            self._current, self.part = None, None
+            raise
+        return False
+
+    def _folder_for(self, destination):
+        missing = [folder for folder in [destination.parent, *destination.parent.parents] if not folder.exists()]
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        self._made_folders.extend(reversed(missing))
+
+    def _copying(self, path):
+        name = self.name_of(path)
+        destination = self.target / name
+        self._folder_for(destination)
+        tmp = destination.with_name(destination.name + '.tmp')
+        read, back = hashlib.sha256(), hashlib.sha256()
+        try:
+            size = max(1, path.stat().st_size)
+            with open(path, 'rb') as source, open(tmp, 'wb') as out:
+                while block := source.read(COPY_BLOCK):
+                    read.update(block)
+                    out.write(block)
+                    out.flush()
+                    os.fsync(out.fileno())
+                    self.part = source.tell() / size / 2
+                    yield
+            with open(tmp, 'rb') as written:
+                while block := written.read(COPY_BLOCK):
+                    back.update(block)
+                    self.part = 0.5 + written.tell() / size / 2
+                    yield
+            if back.hexdigest() != read.hexdigest():
+                raise OSError(f'{name} could not be copied exactly')
+            if name in self.expected and back.hexdigest() != str(self.expected[name]).lower():
+                raise OSError(f'{name} is not the file the backup was made with: it has changed or been damaged since')
+            if destination.exists():
+                raise OSError(f'{name} is already there, and nothing is overwritten')
+            os.replace(tmp, destination)
+        finally:
+            _remove(tmp)
+        self.arrived[name] = back.hexdigest()
+
+    def _stop_current(self):
+        if self._current is not None:
+            self._current[1].close()            # the half-written copy goes
+            self._current, self.part = None, None
+
+    def undo(self):
+        """Remove every file this put in place, and the folders it made that are empty again. Nothing else is touched."""
+        self._stop_current()
+        for name in self.arrived:
+            _remove(self.target / name)
+        self.arrived = {}
+        for folder in sorted(self._made_folders, key=lambda folder: len(folder.parts), reverse=True):
+            try:
+                folder.rmdir()
+            except OSError:
+                pass
+
+
+class Backup(FolderCopy):
+    """A copy of the whole output folder in another place, each file checked, with a list of every file and its SHA-256
+    written beside them at the end, so that bringing it in later can find a file that changed since. The output folder is
+    not changed. A file that the program removed while the backup ran (the work in progress of a take kept since) is
+    passed over and counted in `gone`."""
+
+    def __init__(self, source, target):
+        _not_inside(source, target)
+        target = Path(target)
+        if target.exists() and (not target.is_dir() or any(target.iterdir())):
+            raise ValueError('Choose an empty folder for the backup: nothing in a folder is overwritten.')
+        super().__init__(source, target, _files_of(source))
+
+    def finish(self):
+        """Write the list of the files. Raises OSError when it cannot be written."""
+        data = {'schema': BACKUP_SCHEMA, 'software': {'name': 'voice-slate', 'version': __version__}, 'made': now_iso(),
+                'files': dict(sorted(self.arrived.items()))}
+        Library._write_json(self.target / BACKUP_FILE, data)
+
+    def undo(self):
+        _remove(self.target / BACKUP_FILE)
+        super().undo()                          # a folder the person made for it stays, empty, as it was
+
+
+class BringIn(FolderCopy):
+    """A backup brought into an output folder that has no recordings, each file checked against the backup's own list when
+    it has one, so that a file damaged since the backup was made is found and nothing of it is used. A copy of an output
+    folder made some other way has no list, and each file is checked against what was read. The backup is not changed."""
+
+    def __init__(self, source, target):
+        source, target = Path(source), Path(target)
+        _not_inside(source, target)
+        listed = self._list_of(source)
+        if not holds_recordings(source) and not listed:
+            raise ValueError(f'{source} is not a backup of recordings: it has no speakers and no list of a backup in it.')
+        if target.exists() and any(path != target / 'speakers.json' for path in _files_of(target)) \
+                or holds_recordings(target):
+            raise ValueError('Bring a backup into an output folder that has no recordings yet: choose an empty one in '
+                             'Settings > Output folder first.')
+        files = _files_of(source)
+        missing = sorted(set(listed) - {path.relative_to(source).as_posix() for path in files})
+        if missing:
+            raise ValueError(f'The backup is missing {len(missing)} of the files it was made with, such as {missing[0]}, '
+                             'so it was not brought in.')
+        super().__init__(source, target, files, listed)
+
+    @staticmethod
+    def _list_of(folder):
+        """The files a backup's list names, with their SHA-256, or {} when there is no list. Raises ValueError for one
+        that cannot be read."""
+        try:
+            data = json.loads((Path(folder) / BACKUP_FILE).read_text(encoding='utf-8'))
+        except FileNotFoundError:
+            return {}
+        except (OSError, ValueError):
+            raise ValueError(f'The list of the backup in {folder} cannot be read, so its files cannot be checked.') from None
+        files = data.get('files') if isinstance(data, dict) and data.get('schema') == BACKUP_SCHEMA else None
+        if not isinstance(files, dict):
+            raise ValueError(f'The list of the backup in {folder} is not one this version knows.')
+        return {str(name): str(sha) for name, sha in files.items()}
+
+    def _copying(self, path):
+        if self.name_of(path) == 'speakers.json':
+            _remove(self.target / 'speakers.json')  # an empty list of speakers, which the backup's own replaces
+        yield from super()._copying(path)
+
+
+class TooLong(ValueError):
+    """A recording too long for this computer's memory. The message says how long it is and what to do."""
+
+
+def too_long_text(fit):
+    """Why a recording is refused, and what to do, after its name and a colon, as the other reasons an import fails."""
+    return tr('it is {length} long, and working on it would need about {needed} GB of memory; this computer has {memory} GB. '
+              'Cut it into parts shorter than {longest} with another program, and import those.').format(
+        length=audio_import.duration_text(fit.seconds), needed=f'{fit.needed / 2**30:.1f}',
+        memory=f'{fit.memory / 2**30:.0f}', longest=audio_import.duration_text(fit.longest))
+
+
+class Importing:
+    """A recording being copied in as a take, a block at a time, so that a long one can show how far it has got and be
+    stopped. `step()` does one block and returns True once the take is complete; `cancel()` removes what was written.
+
+    A format FFmpeg reads is decoded first, on a thread of its own, while `step()` keeps returning False. The original is
+    written under a temporary name and renamed when every block has arrived, so a stopped import leaves nothing behind.
+    Closing it, putting it on the disk and renaming it happen on a thread of their own too: Windows looks a long file over
+    as it is closed, which took a third of a second for 45 minutes of stereo.
+    """
+
+    BLOCK_FRAMES = 1 << 19          # about ten seconds at 48 kHz, which takes a few milliseconds to read and write
+
+    def __init__(self, lib, slug, path, purpose=ac.DEFAULT_PURPOSE, memory=None):
+        self.lib, self.slug, self.path, self.purpose, self.memory = lib, slug, Path(path), purpose, memory
+        self.take = None
+        self.done = 0
+        self.frames = None
+        self._source = self._writer = self._tmp = None
+        self._decoding = None           # (thread, outcome) while FFmpeg writes it out
+        self._closing = None            # (thread, outcome) while the original is closed and renamed
+        self._samples = None
+        self._mono = None               # the mono mix of a recording of several channels, worked out a block at a time
+        self._finished = False
+
+    @property
+    def progress(self):
+        """How much has been copied, from 0 to 1."""
+        return self.done / self.frames if self.frames else 0.0
+
+    @property
+    def waiting(self):
+        """True while FFmpeg is still writing the recording out, or the original is being closed: there is nothing to do
+        until that is done."""
+        return any(pair is not None and pair[0].is_alive() for pair in (self._decoding, self._closing))
+
+    def step(self):
+        if self._finished:
+            return True
+        if self._closing is not None:
+            return self._closed()
+        if self._source is None and not self._open():
+            return False
+        block = self._source.read(self.BLOCK_FRAMES, dtype='float32', always_2d=True)
+        if len(block):
+            if not np.isfinite(block).all():
+                raise ValueError('the file is damaged: some of its samples are not numbers')
+            if self.done + len(block) > len(self._samples):        # the file said it was shorter: an MP3 can
+                self._samples = np.concatenate([self._samples, np.empty_like(block)])
+                if self._mono is not None:
+                    self._mono = np.concatenate([self._mono, np.empty(len(block), dtype=np.float32)])
+            self._samples[self.done:self.done + len(block)] = block
+            if self._mono is not None:      # here, a block at a time, not on the window's thread all at once later
+                self._mono[self.done:self.done + len(block)] = ac.to_mono(block)
+            try:
+                self._writer.write(block)
+            except RuntimeError as e:
+                raise OSError(f'{self._tmp.name} could not be written: {e}') from e
+            self.done += len(block)
+        if len(block) < self.BLOCK_FRAMES:
+            if self.done == 0:
+                raise ValueError('the file holds no audio')
+            self._close_source()
+            self._start_closing()
+            return self._closed()
+        return False
+
+    def run(self):
+        """Do it all now, with a short sleep while a thread of its own has the work. Returns the take."""
+        while not self.step():
+            if self.waiting:
+                time.sleep(0.005)
+        return self.take
+
+    def _open(self):
+        """Open the recording, after FFmpeg has written it out if it has to. False while that is still going."""
+        if audio_import.needs_decoding(self.path) and self._decoding is None:
+            outcome = {}
+
+            def decode():
+                try:
+                    outcome['source'] = audio_import.open_audio(self.path)
+                except BaseException as e:      # handed to the window's thread in step()
+                    outcome['error'] = e
+
+            thread = threading.Thread(target=decode, name='recorder-decode', daemon=True)
+            self._decoding = (thread, outcome)
+            thread.start()
+        if self._decoding is not None:
+            thread, outcome = self._decoding
+            if thread.is_alive():
+                return False
+            if 'error' in outcome:
+                raise outcome['error']
+            self._opened = outcome['source']
+        else:
+            self._opened = audio_import.open_audio(self.path)
+        self._source = self._opened.file
+        self.frames, rate, channels = self._source.frames, self._source.samplerate, self._source.channels
+        if self.frames <= 0:
+            raise ValueError('the file holds no audio')
+        fit = audio_import.fit(self.frames, rate, channels, self.memory)
+        if fit.verdict == 'refuse':
+            raise TooLong(too_long_text(fit))
+        self._samples = np.empty((self.frames, channels), dtype=np.float32)
+        self._mono = np.empty(self.frames, dtype=np.float32) if channels > 1 else None
+        # Only the file's name goes in the take, and so into the sidecar that travels with the clip: where the file was
+        # on this computer (a user name, say) is nobody else's business.
+        self.take = Take(source='import', samples=None, rate=int(rate), device={'name': self.path.name}, flags=['imported'],
+                         meta={**self.lib.speaker_defaults(self.slug), 'purpose': self.purpose}, speaker=self.slug,
+                         frames=self.frames, channels=channels)      # its length is known before its audio arrives
+        target = self.lib.folder(self.slug) / 'masters' / f'{self.take.stem}.raw.wav'
+        target.parent.mkdir(parents=True, exist_ok=True)
+        self._tmp = target.with_name(target.name + '.tmp')
+        try:
+            self._writer = sf.SoundFile(str(self._tmp), 'w', int(rate), channels, MASTER_SUBTYPE, format='WAV')
+        except RuntimeError as e:
+            raise OSError(f'{target.name} could not be written: {e}') from e
+        return True
+
+    def _start_closing(self):
+        """Close the original, put it on the disk and give it its name, on a thread of its own."""
+        writer, tmp = self._writer, self._tmp
+        target = tmp.with_name(tmp.name[:-len('.tmp')])
+        outcome = {}
+
+        def close():
+            try:
+                try:
+                    writer.close()
+                except RuntimeError as e:       # SoundFile's own errors
+                    raise OSError(f'{target.name} could not be written: {e}') from e
+                sync_file(tmp)
+                os.replace(tmp, target)
+                outcome['target'] = target
+            except BaseException as e:          # handed to the window's thread in step()
+                outcome['error'] = e
+
+        self._writer = None
+        thread = threading.Thread(target=close, name='recorder-import-close', daemon=True)
+        self._closing = (thread, outcome)
+        thread.start()
+
+    def _closed(self):
+        """Once the original has its name, the take is complete. False while it is still being closed."""
+        thread, outcome = self._closing
+        if thread.is_alive():
+            return False
+        if 'error' in outcome:
+            raise outcome['error']
+        self._closing, self._tmp = None, None
+        target = outcome['target']
+        samples = self._samples[:self.done]
+        _set_samples(self.take, samples if samples.shape[1] > 1 else samples[:, 0])
+        if self._mono is not None:
+            self.take.cache['mono'] = self._mono[:self.done]
+            self._mono = None
+        if self.done != self.frames:            # an MP3's length is an estimate until it has been read
+            self.take.history = History(seconds=self.take.seconds)
+        self._samples = None
+        self.take.master_path = target
+        self.take.unsaved = False
+        self._finished = True
+        return True
+
+    def _close_source(self):
+        opened = getattr(self, '_opened', None)
+        if opened is not None:
+            opened.close()
+            self._opened = None
+        self._source = None
+
+    def cancel(self):
+        """Stop: close the files and remove the original written so far. The take does not exist."""
+        if self._finished:
+            return
+        if self._writer is not None:
+            try:
+                self._writer.close()
+            except RuntimeError:
+                pass
+            self._writer = None
+        if self._closing is not None:           # a moment's wait: the original is being closed, and goes once it is
+            thread, outcome = self._closing
+            thread.join()
+            if 'target' in outcome:
+                _remove(outcome['target'])
+            self._closing = None
+        if self._tmp is not None:
+            _remove(self._tmp)
+            self._tmp = None
+        if self._decoding is not None and self._decoding[0].is_alive():
+            # FFmpeg is still writing its temporary WAV: it is removed when FFmpeg is done, by whoever opened it.
+            thread, outcome = self._decoding
+            threading.Thread(target=lambda: (thread.join(), outcome.get('source') and outcome['source'].close()),
+                             daemon=True).start()
+        self._close_source()
+        self._samples = self._mono = None
+        self.take = None
+        self._finished = True
+
+
+@dataclass(frozen=True)
+class OutOfReach:
+    """Why an output folder cannot be used. `kind` is 'drive' when what it is on is not there (a drive, a memory stick or a
+    network place, at `place`), 'file' when a file stands at `place` where a folder must be, and 'error' when Windows
+    refused, in its own words (`detail`)."""
+    kind: str
+    place: Path
+    detail: str = ''
+
+
+def out_of_reach(root):
+    """Why the output folder `root` cannot be used, or None when it can: it is there, or it can be made where it should be,
+    as on the first start. A missing drive shows the same as an empty folder to everything else, so this is asked first.
+    Nothing is made or changed here."""
+    root = Path(root)
+    try:
+        if root.is_dir():
+            with os.scandir(root) as entries:       # a folder that is there but refused shows only when it is read
+                next(entries, None)
+            return None
+        for place in (root, *root.parents):
+            if place.exists():
+                return None if place.is_dir() else OutOfReach('file', place)
+        return OutOfReach('drive', Path(root.anchor) if root.anchor else root)
+    except OSError as e:
+        return OutOfReach('error', root, e.strerror or str(e))
+
+
 class Library:
     def __init__(self, root=None, trash=None):
         self.root = Path(root or default_root())
@@ -571,8 +1071,8 @@ class Library:
     def release_problem(self, slug, today=None):
         """Why clips of this speaker cannot be kept because of their release, or ''."""
         state, date = self.release_ends(slug, today)
-        return (f'The release for this voice ran out on {date}. Renew it, and put the new one in Speaker details.'
-                if state == 'over' else '')
+        return (tr('The release for this voice ran out on {date}. Renew it, and put the new one in Speaker details.').format(
+            date=date) if state == 'over' else '')
 
     # ---- deleting a speaker -----------------------------------------------------------------------------------------------
 
@@ -681,21 +1181,17 @@ class Library:
         self._drop_spool(take)
         return take.master_path
 
-    def import_file(self, slug, path, purpose=ac.DEFAULT_PURPOSE):
+    def import_file(self, slug, path, purpose=ac.DEFAULT_PURPOSE, memory=None):
         """Copy a recording from anywhere on disk into the speaker's masters, as a take ready to edit. A format soundfile
-        does not read, such as a phone's M4A, is decoded by FFmpeg when it is installed (see audio_import.py)."""
-        samples, rate = audio_import.read_audio(path)
-        if samples.size == 0:
-            raise ValueError('the file holds no audio')
-        if not np.isfinite(samples).all():
-            raise ValueError('the file is damaged: some of its samples are not numbers')
-        # Only the file's name goes in the take, and so into the sidecar that travels with the clip: where the file was
-        # on this computer (a user name, say) is nobody else's business.
-        take = Take(source='import', samples=samples, rate=int(rate),
-                    device={'name': Path(path).name}, flags=['imported'],
-                    meta={**self.speaker_defaults(slug), 'purpose': purpose}, speaker=slug)
-        self.save_master(slug, take)
-        return take
+        does not read, such as a phone's M4A, is decoded by FFmpeg when it is installed (see audio_import.py). All at once:
+        Importing does the same a block at a time, for a long recording."""
+        importing = Importing(self, slug, path, purpose, memory)
+        try:
+            importing.run()
+        except BaseException:
+            importing.cancel()
+            raise
+        return importing.take
 
     def discard(self, take, permanent=False):
         """Remove the take's files: to the Recycle Bin, or for good when `permanent`.
@@ -857,6 +1353,8 @@ class Library:
                           'consent_confirmed_at': confirmed_at if isinstance(confirmed_at, str) else '',
                           'saved_transcript': text['transcript'], 'label': label, 'saved_label': label,
                           'script_line': self._script_line(data, status)})
+        take.meta['markers'] = _markers_of(data, frames / rate if rate else None)
+        take.meta['saved_markers'] = list(take.meta['markers'])
         if isinstance(data.get('consent_batch'), int):
             take.meta['consent_batch'] = data['consent_batch']
         take.meta['draft_words'] = clean_words(data.get('words'))
@@ -866,6 +1364,7 @@ class Library:
         take.sidecar_path = sidecar
         take.moves = _moves_of(data)
         take.kept_sha256 = data['export'].get('sha256')
+        take.kept_seconds = kept_length(data['export'], export_path)
         take.kept_work = _work_of(take)
         take.confirmed_words = words_key(history)
         return take
@@ -934,22 +1433,21 @@ class Library:
         `recipe` (anything with .edits, .chain and .fade_ms) defaults to the take's own; a background job passes a
         frozen copy so that edits made meanwhile cannot change what it renders.
         """
-        return render.before_level(take.samples, take.rate, recipe or take.history, self._denoiser(), self.cache,
-                                   take.id)
+        return render.before_level(take.mono, take.rate, recipe or take.history, self._denoiser(), self.cache, take.id)
 
     def process_native(self, take, recipe=None):
         """The edited clip at its own rate, mono: regions, cuts, filters, cleaning, gain and limiter."""
-        return render.process(take.samples, take.rate, recipe or take.history, self._denoiser(), self.cache, take.id)
+        return render.process(take.mono, take.rate, recipe or take.history, self._denoiser(), self.cache, take.id)
 
     def export_for(self, take, recipe=None):
         """What the export WAV would hold right now: the same chain as process_native, at the rate the clip is kept at."""
-        return render.export_samples(take.samples, take.rate, recipe or take.history, self._denoiser(), self.cache,
+        return render.export_samples(take.mono, take.rate, recipe or take.history, self._denoiser(), self.cache,
                                      take.id, take.export_rate)
 
     def stats_for(self, take, export, recipe=None):
         """What the keep rules judge: the measurements of `export`, and the clipping of the recording it was made from."""
         return {**ac.measure(export, take.export_rate),
-                **render.recorded_clipping(take.samples, take.rate, recipe or take.history)}
+                **render.recorded_clipping(take.samples, take.rate, recipe or take.history, take.mono)}
 
     def _place_master(self, folder, take):
         """The stem a take is kept under. Its original is written now if it is not on disk yet."""
@@ -974,7 +1472,7 @@ class Library:
         only once both files are in place, so a Keep that fails leaves it as it was, still being autosaved.
         """
         if take.needs_transcript_review:
-            raise KeepBlocked(['Confirm that the transcript still matches the words kept after the cuts.'])
+            raise KeepBlocked([tr('Confirm that the transcript still matches the words kept after the cuts.')])
         export = self.export_for(take)
         stats = self.stats_for(take, export)
         purpose = take.purpose
@@ -1014,7 +1512,7 @@ class Library:
         export_tmp = export_path.with_name(export_path.name + '.tmp')
         sidecar_tmp = sidecar_path.with_name(sidecar_path.name + '.tmp')
         try:
-            _write_audio(export_tmp, export, take.export_rate, purpose.subtype)
+            _write_audio(export_tmp, export, take.export_rate, purpose.subtype, permission_line(sidecar))
             sidecar['export']['sha256'] = file_sha256(export_tmp)
             sidecar_tmp.write_text(json.dumps(sidecar, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
             sync_file(sidecar_tmp)
@@ -1030,9 +1528,11 @@ class Library:
             _remove(sidecar_tmp)
         take.export_path, take.sidecar_path = export_path, sidecar_path
         take.kept_sha256 = sidecar['export']['sha256']
+        take.kept_seconds = sidecar['export']['duration_seconds']
         take.kept_work = _work_of(take)
         take.confirmed_words = words_key(take.history)
         take.meta['saved_label'] = clean_label(take.meta.get('label'))
+        take.meta['saved_markers'] = _markers_of(sidecar)
         take.meta['saved_transcript'] = sidecar['transcript']
         self.remove_autosave(take)                  # the sidecar holds the work from here on
         try:
@@ -1097,6 +1597,9 @@ class Library:
         label = clean_label(take.meta.get('label'))
         if label:                                   # a take with no label has no such field, as before
             sidecar['label'] = label
+        markers = clean_markers(take.meta.get('markers'), take.seconds)
+        if markers:                                 # nor does one with no markers
+            sidecar['markers'] = _markers_json(markers)
         if take.moves:                              # nor does a clip that was never moved to another speaker
             sidecar['moves'] = list(take.moves)
         return sidecar
@@ -1121,13 +1624,13 @@ class Library:
     def autosave(self, take):
         """Save what has changed on a take since Keep last wrote it. Returns True if a file was written.
 
-        A take that is not kept gets an autosave file beside its original, holding its cuts, Process settings, text and
-        label. So does a kept take that has been changed since, until Keep writes the changes; its label goes straight into
-        its sidecar, and a kept take that has been put back as it was loses the file. A take whose original is not on disk
+        A take that is not kept gets an autosave file beside its original, holding its cuts, Process settings, text, label
+        and markers. So does a kept take that has been changed since, until Keep writes the changes; its label and markers
+        go straight into its sidecar, and a kept take that has been put back as it was loses the file. A take whose original is not on disk
         (yet, or any more) has nowhere to be saved, and nothing is written. Raises OSError or ValueError when the write
         fails.
         """
-        wrote = self._save_label(take) if take.kept else False
+        wrote = self._save_label_and_markers(take) if take.kept else False
         master = self._master_file(take)
         if master is None or not master.is_file():
             return wrote
@@ -1164,6 +1667,7 @@ class Library:
             'join_fade_ms': recipe['join_fade_ms'],
             'chain': recipe['chain'],
             'label': clean_label(meta.get('label')),
+            'markers': _markers_json(clean_markers(meta.get('markers'), take.seconds)),
             'purpose': take.purpose.key,
             **text,
             'transcript_status': str(meta.get('transcript_status') or 'typed'),
@@ -1218,7 +1722,8 @@ class Library:
             if any(meta.get(key, '').strip() != take.meta[key].strip() for key in ('origin', 'allowed_use')):
                 take.meta.update(consent_confirmed=False, consent_confirmed_at='')
         else:
-            meta['label'] = _label_of(data)         # a kept take's label went straight into its sidecar
+            meta['label'] = _label_of(data)         # a kept take's label and markers went straight into its sidecar
+            meta['markers'] = _markers_of(data, take.seconds)
         take.history = history
         take.meta.update(meta)
         take.needs_transcript_review = bool(data.get('needs_transcript_review')) and history.words_changed
@@ -1234,22 +1739,26 @@ class Library:
                 take.flags = ['recovered'] + [f for f in flags if isinstance(f, str) and f != 'recovered']
         take.restored = True
 
-    def _save_label(self, take):
-        """Write a kept take's label into its sidecar, leaving everything else in the file as it is."""
+    def _save_label_and_markers(self, take):
+        """Write a kept take's label and markers into its sidecar, leaving everything else in the file as it is: the WAV
+        and the SHA-256 that names it do not change."""
         label = clean_label(take.meta.get('label'))
+        markers = clean_markers(take.meta.get('markers'), take.seconds)
         path = take.sidecar_path
-        if label == clean_label(take.meta.get('saved_label')) or path is None or not Path(path).is_file():
+        if (label, markers) == (clean_label(take.meta.get('saved_label')), take.meta.get('saved_markers') or []) \
+                or path is None or not Path(path).is_file():
             return False
         path = Path(path)
         data = json.loads(path.read_text(encoding='utf-8'))
         if not isinstance(data, dict):
             raise ValueError('the sidecar is not a clip description')
-        if label:
-            data['label'] = label
-        else:
-            data.pop('label', None)
+        for key, value in (('label', label), ('markers', _markers_json(markers))):
+            if value:
+                data[key] = value
+            else:
+                data.pop(key, None)
         self._write_json(path, data)
-        take.meta['saved_label'] = label
+        take.meta['saved_label'], take.meta['saved_markers'] = label, markers
         return True
 
     def revert(self, take):
@@ -1260,7 +1769,7 @@ class Library:
         sidecar = Path(take.sidecar_path)
         kept = self._take_from_sidecar(sidecar.parent, sidecar, json.loads(sidecar.read_text(encoding='utf-8')))
         take.history, take.meta = kept.history, kept.meta
-        take.kept_work, take.kept_sha256 = kept.kept_work, kept.kept_sha256
+        take.kept_work, take.kept_sha256, take.kept_seconds = kept.kept_work, kept.kept_sha256, kept.kept_seconds
         take.needs_transcript_review, take.confirmed_words = False, kept.confirmed_words
         take.draft_key = take.draft_request = None
         take.restored = False

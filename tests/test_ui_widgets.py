@@ -243,4 +243,45 @@ def test_nothing_is_clipped_at_the_smallest_window(window, session, open_fake, q
 
 def test_the_window_has_the_documented_minimum_size(window):
     assert (window.minimumWidth(), window.minimumHeight()) == (1100, 600)
-    assert window.editor_panel.stack.count() == 3 and window.editor_panel.EMPTY == 0 and EditorPanel.LIVE == 2
+    assert window.editor_panel.stack.count() == 4 and window.editor_panel.EMPTY == 0 and EditorPanel.LIVE == 2
+    assert EditorPanel.FOLDER == 3
+
+
+# ---- a row that flows onto the next line ------------------------------------------------------------------------------
+
+def flowing(qapp, width, hidden=False):
+    """Two fixed-size boxes in a FlowLayout, in a holder `width` wide."""
+    holder = QWidget()
+    row = widgets.flow(spacing=8)
+    holder.setLayout(row)
+    boxes = []
+    for size in (120, 150):
+        box = QWidget()
+        box.setFixedSize(size, 30)
+        row.addWidget(box)
+        boxes.append(box)
+    boxes[0].setHidden(hidden)
+    holder.resize(width, row.heightForWidth(width))
+    holder.show()
+    ui_helpers.pump(qapp)
+    return holder, row, boxes
+
+
+def test_a_flowing_row_stays_on_one_line_while_it_fits(qapp):
+    holder, row, (first, second) = flowing(qapp, 400)
+    assert row.heightForWidth(400) == 30 and first.y() == second.y() == 0 and second.x() == 128
+    assert row.sizeHint().width() == 278
+    holder.close()
+
+
+def test_a_flowing_row_goes_on_to_the_next_line_when_it_does_not(qapp):
+    holder, row, (first, second) = flowing(qapp, 200)
+    assert row.heightForWidth(200) == 68 and second.x() == 0 and second.y() == 38
+    assert row.minimumSize().width() == 150          # as narrow as its widest widget, not as both side by side
+    holder.close()
+
+
+def test_a_hidden_widget_takes_no_room_in_a_flowing_row(qapp):
+    holder, row, (first, second) = flowing(qapp, 200, hidden=True)
+    assert row.heightForWidth(200) == 30 and second.pos().x() == 0
+    holder.close()

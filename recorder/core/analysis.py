@@ -4,7 +4,8 @@
 - spectrogram: dB magnitudes for the picture under the waveform.
 - loudness_lufs, noise_floor_db, snr_db, bandwidth_hz, detect_hum, edge_silence: the quality checks.
 - silent_runs and the two range finders behind Auto-trim and Shorten pauses.
-- quality_report: the rows of the Check tab.
+- quality_report: the rows of the Check tab, in the window's language (i18n needs no toolkit).
+- delivery: an Audition measured against the limits ACX gives for an audiobook file.
 """
 import math
 from collections import namedtuple
@@ -13,6 +14,7 @@ import numpy as np
 from scipy.signal import lfilter, welch
 
 from .. import audio_core as ac
+from ..i18n import tr
 
 
 # ---- waveform drawing -------------------------------------------------------------------------------------------------
@@ -33,7 +35,12 @@ class PeakPyramid:
         block = self.BASE
         lo, hi = self._reduce(self.mono, self.mono, block)
         starts = np.arange(0, self.n, block)
-        sq = np.add.reduceat(self.mono.astype(np.float64) ** 2, starts)
+        sq = np.empty(len(starts), dtype=np.float64)
+        step = ac.BLOCK // block * block            # a block at a time: no 64-bit copy of a long recording
+        for first in range(0, self.n, step):
+            chunk = self.mono[first:first + step].astype(np.float64)
+            sums = np.add.reduceat(chunk ** 2, np.arange(0, len(chunk), block))
+            sq[first // block:first // block + len(sums)] = sums
         count = np.diff(np.append(starts, self.n))
         self.levels.append((block, lo, hi))
         self._energy.append((sq, count))
@@ -117,41 +124,44 @@ def spectrogram(x, rate, max_hz=12000.0, max_frames=12000):
     """dB below full scale per frequency bin (rows, low to high) and frame (columns), up to max_hz."""
     mono = ac.to_mono(x)
     n_fft = int(2 ** round(math.log2(max(rate * 0.0256, 64))))
-    hop = max(1, int(rate * 0.005), len(mono) // max_frames)
-    padded = np.pad(mono.astype(np.float32), (n_fft // 2, n_fft // 2), mode='reflect' if len(mono) > n_fft else 'constant')
-    starts = np.arange(0, max(len(padded) - n_fft + 1, 1), hop)
+    half, n = n_fft // 2, len(mono)
+    hop = max(1, int(rate * 0.005), n // max_frames)
+    if n > n_fft:
+        source, shift = mono, half      # the frames are read from the recording itself, mirrored at its ends, not from a copy
+    else:
+        source, shift = np.pad(mono.astype(np.float32), (half, half)), 0
+    starts = np.arange(0, max(n + 2 * half - n_fft + 1, 1), hop)
     window = np.hanning(n_fft).astype(np.float32)
     bins = int(min(max_hz, rate / 2) / (rate / n_fft)) + 1
     out = np.empty((bins, len(starts)), dtype=np.float32)
     scale = n_fft / 4.0                                     # a full-scale sine reads 0 dB
     for first in range(0, len(starts), 512):
-        idx = starts[first:first + 512, None] + np.arange(n_fft)[None, :]
-        mag = np.abs(np.fft.rfft(padded[idx] * window, axis=1))[:, :bins]
+        idx = starts[first:first + 512, None] + np.arange(n_fft)[None, :] - shift
+        if shift:
+            idx = np.abs(idx)                               # as np.pad's 'reflect': -1 reads sample 1
+            past = idx >= n
+            idx[past] = 2 * (n - 1) - idx[past]
+        mag = np.abs(np.fft.rfft(source[idx].astype(np.float32) * window, axis=1))[:, :bins]
         out[:, first:first + len(idx)] = (20.0 * np.log10(mag / scale + 1e-9)).T
     return Spectrogram(out, rate / n_fft, hop / rate)
 
 
 # ---- levels -----------------------------------------------------------------------------------------------------------
 
-def frame_db(x, rate):
-    """RMS level of each 20 ms frame in dB (the last partial frame is dropped)."""
-    m = ac.to_mono(x).astype(np.float64)
-    frame = max(1, int(rate * ac.FRAME_SECONDS))
-    usable = len(m) // frame * frame
-    if usable == 0:
-        return np.zeros(0)
-    rms = np.sqrt(np.mean(m[:usable].reshape(-1, frame) ** 2, axis=1))
-    return 20.0 * np.log10(rms + 1e-12)
+def frame_db(x, rate, energy=None):
+    """RMS level of each 20 ms frame in dB (the last partial frame is dropped). `energy` is ac.frame_energy of the same
+    clip, when it has been worked out already: the measures below all start from it, so one look at a clip shares it."""
+    return ac.energy_db(ac.frame_energy(x, rate) if energy is None else energy)
 
 
 QUIET_STRETCH_FRAMES = 10       # 0.2 s of frames in a row is enough to read the noise floor from
 
 
-def noise_floor_db(x, rate):
+def noise_floor_db(x, rate, energy=None):
     """The level of the quietest tenth of the frames, or of the quietest 0.2 s stretch if that is lower, ignoring digital
     silence. An estimate: it needs a pause. The stretch keeps the estimate from rising when the pauses are cut short
     (Auto-trim, Shorten pauses), which would leave the pauses under a tenth of the frames."""
-    db = frame_db(x, rate)
+    db = frame_db(x, rate, energy)
     db = db[db > -110.0]
     if not db.size:
         return -120.0
@@ -162,8 +172,9 @@ def noise_floor_db(x, rate):
     return round(floor, 1)
 
 
-def snr_db(x, rate):
-    return round(ac.voiced_rms_db(x, rate) - noise_floor_db(x, rate), 1)
+def snr_db(x, rate, energy=None):
+    energy = ac.frame_energy(x, rate) if energy is None else energy
+    return round(ac.voiced_rms_db(x, rate, energy) - noise_floor_db(x, rate, energy), 1)
 
 
 VOICE_BANDS = ((1000.0, 4000.0), (4000.0, 11000.0))     # where the consonants are, which noise cleaning takes first
@@ -182,7 +193,8 @@ def voice_loss_db(before, after, rate):
     frame = max(1, int(rate * ac.FRAME_SECONDS))
     x, y = ac.to_mono(before), ac.to_mono(after)
     count = min(min(len(x), len(y)) // frame, int(VOICE_CHECK_SECONDS / ac.FRAME_SECONDS))
-    speech = frame_db(x, rate)[:count] > speech_threshold_db(x, rate)
+    energy = ac.frame_energy(x, rate)
+    speech = frame_db(x, rate, energy)[:count] > speech_threshold_db(x, rate, energy)
     if not speech.any() or speech.all():
         return 0.0
     window = np.hanning(frame).astype(np.float32)
@@ -211,18 +223,32 @@ _K_HIGHPASS = ([1.0, -2.0, 1.0], [1.0, -1.99004745483398, 0.99007225036621])
 
 
 def loudness_lufs(x, rate):
-    """Integrated loudness of a mono signal, ITU-R BS.1770-4 (K-weighting, 400 ms blocks, absolute and relative gates)."""
+    """Integrated loudness of a mono signal, ITU-R BS.1770-4 (K-weighting, 400 ms blocks, absolute and relative gates).
+
+    Worked out a piece at a time: the filters carry their state from one piece to the next, and the energy is summed per
+    100 ms hop, of which each 400 ms block holds four. The result is the one a single pass over everything gives."""
     m = ac.to_mono(x)
-    if rate != 48000:
-        m = ac.resample(m, rate, 48000)
-    y = lfilter(*_K_HIGHPASS, lfilter(*_K_SHELF, m.astype(np.float64)))
+    pieces = ac.resample_blocks(m, rate, 48000) if rate != 48000 else (m[i:i + ac.BLOCK] for i in range(0, len(m), ac.BLOCK))
+    shelf = np.zeros(len(_K_SHELF[1]) - 1)
+    highpass = np.zeros(len(_K_HIGHPASS[1]) - 1)
     block, hop = 19200, 4800
-    if len(y) < block:
-        ms = np.array([float(np.mean(y * y))]) if len(y) else np.zeros(1)
+    hops, left = [], np.zeros(0)
+    total, length = 0.0, 0
+    for piece in pieces:
+        y, shelf = lfilter(*_K_SHELF, np.asarray(piece, dtype=np.float64), zi=shelf)
+        y, highpass = lfilter(*_K_HIGHPASS, y, zi=highpass)
+        total += float(np.dot(y, y))
+        length += len(y)
+        y = np.concatenate([left, y])
+        whole = len(y) // hop * hop
+        hops.append(np.sum(y[:whole].reshape(-1, hop) ** 2, axis=1))
+        left = y[whole:]
+    if length < block:
+        ms = np.array([total / length]) if length else np.zeros(1)
     else:
-        csum = np.concatenate([[0.0], np.cumsum(y * y)])
-        starts = np.arange(0, len(y) - block + 1, hop)
-        ms = (csum[starts + block] - csum[starts]) / block
+        sums = np.concatenate(hops)
+        count = (length - block) // hop + 1
+        ms = (sums[:count] + sums[1:count + 1] + sums[2:count + 2] + sums[3:count + 3]) / block
     with np.errstate(divide='ignore'):
         block_lufs = -0.691 + 10.0 * np.log10(ms)
     kept = block_lufs > -70.0
@@ -235,18 +261,35 @@ def loudness_lufs(x, rate):
     return round(-0.691 + 10.0 * math.log10(float(np.mean(ms[kept]))), 1)
 
 
-def bandwidth_hz(x, rate):
-    """The frequency below which 99.9% of the energy of the voiced frames lies: a band-limited source shows here."""
-    m = ac.to_mono(x).astype(np.float64)
-    db = frame_db(m, rate)
+BANDWIDTH_PIECE_FRAMES = 3000          # voiced frames looked at together: a minute at most, so a long take needs little memory
+
+
+def bandwidth_hz(x, rate, energy=None):
+    """The frequency below which 99.9% of the energy of the voiced frames lies: a band-limited source shows here.
+
+    The spectrum is averaged over pieces of up to a minute of voiced frames, weighted by their length, which comes to the
+    same as one spectrum over all of them for anything but a few segments where two pieces meet."""
+    m = ac.to_mono(x)
+    db = frame_db(m, rate, energy)
     if db.size == 0:
         return 0.0
     frame = max(1, int(rate * ac.FRAME_SECONDS))
     voiced = np.nonzero(db > max(ac.SILENCE_FRAME_DB, db.max() - 30.0))[0]
     if voiced.size == 0:
         return 0.0
-    signal = np.concatenate([m[i * frame:(i + 1) * frame] for i in voiced])
-    freqs, power = welch(signal, fs=rate, nperseg=min(2048, len(signal)))
+    nperseg = min(2048, voiced.size * frame)
+    power, weight, freqs = None, 0, None
+    for first in range(0, voiced.size, BANDWIDTH_PIECE_FRAMES):
+        frames = voiced[first:first + BANDWIDTH_PIECE_FRAMES]
+        signal = m[(frames[:, None] * frame + np.arange(frame)[None, :]).reshape(-1)].astype(np.float64)
+        if len(signal) < nperseg:
+            if power is not None:
+                break                       # a short remainder after full pieces changes nothing that matters
+            nperseg = len(signal)
+        freqs, piece = welch(signal, fs=rate, nperseg=nperseg)
+        power = piece * len(signal) if power is None else power + piece * len(signal)
+        weight += len(signal)
+    power = power / weight
     cumulative = np.cumsum(power)
     return round(float(freqs[min(int(np.searchsorted(cumulative, 0.999 * cumulative[-1])), len(freqs) - 1)]), 0)
 
@@ -258,10 +301,10 @@ def _runs(flags):
     return list(zip(changes[::2], changes[1::2]))
 
 
-def detect_hum(x, rate):
+def detect_hum(x, rate, energy=None):
     """(mains frequency, strength in dB) when 50 or 60 Hz hum stands out in the longest quiet stretch, else None."""
-    m = ac.to_mono(x).astype(np.float64)
-    db = frame_db(m, rate)
+    m = ac.to_mono(x)
+    db = frame_db(m, rate, energy)
     if db.size < 15:
         return None
     frame = max(1, int(rate * ac.FRAME_SECONDS))
@@ -271,7 +314,8 @@ def detect_hum(x, rate):
     first, last = max(runs, key=lambda r: r[1] - r[0])
     if (last - first) * frame < 0.3 * rate:
         return None
-    freqs, power = welch(m[first * frame:last * frame], fs=rate, nperseg=min(1 << 15, (last - first) * frame))
+    quiet = m[first * frame:last * frame].astype(np.float64)
+    freqs, power = welch(quiet, fs=rate, nperseg=min(1 << 15, (last - first) * frame))
     level = 10.0 * np.log10(power + 1e-30)
     best = None
     for mains in (50.0, 60.0):
@@ -296,7 +340,7 @@ SPEECH_ABOVE_NOISE_DB = 15.0    # the loudest tenth of the frames is speech when
                                 # noise rises and falls by 6 dB comes within 12 dB of its own floor
 
 
-def speech_threshold_db(x, rate):
+def speech_threshold_db(x, rate, energy=None):
     """Frames at or below this level count as pauses: well above the noise floor, well below the speech.
 
     The speech level is that of the loudest tenth of the frames. In a take that is mostly pause, such as one short word
@@ -304,31 +348,56 @@ def speech_threshold_db(x, rate):
     the speech. The threshold stays below the frames the speech level is read from, so some of every take is speech, and
     a take is never all pause, however quiet the voice.
     """
-    db = frame_db(x, rate)
+    energy = ac.frame_energy(x, rate) if energy is None else energy
+    db = frame_db(x, rate, energy)
     if db.size == 0:
         return ac.SILENCE_FRAME_DB
-    noise = noise_floor_db(x, rate)
+    noise = noise_floor_db(x, rate, energy)
     speech = float(np.percentile(db, 90))
     if speech < noise + SPEECH_ABOVE_NOISE_DB:
         speech = float(np.percentile(db, 99))
     return min(max(noise + 6.0, speech - 25.0, ac.SILENCE_FRAME_DB - 15.0), speech - 10.0)
 
 
-def silent_runs(x, rate, min_seconds=0.0):
+LIVE_ABOVE_ROOM_DB = 12.0       # while recording, a block this far above the room is the voice
+LIVE_FLOOR_DB = -55.0           # and never below this, so that hiss on a silent input is not taken for a voice
+LIVE_SPEECH_SECONDS = 0.3       # this much voice before a pause can end a take: the click of the record key is not speech
+
+
+def live_pause(rows):
+    """Whether a voice has been heard in a take being recorded, and for how many seconds it has not been since.
+
+    `rows` are (end second, RMS dBFS) per block, as Capture.loudness gives them. The room is the quietest tenth of the
+    blocks, which the half second kept before Record makes sure of; the voice is well above it. Short sounds do not count
+    until 0.3 s of them have been heard, so a click or a bump cannot end a take before the line has been read."""
+    rows = np.asarray(rows, dtype=np.float64).reshape(-1, 2)
+    if not len(rows):
+        return False, 0.0
+    ends, db = rows[:, 0], rows[:, 1]
+    lengths = np.diff(ends, prepend=0.0)
+    loud = db >= max(float(np.percentile(db, 10)) + LIVE_ABOVE_ROOM_DB, LIVE_FLOOR_DB)
+    if lengths[loud].sum() < LIVE_SPEECH_SECONDS:
+        return False, 0.0
+    return True, float(ends[-1] - ends[np.nonzero(loud)[0][-1]])
+
+
+def silent_runs(x, rate, min_seconds=0.0, energy=None):
     """Runs of pause frames as (start, end) seconds on the signal's own timeline. Includes the ends of the clip."""
-    db = frame_db(x, rate)
+    energy = ac.frame_energy(x, rate) if energy is None else energy
+    db = frame_db(x, rate, energy)
     if db.size == 0:
         return []
-    runs = [(a * ac.FRAME_SECONDS, b * ac.FRAME_SECONDS) for a, b in _runs(db <= speech_threshold_db(x, rate))]
+    runs = [(a * ac.FRAME_SECONDS, b * ac.FRAME_SECONDS) for a, b in _runs(db <= speech_threshold_db(x, rate, energy))]
     return [(a, b) for a, b in runs if b - a >= min_seconds]
 
 
-def edge_silence(x, rate):
+def edge_silence(x, rate, energy=None):
     """(seconds of pause before the first speech, seconds of pause after the last)."""
+    energy = ac.frame_energy(x, rate) if energy is None else energy
     total = len(ac.to_mono(x)) / rate
-    runs = silent_runs(x, rate)
+    runs = silent_runs(x, rate, energy=energy)
     lead = runs[0][1] if runs and runs[0][0] <= 1e-9 else 0.0
-    tail = total - runs[-1][0] if runs and runs[-1][1] >= len(frame_db(x, rate)) * ac.FRAME_SECONDS - 1e-9 else 0.0
+    tail = total - runs[-1][0] if runs and runs[-1][1] >= len(energy) * ac.FRAME_SECONDS - 1e-9 else 0.0
     return round(lead, 3), round(max(tail, 0.0), 3)
 
 
@@ -364,20 +433,20 @@ WORD_EDGE_FRAME = 0.005
 def quietest_near(x, rate, seconds, reach=WORD_EDGE_REACH):
     """The moment within `reach` of `seconds` where the sound is quietest. The times a recognizer gives a word are rough, and a
     cut made exactly on them can leave the first sound of the word behind. The gap between two words is where it belongs."""
-    m = ac.to_mono(x).astype(np.float64)
+    m = ac.to_mono(x)
     frame = max(1, int(rate * WORD_EDGE_FRAME))
     first, last = max(int((seconds - reach) * rate), 0), min(int((seconds + reach) * rate), len(m))
     count = (last - first) // frame
     if count < 2:
         return seconds
-    energy = np.sum(m[first:first + count * frame].reshape(-1, frame) ** 2, axis=1)
+    energy = np.sum(m[first:first + count * frame].astype(np.float64).reshape(-1, frame) ** 2, axis=1)
     return (first + (int(np.argmin(energy)) + 0.5) * frame) / rate
 
 
 SPLIT_PAUSE_SECONDS = 0.35      # a pause at least this long is a place to split a take
 
 
-def split_ranges(x, rate, shortest, keep_min, keep_max):
+def split_ranges(x, rate, shortest, keep_min, keep_max, energy=None):
     """Where to split a long take: (first, end) sample ranges that cover all of it, cut in the middle of its pauses.
 
     Each part closes at the first pause after it has reached `shortest` seconds, which gives parts of about that length
@@ -386,7 +455,8 @@ def split_ranges(x, rate, shortest, keep_min, keep_max):
     """
     n = len(ac.to_mono(x))
     total = n / rate
-    pauses = [(a + b) / 2 for a, b in silent_runs(x, rate, min_seconds=SPLIT_PAUSE_SECONDS) if a > 1e-9 and b < total - 0.05]
+    pauses = [(a + b) / 2 for a, b in silent_runs(x, rate, min_seconds=SPLIT_PAUSE_SECONDS, energy=energy)
+              if a > 1e-9 and b < total - 0.05]
     parts, start = [], 0.0
     for point in pauses:
         if point - start >= shortest:
@@ -404,6 +474,26 @@ def split_ranges(x, rate, shortest, keep_min, keep_max):
 Check = namedtuple('Check', 'key label value status hint')     # status: ok, warn, bad or info
 
 
+# The limits of the Check tab, which the room check uses too, so that the two never disagree.
+SPEECH_OK_DB = 3.0              # the voiced level this close to ac.TARGET_VOICED_DB is right
+SPEECH_WARN_DB = 8.0            # and this close is worth a note
+PEAK_OK_DBFS = -1.0             # a peak above this leaves no headroom
+CLIPPED_MAX = 0.001             # more of the samples than this at full scale is clipping
+NOISE_OK_DB = -55.0             # a noise floor at or below this is quiet
+NOISE_WARN_DB = -45.0           # and at or below this is worth a note
+
+
+def rank_speech(speech_db):
+    """'ok', 'warn' or 'bad' for a voiced level, by its distance from the target."""
+    off = abs(speech_db - ac.TARGET_VOICED_DB)
+    return 'ok' if off <= SPEECH_OK_DB else 'warn' if off <= SPEECH_WARN_DB else 'bad'
+
+
+def rank_noise(floor_db):
+    """'ok', 'warn' or 'bad' for a noise floor."""
+    return 'ok' if floor_db <= NOISE_OK_DB else 'warn' if floor_db <= NOISE_WARN_DB else 'bad'
+
+
 def quality_report(x, rate=ac.EXPORT_RATE, recorded_clipped=0.0, purpose=None):
     """The measurements of a finished clip, each with a status, in the order the Check tab shows them.
 
@@ -411,50 +501,140 @@ def quality_report(x, rate=ac.EXPORT_RATE, recorded_clipped=0.0, purpose=None):
     finished clip can hide. `purpose` gives the length rules (a Reference's if none is given).
     """
     rules = purpose or ac.PURPOSES[ac.DEFAULT_PURPOSE]
-    stats = ac.measure(x, rate)
+    energy = ac.frame_energy(x, rate)           # worked out once, for every measure below
+    stats = ac.measure(x, rate, energy)
     seconds = stats['seconds']
-    speech = ac.voiced_rms_db(x, rate)
-    floor = noise_floor_db(x, rate)
-    lead, tail = edge_silence(x, rate)
-    hum = detect_hum(x, rate)
-    band = bandwidth_hz(x, rate)
+    speech = ac.voiced_rms_db(x, rate, energy)
+    floor = noise_floor_db(x, rate, energy)
+    lead, tail = edge_silence(x, rate, energy)
+    hum = detect_hum(x, rate, energy)
+    band = bandwidth_hz(x, rate, energy)
     clipped = max(stats['clipped_fraction'], recorded_clipped)
 
     def rank(value, ok, warn):
         return 'ok' if ok(value) else 'warn' if warn(value) else 'bad'
 
     rows = [
-        Check('length', 'Length', f'{seconds:.1f} s',
+        Check('length', tr('Length'), f'{seconds:.1f} s',
               rank(seconds, lambda v: rules.best_from <= v <= rules.best_to,
                    lambda v: rules.min_seconds <= v <= rules.max_seconds),
-              f'Between {rules.min_seconds:g} and {rules.max_seconds:g} s can be kept; {rules.best_from:g} to '
-              f'{rules.best_to:g} s works best.'),
-        Check('speech', 'Speech level', f'{speech:.1f} dB',
-              rank(abs(speech - ac.TARGET_VOICED_DB), lambda v: v <= 3, lambda v: v <= 8),
-              f'Loudness of the voiced parts. The target is {ac.TARGET_VOICED_DB:.0f} dB; Normalize sets it.'),
-        Check('peak', 'Peak', f"{stats['peak_dbfs']:.1f} dBFS",
-              'ok' if stats['peak_dbfs'] <= -1.0 else 'warn',
-              'Peaks above -1 dBFS leave no headroom; the limiter keeps them under the ceiling.'),
-        Check('clipping', 'Clipping', f'{clipped * 100:.3f}% of samples', 'ok' if clipped <= 0.001 else 'bad',
-              'More than 0.1% of samples at full scale is flagged as clipped. The recording counts too: gain and the '
-              'limiter can hide clipping, but not repair it.'),
-        Check('loudness', 'Loudness', f'{loudness_lufs(x, rate):.1f} LUFS', 'info',
-              'Integrated loudness (ITU-R BS.1770). For comparison only.'),
-        Check('noise', 'Noise floor', f'{floor:.1f} dB',
-              rank(floor, lambda v: v <= -55, lambda v: v <= -45),
-              f'Level of the quietest tenth of the clip. Speech is about {max(speech - floor, 0):.0f} dB above it.'),
-        Check('bandwidth', 'Bandwidth', f'{band / 1000:.1f} kHz',
+              tr('Between {low} and {high} s can be kept; {start} to {end} s works best.').format(
+                  low=f'{rules.min_seconds:g}', high=f'{rules.max_seconds:g}', start=f'{rules.best_from:g}',
+                  end=f'{rules.best_to:g}')),
+        Check('speech', tr('Speech level'), f'{speech:.1f} dB', rank_speech(speech),
+              tr('Loudness of the voiced parts. The target is {target} dB; Normalize sets it.').format(
+                  target=f'{ac.TARGET_VOICED_DB:.0f}')),
+        Check('peak', tr('Peak'), f"{stats['peak_dbfs']:.1f} dBFS",
+              'ok' if stats['peak_dbfs'] <= PEAK_OK_DBFS else 'warn',
+              tr('Peaks above -1 dBFS leave no headroom; the limiter keeps them under the ceiling.')),
+        Check('clipping', tr('Clipping'), tr('{percent}% of samples').format(percent=f'{clipped * 100:.3f}'),
+              'ok' if clipped <= CLIPPED_MAX else 'bad',
+              tr('More than 0.1% of samples at full scale is flagged as clipped. The recording counts too: gain and the '
+                 'limiter can hide clipping, but not repair it.')),
+        Check('loudness', tr('Loudness'), f'{loudness_lufs(x, rate):.1f} LUFS', 'info',
+              tr('Integrated loudness (ITU-R BS.1770). For comparison only.')),
+        Check('noise', tr('Noise floor'), f'{floor:.1f} dB', rank_noise(floor),
+              tr('Level of the quietest tenth of the clip. Speech is about {gap} dB above it.').format(
+                  gap=f'{max(speech - floor, 0):.0f}')),
+        Check('bandwidth', tr('Bandwidth'), f'{band / 1000:.1f} kHz',
               rank(band, lambda v: v >= 4500, lambda v: v >= 3500),
-              'Frequency below which 99.9% of the speech energy lies. Phone-quality sources stop below about 4 kHz.'),
-        Check('hum', 'Mains hum',
-              'none found' if hum is None else f'{hum[0]:.0f} Hz, {hum[1]:.0f} dB above its surroundings',
+              tr('Frequency below which 99.9% of the speech energy lies. Phone-quality sources stop below about 4 kHz.')),
+        Check('hum', tr('Mains hum'),
+              tr('none found') if hum is None else
+              tr('{hz} Hz, {db} dB above its surroundings').format(hz=f'{hum[0]:.0f}', db=f'{hum[1]:.0f}'),
               'ok' if hum is None else 'warn',
-              'Turn on the hum notch in Process if it is found.'),
-        Check('ends', 'Silence at the ends', f'{lead:.2f} s before, {tail:.2f} s after',
+              tr('Turn on the Hum filter in Process if it is found.')),
+        Check('ends', tr('Silence at the ends'),
+              tr('{before} s before, {after} s after').format(before=f'{lead:.2f}', after=f'{tail:.2f}'),
               'ok' if max(lead, tail) <= 0.8 else 'warn',
-              'Long pauses at the ends are wasted reference time. Auto-trim keeps 0.15 s.'),
-        Check('silence', 'Silence overall', f"{stats['silence_fraction'] * 100:.0f}% of frames",
+              tr('Long pauses at the ends are wasted reference time. Auto-trim keeps 0.15 s.')),
+        Check('silence', tr('Silence overall'), tr('{percent}% of frames').format(
+              percent=f"{stats['silence_fraction'] * 100:.0f}"),
               'ok' if stats['silence_fraction'] <= ac.MOSTLY_SILENT else 'warn',
-              'More than 40% pauses leaves little speech.'),
+              tr('More than 40% pauses leaves little speech.')),
     ]
     return rows
+
+
+# ---- audiobook delivery -----------------------------------------------------------------------------------------------
+
+# The limits ACX gives for every file of an audiobook, in "ACX audio submission requirements" on help.acx.com (the
+# version of 15 April 2026). ACX does not say how it measures the noise floor; here it is the quietest half second.
+ACX_SOURCE = 'ACX audio submission requirements, help.acx.com, April 2026'
+ACX_RMS_DB = (-23.0, -18.0)     # the RMS level of the whole file, pauses included
+ACX_PEAK_DB = -3.0              # no sample above this
+ACX_NOISE_DB = -60.0            # the noise floor, as an RMS level
+NOISE_WINDOW_SECONDS = 0.5
+DIGITAL_SILENCE_DB = -110.0     # a frame this quiet holds nothing at all: a pause cut to silence is not the room's noise
+
+
+def quietest_db(x, rate, seconds=NOISE_WINDOW_SECONDS, energy=None):
+    """The RMS level of the quietest stretch of `seconds` in the clip, or None when it has no such stretch free of
+    digital silence."""
+    energy = ac.frame_energy(x, rate) if energy is None else energy
+    width = max(1, int(round(seconds / ac.FRAME_SECONDS)))
+    if len(energy) < width:
+        return None
+    total = np.concatenate([[0.0], np.cumsum(energy)])
+    silent = np.concatenate([[0], np.cumsum(ac.energy_db(energy) <= DIGITAL_SILENCE_DB)])
+    means = (total[width:] - total[:-width]) / width
+    means = means[(silent[width:] - silent[:-width]) == 0]
+    if not means.size:
+        return None
+    return round(10.0 * math.log10(max(float(means.min()), 1e-24)), 1)
+
+
+class Delivery(namedtuple('Delivery', 'rms_db peak_db noise_db')):
+    """A clip measured against ACX_RMS_DB, ACX_PEAK_DB and ACX_NOISE_DB, each value rounded as the Check tab shows it, so
+    that what it shows and what it says agree. `noise_db` is None when there is nothing to read it from."""
+
+    @property
+    def level_ok(self):
+        return ACX_RMS_DB[0] <= self.rms_db <= ACX_RMS_DB[1]
+
+    @property
+    def peak_ok(self):
+        return self.peak_db <= ACX_PEAK_DB
+
+    @property
+    def noise_ok(self):
+        return self.noise_db is not None and self.noise_db <= ACX_NOISE_DB
+
+
+def delivery(x, rate, stats=None, energy=None):
+    """`x` measured as ACX measures an audiobook file. `stats` is ac.measure of it, when it has been worked out already."""
+    energy = ac.frame_energy(x, rate) if energy is None else energy
+    stats = ac.measure(x, rate, energy) if stats is None else stats
+    return Delivery(round(stats['rms_dbfs'], 1), round(stats['peak_dbfs'], 1), quietest_db(x, rate, energy=energy))
+
+
+# ---- the room and the level, before a session -------------------------------------------------------------------------
+
+Room = namedtuple('Room', 'heard floor_db speech_db floor_at_target_db peak_dbfs clipped hum room level headroom')
+
+
+def room_check(quiet, spoken, rate, out_rate=ac.EXPORT_RATE):
+    """What a few seconds of the room and then a spoken sentence say, judged by the Check tab's limits.
+
+    `quiet` and `spoken` are the two parts of the recording, mono, at `rate`. The whole of it is measured as the Check tab
+    measures a take of it, at `out_rate`, so that the two cannot disagree; peaks and clipping are read on the recording
+    itself, as the Check tab counts the recording's clipping too, and hum in the quiet part. The room is judged where it
+    will be once the voice is at the target level, as Normalize puts it: a quiet voice is raised, and the room with it.
+    `room`, `level` and `headroom` are 'ok', 'warn' or 'bad'; with no voice heard, `level` is 'bad' and `room` is judged
+    as it is.
+    """
+    quiet, spoken = np.asarray(quiet, dtype=np.float32), np.asarray(spoken, dtype=np.float32)
+    whole = np.concatenate([quiet, spoken])
+    stats = ac.measure(whole, rate)
+    x = ac.resample(whole, rate, out_rate) if rate != out_rate else whole
+    q = ac.resample(quiet, rate, out_rate) if rate != out_rate else quiet
+    energy = ac.frame_energy(x, out_rate)
+    floor = noise_floor_db(x, out_rate, energy)
+    speech = ac.voiced_rms_db(x, out_rate, energy) if len(x) else -240.0
+    heard = speech > max(floor + LIVE_ABOVE_ROOM_DB, LIVE_FLOOR_DB)
+    at_target = round(floor + (ac.TARGET_VOICED_DB - speech), 1) if heard else floor
+    clipped = stats['clipped_fraction']
+    headroom = 'bad' if clipped > CLIPPED_MAX else 'ok' if stats['peak_dbfs'] <= PEAK_OK_DBFS else 'warn'
+    return Room(heard=heard, floor_db=floor, speech_db=round(speech, 1), floor_at_target_db=at_target,
+                peak_dbfs=stats['peak_dbfs'], clipped=clipped, hum=detect_hum(q, out_rate), room=rank_noise(at_target),
+                level=rank_speech(speech) if heard else 'bad', headroom=headroom if heard else 'ok')

@@ -40,7 +40,7 @@ A UTF-8 JSON object. An example, written compactly (the program writes it with o
 ```json
 {
   "schema": "voice-recorder-clip-v2",
-  "software": { "name": "voice-slate", "version": "0.6.0" },
+  "software": { "name": "voice-slate", "version": "0.7.0" },
   "id": "3f9a1c2e",
   "created": "2026-10-20T16:12:04+01:00",
   "speaker": "my-voice",
@@ -115,11 +115,12 @@ A UTF-8 JSON object. An example, written compactly (the program writes it with o
 | `notes` | Free text. |
 | `flags` | Facts about the take, worked out again at each Keep: `edited`, `filtered` (high-pass or hum notch on), `cleaned` (noise reduction on), `level_changed`, `limited` (limiter on), `clipped` (a sample of the kept clip, or of the recording it was made from, reaches full scale), `interrupted` (the device stopped while recording, or the program did), `dropouts` (the device reported losing audio while recording), `split` (a part of a longer take). |
 | `label` | Optional. A name the person gave the take to find it by: one line, at most 80 characters. The field is absent when the take has no label. It can change after the clip was kept (renaming a kept take rewrites only this field of the sidecar), and the WAV never changes with it, so the SHA-256 in `export` still holds. |
+| `markers` | Optional. Moments the person marked, in order: a list of `{ "seconds": 12.345 }`, in seconds on the master's timeline like the edits, to the millisecond. The field is absent when the take has none. Like `label`, it can change after the clip was kept (only this field of the sidecar is rewritten), and the WAV never changes with it. A marker can fall inside a part that was cut. |
 | `moves` | Optional. Present only on a clip that was moved to another speaker: a list, oldest first, of `{ "from": "<speaker folder>", "to": "<speaker folder>", "at": "<ISO 8601 time>" }`. `speaker` always names where the clip is now. The WAV is the same bytes, so the SHA-256 in `export` still holds. |
 | `script_line` | Optional. The line of a script the take was read from, exactly as it stood. |
 | `words` | Optional. What the speech recognizer heard, as `[word, start, end]` rows, with times in seconds on the master's timeline. A draft: the words can be wrong, and the times are rough. Present when the take had a draft. |
 | `split_from` | Optional. On a part of a take that was split: `{ "take": "<id of the long take>", "start_seconds": ..., "end_seconds": ... }`, on that take's timeline. |
-| `dataset` | Only on the copy of a sidecar in an exported dataset: `{ "made_from": "original" }` or `"kept clip"`. There, `export` describes the WAV in the dataset, and `master` still names the file in the library, which is not part of the dataset. |
+| `dataset` | Only on the copy of a sidecar in an exported dataset: `{ "made_from": "original" }` or `"kept clip"`, and `"split": "train"` or `"validation"` when the dataset was split. There, `export` describes the WAV in the dataset, and `master` still names the file in the library, which is not part of the dataset. |
 
 ### Edits
 
@@ -150,6 +151,40 @@ rate so that resampling cannot push a peak above its ceiling.
 
 Everything needed to rebuild the kept clip from the master is in the sidecar, but you do not need it to use the clip:
 the `.wav` file is complete.
+
+## Inside the WAV
+
+A kept clip's WAV carries one line of plain text, so that the clip still says what it may be used for when it is copied
+somewhere without its sidecar. It is in the standard information chunk (`LIST` `INFO`, as `ICMT`, the comment), after the
+audio, which is the only place Windows' own file properties look for it:
+
+```text
+Fel's Voice Slate clip 3f9a1c2e, described in 20261020-161204_mic_3f9a1c2e.json. Allowed use: my own voice references. Permission given 2026-10-20.
+```
+
+- The id and the sidecar's name are the clip's own, also in a copy or a dataset where the WAV has another name.
+- The allowed use is on one line. One longer than 400 characters is cut there and ends `... (the rest is in the sidecar)`.
+- *Permission given* is the date part of `consent_confirmed_at`, and is left out when the sidecar has none.
+- The origin is not in it: it can say who the person is. Read it from the sidecar.
+
+The line is written whenever a clip is kept or kept again, so `export.sha256` is of the file with the line in it. Clips
+kept before version 0.7 do not have it, and are not changed to add it. Copies (**Save a copy...**) and the clips of a
+dataset carry it too, made from the sidecar, whenever the clip was kept: in WAV the same chunk, in FLAC and Ogg Vorbis
+the `COMMENT` field, and in MP3 its ID3 comment.
+
+The chunk names no character set. The line is written in UTF-8, as typed. What was seen on Windows 11 with the
+allowed use "réunion d’équipe, Señora Núñez":
+
+| Read by | WAV | FLAC | Ogg Vorbis | MP3 |
+|---|---|---|---|---|
+| libsndfile (SoundFile, and the programs built on it) | as typed | as typed | as typed | without accents |
+| FFmpeg 8.1 (`ffprobe`) | as typed | as typed | | without accents |
+| Windows Explorer, *Properties > Details > Comments* | accents wrong ("rÃ©union") | not shown | as typed | without accents |
+
+Windows reads a WAV's comment as the Windows code page, so an accented letter shows as two wrong ones there; the sidecar
+has the text as it was typed. FLAC and Ogg Vorbis define their comments as UTF-8. An MP3's tag is written as Latin-1 by the
+encoder inside libsndfile, which garbled every accent in every program, so in an MP3 copy the line has its accents taken
+off ("é" becomes "e", "’" becomes "'") and any other letter outside plain ASCII is a `?`.
 
 ## Reading the clips from another program
 
@@ -230,10 +265,73 @@ my-dataset\                     LJSpeech
   manifest.jsonl                the same, with the origin and allowed use of each clip
   wavs\
     my-voice_20261020-161204_mic_3f9a1c2e.wav
+
+my-dataset\                     Hugging Face audio folder
+  manifest.jsonl
+  train\
+    metadata.csv                file_name,text,speaker_id,allowed_use
+    my-voice_20261020-161204_mic_3f9a1c2e.wav
+
+my-dataset\                     Kaldi
+  wav.scp                       my_voice-20261020-161204_mic_3f9a1c2e wavs/my-voice_20261020-161204_mic_3f9a1c2e.wav
+  text                          my_voice-20261020-161204_mic_3f9a1c2e The harbour lights came on at dusk.
+  utt2spk                       my_voice-20261020-161204_mic_3f9a1c2e my_voice
+  spk2utt                       my_voice my_voice-20261020-161204_mic_3f9a1c2e ...
+  manifest.jsonl
+  wavs\
+    my-voice_20261020-161204_mic_3f9a1c2e.wav
 ```
 
-In `metadata.csv` the first column is the file's name without `.wav`, and the second and third are the transcript on one line, with
-any `|` replaced by a space. The LJSpeech layout's WAVs are mono and 16-bit; in the other layout an audition stays 24-bit.
+In the LJSpeech `metadata.csv` the first column is the file's name without `.wav`, and the second and third are the transcript
+on one line, with any `|` replaced by a space. The LJSpeech and Kaldi layouts' WAVs are mono and 16-bit; in the other layouts
+an audition stays 24-bit.
+
+The Hugging Face `metadata.csv` is a CSV with a header row, UTF-8 with no byte-order mark. `file_name` is the path from the
+folder it is in, as the `datasets` library wants, and the transcript is on one line, exactly as it is: unlike the manifest's
+CSV, nothing is put in front of a text that starts like a formula, because a training tool needs the words as they are. The
+clips are always in a folder named for their split, `train` when there is no split, because the library also takes a split
+from a file's name: a speaker called "Test" would otherwise make their clips the test split.
+
+The Kaldi lists are what Kaldi's own data preparation describes: UTF-8, one line each, `\n` line ends, sorted by byte (as with
+`LC_ALL=C`). An utterance's id is the speaker's id, a dash, and the clip's name. A speaker's id is the folder name with each
+`-` made `_`, so that the utterances in that sort come out in the order of their speakers, which `utils/validate_data_dir.sh`
+checks. The paths in `wav.scp` are relative to the dataset's folder, with `/`.
+
+### A split
+
+With a split, some clips are put aside for validation. A clip goes aside by a hash of its speaker's folder and its file name,
+so the same clips go aside every time; the number is the share chosen of the clips, rounded, at least one when there are two
+clips or more, and never all of them. Each row of `manifest.jsonl` then has `split`, `"train"` or `"validation"`.
+
+| Layout | With a split |
+|---|---|
+| Clips with their sidecars | `train\<speaker>\` and `validation\<speaker>\` instead of `<speaker>\` |
+| LJSpeech | `metadata.csv` still lists every clip; `metadata_train.csv` and `metadata_validation.csv` list each part |
+| Hugging Face audio folder | `train\` and `validation\`, each with its own `metadata.csv` |
+| Kaldi | `train\` and `validation\`, each a data folder with its four lists; the clips stay in `wavs\` |
+
+## Backups
+
+**Back up recordings...** writes a copy of the whole output folder, laid out exactly as above, and beside it one more file,
+`voice-slate-backup.json`, which lists every file the backup holds and the SHA-256 it had when it was copied and checked:
+
+```json
+{
+  "schema": "voice-slate-backup-v1",
+  "software": { "name": "voice-slate", "version": "0.7.0" },
+  "made": "2026-11-14T19:40:12+00:00",
+  "files": {
+    "my-voice/20261020-161204_mic_3f9a1c2e.json": "…",
+    "my-voice/20261020-161204_mic_3f9a1c2e.wav": "…",
+    "my-voice/masters/20261020-161204_mic_3f9a1c2e.raw.wav": "…",
+    "speakers.json": "…"
+  }
+}
+```
+
+The names are relative to the backup's folder, with `/`. **Bring in a backup...** checks each file it copies against this
+list, and refuses a backup that is missing a file the list names. The list itself is not brought into the output folder. A
+file still being written when the backup ran, one ending in `.tmp`, is not in it.
 
 ## Older sidecars
 

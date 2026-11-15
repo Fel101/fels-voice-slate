@@ -53,7 +53,7 @@ def test_a_device_that_cannot_be_opened_is_reported_and_leaves_things_idle(sessi
 
 
 def test_starting_with_no_device_asks_for_one(session, monkeypatch):
-    monkeypatch.setattr(cap, 'list_microphones', lambda: [])
+    monkeypatch.setattr(cap, 'list_microphones', lambda every=False: [])
     monkeypatch.setattr(cap, 'default_microphone', lambda: None)
     session.capturing.refresh_devices()
     assert session.capturing.device is None
@@ -277,7 +277,7 @@ def test_a_failed_capture_that_cannot_even_be_saved_still_releases_the_device(se
 # ---- devices ----------------------------------------------------------------------------------------------------------
 
 def test_a_chosen_device_stays_chosen(session, monkeypatch):
-    monkeypatch.setattr(cap, 'list_microphones', lambda: [(5, 'Mic A'), (7, 'Mic B')])
+    monkeypatch.setattr(cap, 'list_microphones', lambda every=False: [(5, 'Mic A'), (7, 'Mic B')])
     monkeypatch.setattr(cap, 'default_microphone', lambda: 5)
     session.capturing.refresh_devices()
     assert session.capturing.device == 5 and session.capturing.device_label() == 'Mic A'
@@ -286,7 +286,7 @@ def test_a_chosen_device_stays_chosen(session, monkeypatch):
 
 
 def test_picking_a_device_releases_an_armed_one_so_the_next_start_uses_it(session, open_fake, monkeypatch):
-    monkeypatch.setattr(cap, 'list_microphones', lambda: [(5, 'Mic A'), (7, 'Mic B')])
+    monkeypatch.setattr(cap, 'list_microphones', lambda every=False: [(5, 'Mic A'), (7, 'Mic B')])
     monkeypatch.setattr(cap, 'default_microphone', lambda: 5)
     session.capturing.refresh_devices()
     session.capturing.toggle_arm()
@@ -297,14 +297,14 @@ def test_picking_a_device_releases_an_armed_one_so_the_next_start_uses_it(sessio
 
 
 def test_a_missing_default_device_falls_back_to_the_first_in_the_list(session, monkeypatch):
-    monkeypatch.setattr(cap, 'list_microphones', lambda: [(5, 'Mic A'), (7, 'Mic B')])
+    monkeypatch.setattr(cap, 'list_microphones', lambda every=False: [(5, 'Mic A'), (7, 'Mic B')])
     monkeypatch.setattr(cap, 'default_microphone', lambda: 99)
     session.capturing.refresh_devices()
     assert session.capturing.device == 5
 
 
 def test_a_device_library_error_is_shown_not_raised(session, monkeypatch):
-    def broken():
+    def broken(every=False):
         raise OSError('PortAudio is unavailable')
 
     monkeypatch.setattr(cap, 'list_microphones', broken)

@@ -15,9 +15,10 @@ recorder/
                  whole output folder (Relocation). A take reads its audio only when it is asked for (_Resident)
   share.py       a copy of a kept clip as WAV, FLAC, MP3 or Ogg at another sample rate (SoundFile's libsndfile, no FFmpeg)
   manifest.py    a list of the kept clips, as JSON Lines or CSV, for programs that read a whole set
-  dataset.py     the kept clips gathered in one new folder, as clips with sidecars or in the LJSpeech layout
+  dataset.py     the kept clips gathered in one new folder, in four layouts (clips, LJSpeech, Hugging Face, Kaldi)
   audio_core.py  small pure helpers, the purposes, and the rules for what can be kept
   i18n.py        the window in other languages: tr() and the tables in resources/lang
+  devices.py     the lists of microphones and outputs: each device once, as WASAPI names it, and a remembered name found again
   capture.py     microphone (sounddevice) and system audio (PyAudioWPatch), behind one interface
   audio_io.py    playback through a sounddevice output stream
   clean.py       noise reduction by running the user's own FFmpeg
@@ -56,6 +57,12 @@ are seconds on the original's timeline, so they survive undo and redo.
 Because the original is written to disk the moment recording stops and the recipe is separate, editing is
 non-destructive: **Keep** renders the recipe to a new file, and the sidecar stores the recipe, so a kept clip can be
 opened again and its edits are still editable.
+
+A take's **label** and **markers** are not part of the recipe. They say nothing about the sound, so they are left out of
+what tells a kept take that it has changed (`store._work_of`), have no undo steps, and on a kept clip go straight into its
+sidecar (`Library._save_label_and_markers`), leaving the WAV and its SHA-256 alone. Markers are seconds on the original's
+timeline, like the recipe's times. While recording, `Capturing.markers` collects them from `Capture.elapsed`, which counts
+the pre-roll, and `Workspace.add_take` gives them to the take.
 
 ## Rendering
 
@@ -106,12 +113,36 @@ audio and of what was worked out from it. The take in front (`in_use`) and a tak
 go. Another thread can let a take go at any moment, so code that reads `take.cache` for something made from the audio reads it once.
 
 The list of takes (`ui/library.py`) is a `QListView` over a model, drawn by a delegate, so only the rows on screen cost anything.
-`Measurements.thumbnail` works out the outline of a row in the background the first time it is drawn.
+`Measurements.thumbnail` works out the outline of a row in the background the first time it is drawn. What it shows is
+`library.arrange`: the takes, newest first as the workspace holds them, narrowed by the filter words and by the choice above
+the list, in the order chosen there. It reads only what the takes already hold, never their audio.
+The totals beside **Takes** work the same way: `take.kept_seconds` is the kept clip's length as its sidecar says (read
+when the list loads and set at Keep), and `take.clip_seconds` is the original less its cuts, from the recipe and the
+frame count. `manifest.tally` adds up what an export would hold from the sidecars alone, without the SHA-256 check.
 
 `session/advisor.py` runs it. It works out the advice on a worker thread, caches it per take under the recipe it was
 made for (a result for an older recipe is dropped), follows the clip as it is edited, and applies a fix through
 `Editor.apply_auto_fix`, which adds **all** of its steps to the undo history as one. The Check tab's card (`AutoCard` in
 `ui/inspector.py`) only shows what the advisor holds.
+
+## A long take
+
+A 45-minute stereo take is 950 MB of float32, so nothing may copy it whole when it does not have to. Everything that measures
+works from `take.mono`, made once. `audio_core.frame_energy` works out the energy of each 20 ms frame a block (`ac.BLOCK`
+samples) at a time, and the measurements that need it take it as `energy=` instead of each working it out again; the loudness
+filter, the peak pyramid and the clipping count go a block at a time too, and `audio_core.resample` does a long input in
+overlapping blocks that give exactly what one call would. `render.finish` clips in place.
+
+`audio_import.fit` decides, from the length and channels alone, whether a recording can be worked on here: refused past 70%
+of the computer's memory (`physical_memory`, from Windows), asked about past 35% or an hour. `memory_needed` counts 4 bytes a
+channel and 20 more a frame, measured: a one-hour stereo take, imported, measured and split, peaked at 3.75 GB against the
+4.46 GB it counts. `store.Importing` copies a recording in a block at a time, writing the original under a temporary name as it
+goes. FFmpeg's decode, and closing, syncing and renaming the original (Windows looks a long file over as it is closed, a third
+of a second for 45 minutes), happen on threads of their own, and `step()` returns without waiting for them. `Importing.run`
+does it all at once, for a short import. It works out the mono mix a block at a time as it copies, into `take.cache['mono']`,
+because working it out afterwards held the window for 1.5 s. `Measurements.pyramid` builds the peaks of a take over
+`PYRAMID_AT_ONCE` samples in the background (the window asks for them first, before the spectrogram), and the waveform says it
+is being drawn until they arrive.
 
 ## Threads, the tick and the clock
 
@@ -122,7 +153,39 @@ made for (a result for an older recipe is dropped), follows the clip as it is ed
 - **Worker threads** (`jobs.py`) do the slow work: measuring, rendering for playback, FFmpeg, and the speech recognizer. A
   job's result waits in a queue until `tick()` hands it to the main thread, so no code outside `jobs.py` needs a lock.
   Jobs are given a frozen copy of the recipe, so edits made while they run cannot change what they render.
+- **Lanes.** Draft transcripts run in a lane of their own, one at a time, because there is one recognizer and a draft takes
+  seconds; measuring, the spectrogram, the outlines in the list and Auto analyze share the `work` lane. In each lane the
+  jobs for the take in front (`Jobs.front`) go first. A draft is dropped before it starts if its take has been discarded or
+  a newer draft asked for (`wanted`), and closing drops everything queued, so it waits for nothing.
 - **The clock** is injected, so the recording state machine and the stop tail run in tests without sleeping.
+- **A script run** (`session/run.py`) is ticked right after the recording. It watches each take of a script line: once
+  `analysis.live_pause` has heard the voice in the loudness the capture keeps of each block, and the room has been quiet for
+  the pause chosen, it stops the take as Stop does. When the take ends it moves to the next line, counts in the next take
+  against the clock, or records the line again. It never keeps and never touches the permission: that stays with Keep
+  selected takes.
+- **The room check** (`session/roomcheck.py`) is ticked after the script run. It opens the microphone with a Capture of its
+  own, not through the recording, so no spool is written and no take is made, and hands the recording's input back armed if
+  it was. It moves on by the audio that arrives (three seconds of room, then the sentence until `live_pause` hears it end)
+  and judges both parts with `analysis.room_check`, which measures them as the Check tab measures a take and ranks them by
+  the same named limits (`rank_speech`, `rank_noise`, `PEAK_OK_DBFS`, `CLIPPED_MAX`). Only that result is kept: the samples
+  and the Capture are let go as soon as it is worked out, and a test holds the Capture by a weak reference to prove it.
+
+## Devices
+
+Windows offers each device through four audio interfaces, and the sound library lists all of them: MME, which cuts names
+at 31 letters and reports 44.1 kHz for everything; DirectSound; WASAPI; and WDM-KS. `devices.py` lists WASAPI's entries
+only, which is one for each device with its full name and the rate it runs at, and starts on WASAPI's default, which is the
+device Windows' Sound settings name. The `all_interfaces` setting lists every interface, with the interface after the name,
+and when WASAPI has no device of a kind (no microphone in a remote desktop session) every interface is listed anyway.
+
+The microphone, the input of a several-input device and the output are remembered by the name shown. `devices.match` finds a
+remembered name in the list shown now: the same name, else the device's own name without the interface (0.6 kept
+`Microphone  [MME]`), else a name cut at 31 letters, but only when it fits one device. Anything else falls back to the
+default rather than guess. A microphone is opened with all its inputs and the callback keeps the ones wanted, because WASAPI
+may refuse to open part of them.
+
+System audio is opened in floating point, which is how Windows mixes what it plays, so nothing is lost before the original
+is saved in 24 bits; a loopback that refuses floating point is opened in 16 bits, as every one was until 0.7.
 
 ## Starting up
 
@@ -173,6 +236,11 @@ It installs per user, so the program folder is writable.
   stand-in error.
 - A sidecar is a text file that can be edited or arrive from elsewhere, so `Library._check_fields` checks the kind of every
   value it uses. One bad value costs that clip, which is reported, and not the whole list.
+- An output folder on a drive that is not connected looks empty to everything that reads it, so `store.out_of_reach` is
+  asked first: at the start, when Settings changes the folder, on *Try again*, and before Record, Import, New speaker and
+  the Folder button. A folder that is there, or that can be made where it should be (as on the first start), is in reach.
+  One that is not is never read or made, the window says which folder it is and what to do, and the `root` setting is
+  never changed by the program.
 - Discard goes through `send2trash`, so it is recoverable. If the Recycle Bin is not available the person is asked
   before anything is deleted for good.
 - Each export's SHA-256 goes in its sidecar.
@@ -210,8 +278,19 @@ None of these changes a kept clip, and none goes online.
 - **Export manifest** is `manifest.collect` and `manifest.write`. A row is built from each sidecar, read by the rules of
   the library (a name that leaves the sidecar's folder is refused), and the WAV is hashed again; a clip that does not
   check out is left out and named. The escaping is described in [Clip format](clip-format.md#manifest-files).
+- **The line inside a clip's audio file** is `store.permission_line`, made from the sidecar and written by `_write_audio`
+  into the WAV's `LIST` `INFO` chunk when a clip is kept, before its SHA-256 is taken; `share.save_copy` and
+  `dataset.Export.add` write it into copies and dataset clips. In a WAV it is set after the audio, so that libsndfile puts the
+  chunk after the data, where Windows looks. No clip already kept is rewritten to add it.
 - **Export dataset** is `dataset.Export`, fed the rows of `manifest.collect` one at a time by `session/batch.py`. Made from the
-  original, a clip goes through `render.export_samples` again at the rate asked for, with the recipe in its sidecar.
+  original, a clip goes through `render.export_samples` again at the rate asked for, with the recipe in its sidecar. A split is
+  `dataset.split`, before the job starts: the clips are ranked by a hash of their speaker and file name, so the same clips go to
+  validation whatever order they come in. The lists of each layout are written by `finish`, from the clips that went in.
+- **Backing up and bringing a backup in** are `store.Backup` and `store.BringIn`, both a `store.FolderCopy`: a file is
+  copied a block of `COPY_BLOCK` at a time (a generator, so that `session/batch.py` can return MORE between blocks and the
+  window keeps moving), fsynced, read back, and must hash as what was read and, for a backup that has one, as its list says;
+  only then is it renamed into place. `undo` removes exactly the files and folders it made. `Relocation` predates them and
+  copies a whole file at once.
 - **Moving an output folder** is `store.Relocation`: every file is copied and compared, and the old files go only when all of them
   have arrived. Stopped or failed on the way, the copies are removed and the old folder stays in use.
 - **Drag out** is in `ui/library.py`. A kept card pulled past `startDragDistance` emits `dragRequested`, and the panel
@@ -224,7 +303,10 @@ None of these changes a kept clip, and none goes online.
   `Script.progress` counts `take.meta['script_line']` over the takes of the speaker in front, so it cannot go stale.
 - **Many takes at once** (`session/batch.py`) run in `Session.tick`, a slice of 40 ms at a time, on the main thread, because each
   step changes files and lists the window shows. `Batch.keep` takes a statement the window collected. It goes on each take for its
-  own Keep with `consent_batch`, and comes off again if that Keep fails: the permission is still never remembered.
+  own Keep with `consent_batch`, and comes off again if that Keep fails: the permission is still never remembered. A step that
+  has more of its item to do returns `MORE`, and one waiting on a thread returns `WAIT`; `Batch.part` is how far that item has
+  got. `Batch.import_files` and `Batch.split` use this, so a long import or split shows its progress and can be stopped. The
+  window imports at once only when every file's length is known and they come to under five minutes in all.
 - **The reading check** (`core/reading.py`) compares words with `difflib`, without capitals or punctuation, and letter by letter in
   languages written without spaces. `workspace.reading_of` gives the check for a take, or None when the draft was made before the
   latest cuts, and `Drafts` asks for a new draft when that happens.
@@ -232,12 +314,15 @@ None of these changes a kept clip, and none goes online.
   edits are. `analysis.quietest_near` moves the edges of a word to the quiet beside it, because the recognizer's times are rough.
   `ui/words.py` shows them as links in a text view, which gives the keyboard and a screen reader what they need.
 - **Splitting** (`analysis.split_ranges`, `Workspace.split_take`) makes ordinary takes with their own originals, cut in the middle of
-  pauses, and leaves the long take alone.
+  pauses, and leaves the long take alone. `Workspace.split_part` makes one part, writes its original and lets go of its audio;
+  `split_done` lists and opens them. The window runs the parts through `Batch.split`.
+- **Busy**: anything the window waits for on a take over two minutes long (Keep, Play, opening it, looking for pauses) runs inside
+  `MainWindow._busy`, which shows the wait cursor and a status line first. A notice about what went wrong is shown after it.
 
 ## The window
 
 - **`session/bus.py`** carries topics (`takes`, `current`, `meta` (with the take whose text changed, when that is worth
-  saving), `edits`, `selection`, `playhead`, `recording`, `analysis` and so on). The window marks the parts that heard a
+  saving), `edits`, `selection`, `playhead`, `recording`, `run`, `room`, `analysis` and so on). The window marks the parts that heard a
   topic and redraws them once per event-loop turn (`MainWindow.flush`).
 - **`ui/actions.py`** defines every command once (`SPEC`: name, icon, shortcuts, tooltip). Toolbar buttons, menus and
   shortcuts all use the same `QAction`, so a command is enabled, disabled and described in one place.
@@ -250,8 +335,14 @@ None of these changes a kept clip, and none goes online.
   `tests/test_ui_access.py` measures the contrast of each theme.
 - **`i18n.py`, `ui/translate.py`** translate the window. The English text is the key. The helpers in `ui/widgets.py` translate what
   they are given, and `translate_tree` goes over a finished window or dialog, so most code simply writes English. A text built from
-  values stays in English until it is written with `{}` fields and `tr(...).format(...)`. `tools/strings.py` lists what a language
-  lacks, and the tests refuse an entry whose fields differ from the English.
+  values stays in English until it is written with `{}` fields and `tr(...).format(...)`, where it is worked out: `i18n` needs no
+  toolkit, so the measurements in `core/analysis.py` and `core/autofix.py` and the keep rules are written that way too. What is
+  stored in a file stays in English. `tools/strings.py` lists what a language lacks; it passes over a text with `_` in it, as a
+  name in the code, so a field is `{start}`, never `{best_from}`, and a file name such as `THIRD_PARTY_NOTICES.md` goes in a
+  field. A text the code returns rather than passes to a call it knows is not found either: write `tr(...)` where it is
+  returned. The tests refuse an entry whose fields differ from the English, compare what the Check tab, the Keep card, an
+  edited take, its history and the dialogs say in English and in each language, and measure the take list's choices against
+  their boxes.
 - **`ui/toolbar.py`** collapses labels, then icons, then buttons into a "more" menu as the window narrows, so nothing is
   clipped at the minimum size of 1100 by 600.
 

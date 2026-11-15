@@ -14,22 +14,62 @@ from PySide6.QtGui import QDrag, QFont, QFontMetrics, QPainter, QPen
 from PySide6.QtWidgets import QAbstractItemView, QLineEdit, QListView, QStyle, QStyledItemDelegate, QWidget
 
 from .. import audio_core as ac
+from ..core import reading
 from ..i18n import tr
 from ..session.measure import THUMB_COLUMNS
+from ..session.workspace import kept_total, length_total, reading_of
 from ..store import clean_label
 from . import theme
 from .palette import color
-from .widgets import ElidedCombo, button, caption, chip, hbox, label, set_chip, vbox
+from .widgets import ElidedCombo, button, caption, chip, format_total, hbox, label, set_chip, vbox
 
 SOURCES = {'mic': 'Mic', 'system': 'System', 'import': 'Import'}
 STATUS_COLOURS = {'In review': 'amber', 'Kept': 'green', 'Changed': 'amber', 'Not kept': 'muted', 'Recording': 'red',
                   'Not saved': 'red'}
 EMPTY_TEXT = 'No takes yet.\nPress Record, or import a recording.'
+OUT_OF_REACH_TEXT = 'Your recordings folder cannot be reached, so its takes cannot be shown.'
 ROW_HEIGHT = 74
 ROW_GAP = 4                     # on every side of a row, so 8 pixels between two rows
 ROW_ROLE = Qt.ItemDataRole.UserRole
 
-Row = namedtuple('Row', 'take title sub status tip named opened live')
+Row = namedtuple('Row', 'take title sub status tip named opened live reading')    # reading: None, 0 or how many differ
+ORDERS = (('newest', 'Newest first'), ('oldest', 'Oldest first'), ('script', 'Script order'))
+MONTHS = ('Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec')
+SHOWN = (('all', 'All takes'), ('not_kept', 'Not kept'), ('kept', 'Kept'), ('changed', 'Changed'), ('line', 'Current line'))
+CHOICE_TIPS = {'script': 'The takes of each script line together, in the order of the script, then the takes of no line',
+               'kept': 'Takes with a kept clip, changed since or not',
+               'changed': 'Kept clips with changes that Update kept clip has not written yet',
+               'line': 'The takes of the script line shown above the waveform'}
+
+
+def reading_said(count):
+    """The reading check of a take in words, as the Take tab heads it: read as written, or how many places differ."""
+    if not count:
+        return tr('Reading check: read as written')
+    return tr('Reading check: {count} place differs' if count == 1 else 'Reading check: {count} places differ').format(
+        count=count)
+
+
+def arrange(takes, order='newest', shown='all', lines=(), line=None):
+    """The takes to list, from `takes` newest first: narrowed as `shown` says ('line' keeps the takes of the script line
+    `line`), in the order chosen. In script order the takes of each line come in the order they were read, and takes of no
+    line in the script come last, newest first."""
+    keep = {'not_kept': lambda take: not take.kept, 'kept': lambda take: take.kept,
+            'changed': lambda take: take.changed,
+            'line': lambda take: line is not None and take.meta.get('script_line') == line}.get(shown, lambda take: True)
+    out = [take for take in takes if keep(take)]
+    if order == 'oldest':
+        out.reverse()
+    elif order == 'script':
+        place, age = {}, {id(take): number for number, take in enumerate(out)}
+        for number, text in enumerate(lines):
+            place.setdefault(text, number)
+
+        def key(take):
+            where = place.get(take.meta.get('script_line'))
+            return (0, where, -age[id(take)]) if where is not None else (1, 0, age[id(take)])
+        out.sort(key=key)
+    return out
 
 
 def when(created, now=None):
@@ -40,7 +80,8 @@ def when(created, now=None):
         return ''
     now = now or dt.datetime.now().astimezone()
     days = (now.date() - moment.date()).days
-    day = tr('Today') if days == 0 else tr('Yesterday') if days == 1 else moment.strftime('%b %d').replace(' 0', ' ')
+    day = (tr('Today') if days == 0 else tr('Yesterday') if days == 1 else
+           tr('{month} {day}').format(month=tr(MONTHS[moment.month - 1]), day=moment.day))
     return f'{day} {moment:%H:%M}'
 
 
@@ -94,7 +135,7 @@ class TakeModel(QAbstractListModel):
         take = self.items[position]
         if take is None:
             source = tr('Mic' if self.session.capturing.source == 'mic' else 'System')
-            return Row(None, tr('Recording...'), f'{tr("Now")}  ·  {source}', 'Recording', '', False, True, True)
+            return Row(None, tr('Recording...'), f'{tr("Now")}  ·  {source}', 'Recording', '', False, True, True, None)
         workspace = self.session.workspace
         number = self.numbers.get(take, 0)
         status = ('Changed' if take.changed else 'Kept' if take.kept else 'Not saved' if take.unsaved else
@@ -105,8 +146,12 @@ class TakeModel(QAbstractListModel):
         else:
             title = f'{tr("Take")} {number}  ·  {take.seconds:.1f} s'
             sub = f'{when(take.created)}  ·  {tr(SOURCES.get(take.source, take.source))}'
-        return Row(take, title, sub, status, tip_for(take, number, name), bool(name),
-                   take is workspace.current and self.live is None, False)
+        check = reading_of(take)
+        differ = reading.differences(check) if check is not None else None
+        tip = tip_for(take, number, name)
+        if differ is not None:
+            tip += '\n' + reading_said(differ)
+        return Row(take, title, sub, status, tip, bool(name), take is workspace.current and self.live is None, False, differ)
 
     def data(self, index, role=Qt.ItemDataRole.DisplayRole):
         if not index.isValid():
@@ -115,7 +160,10 @@ class TakeModel(QAbstractListModel):
             return self.row_at(index.row())
         if role in (Qt.ItemDataRole.DisplayRole, Qt.ItemDataRole.AccessibleTextRole):
             row = self.row_at(index.row())
-            return f'{row.title}, {row.sub}, {tr(row.status)}'.replace('  ·  ', ', ')
+            said = f'{row.title}, {row.sub}, {tr(row.status)}'.replace('  ·  ', ', ')
+            if row.reading is not None:
+                said += ', ' + reading_said(row.reading)
+            return said
         if role == Qt.ItemDataRole.ToolTipRole:
             return self.row_at(index.row()).tip or None
         return None
@@ -152,11 +200,14 @@ class TakeDelegate(QStyledItemDelegate):
         return QSize(option.rect.width(), ROW_HEIGHT)
 
     @staticmethod
-    def fit(text, font, room, named):
-        """The text as it is, or for a label cut with an ellipsis to the room the row has."""
-        if not named:
-            return text
-        return QFontMetrics(font).elidedText(text, Qt.TextElideMode.ElideRight, int(room) + 4)
+    def fit(text, font, room):
+        """The text as it is when it fits the room the row has; if not, with the spaces around its dots taken in, and then
+        cut with an ellipsis. Only a label was cut so, and the edge of the card cut "Système" to "Syst" with no sign."""
+        metrics = QFontMetrics(font)
+        room = int(room) + 4
+        if metrics.horizontalAdvance(text) > room:
+            text = text.replace('  ·  ', ' · ')
+        return metrics.elidedText(text, Qt.TextElideMode.ElideRight, room)
 
     def paint(self, p, option, index):
         row = index.data(ROW_ROLE)
@@ -199,11 +250,11 @@ class TakeDelegate(QStyledItemDelegate):
         p.setFont(title_font)
         p.setPen(color('text'))
         p.drawText(QRectF(122, 12, room, 20), int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
-                   self.fit(row.title, title_font, room, row.named))
+                   self.fit(row.title, title_font, room))
         p.setFont(sub_font)
         p.setPen(color('muted'))
         p.drawText(QRectF(122, 32, room, 16), int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
-                   self.fit(row.sub, sub_font, room, row.named))
+                   self.fit(row.sub, sub_font, room))
         name = STATUS_COLOURS.get(row.status, 'muted')
         chip_font = theme.ui_font(10, QFont.Weight.DemiBold)
         chip_text = tr(row.status)
@@ -214,6 +265,14 @@ class TakeDelegate(QStyledItemDelegate):
         p.setPen(color(name))
         p.setFont(chip_font)
         p.drawText(chip_rect, int(Qt.AlignmentFlag.AlignCenter), chip_text)
+        if row.reading is not None:             # the reading check, in the glyphs of the checklist: read as written, or not
+            mark = 'green' if not row.reading else 'amber'
+            badge = QRectF(chip_rect.right() + 6, chip_rect.top(), chip_rect.height(), chip_rect.height())
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(color(mark, 38))
+            p.drawEllipse(badge)
+            p.setPen(color(mark))
+            p.drawText(badge, int(Qt.AlignmentFlag.AlignCenter), '✓' if not row.reading else '!')
         if row.live:
             p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(color('red'))
@@ -237,8 +296,8 @@ class TakeList(QListView):
         super().__init__(parent)
         self.setObjectName('takes')
         self.setAccessibleName('Takes')
-        self.setAccessibleDescription('The takes of this speaker, newest first. Up and Down open a take. Hold Ctrl or Shift '
-                                      'to select several')
+        self.setAccessibleDescription('The takes of this speaker, in the order chosen above the list. Up and Down open a '
+                                      'take. Hold Ctrl or Shift to select several')
         self.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -319,6 +378,8 @@ class LibraryPanel(QWidget):
         head = hbox(spacing=8)
         head.addWidget(caption('Takes'))
         head.addStretch(1)
+        self.totals = label('', 'dim', size=11)
+        head.addWidget(self.totals)
         self.count = chip('0', 'gray')
         head.addWidget(self.count)
         layout.addLayout(head)
@@ -329,6 +390,25 @@ class LibraryPanel(QWidget):
         self.filter.setClearButtonEnabled(True)
         self.filter.textChanged.connect(lambda text: self.refresh_takes())
         layout.addWidget(self.filter)
+        self.choices = QWidget()
+        row = hbox(self.choices, spacing=6)
+        self.order = ElidedCombo()
+        self.order.setAccessibleName('Order of the takes')
+        self.order.setToolTip('The order of the list: newest first, oldest first, or in the order of the script')
+        for key, text in ORDERS:
+            self.order.addItem(tr(text), key)
+            if key in CHOICE_TIPS:
+                self.order.setItemData(self.order.count() - 1, tr(CHOICE_TIPS[key]), Qt.ItemDataRole.ToolTipRole)
+        self.order.activated.connect(lambda index: self.refresh_takes())
+        row.addWidget(self.order, 1)
+        self.shown = ElidedCombo()
+        self.shown.setAccessibleName('Which takes to show')
+        self.shown.setToolTip('Show every take, or only those not kept, kept, changed since they were kept, or of the current '
+                              'script line')
+        self.shown.activated.connect(lambda index: self.refresh_takes())
+        row.addWidget(self.shown, 1)
+        layout.addWidget(self.choices)
+        self.refresh_choices()
         self.model = TakeModel(session, self)
         self.list = TakeList()
         self.list.setModel(self.model)
@@ -385,9 +465,9 @@ class LibraryPanel(QWidget):
         self.refresh_enabled()
 
     def refresh_enabled(self):
-        """The picker and the + are off while a recording runs, so each recording keeps the speaker it started with.
-        Called whenever the recording starts or ends, not only when the list of speakers changes."""
-        recording = self.session.capturing.recording
+        """The picker and the + are off while a recording or a script run goes on, so each recording keeps the speaker
+        it started with. Called whenever the recording starts or ends, not only when the list of speakers changes."""
+        recording = self.session.capturing.recording or self.session.run.active
         self.speakers.setEnabled(not recording and self.speakers.count() > 0)
         self.add_speaker.setEnabled(not recording)
         self.purpose.setEnabled(not recording)
@@ -414,7 +494,25 @@ class LibraryPanel(QWidget):
         places = sorted(index.row() for index in self.list.selectionModel().selectedRows())
         return [self.model.items[place] for place in places if self.model.items[place] is not None]
 
+    def refresh_totals(self):
+        """How much the speaker has kept, or, while several takes are selected, how long they are: from what the takes
+        hold, with no audio read."""
+        chosen = self.selected_takes()
+        if len(chosen) > 1:
+            count, seconds = length_total(chosen)
+            text = tr('{count} selected · {time}')
+            tip = tr('The takes selected and how long they are in all, after their cuts')
+        else:
+            count, seconds = kept_total(self.session.workspace.takes)
+            text = tr('{count} kept · {time}')
+            tip = tr('The kept clips of this speaker and how long they are in all')
+        self.totals.setText(text.format(count=count, time=format_total(seconds)) if count else '')
+        self.totals.setToolTip(tip)
+        self.totals.setAccessibleName(self.totals.text())
+        self.totals.setVisible(bool(count))
+
     def _selection_changed(self):
+        self.refresh_totals()
         self.selectionChanged.emit()
         if self._syncing:
             return
@@ -478,18 +576,58 @@ class LibraryPanel(QWidget):
             # Only copying is offered: whatever a clip is dropped on can copy it but cannot move it out of the library.
             self.run_drag(drag, Qt.DropAction.CopyAction)
 
+    def refresh_choices(self):
+        """Takes of the current line can be shown while there is a script: without one, the list shows all of them."""
+        script = self.session.script
+        wanted = self.shown.currentData() or 'all'
+        if wanted == 'line' and not script.lines:
+            wanted = 'all'
+        self.shown.blockSignals(True)
+        self.shown.clear()
+        for key, text in SHOWN:
+            if key != 'line' or script.lines:
+                self.shown.addItem(tr(text), key)
+                if key in CHOICE_TIPS:
+                    self.shown.setItemData(self.shown.count() - 1, tr(CHOICE_TIPS[key]), Qt.ItemDataRole.ToolTipRole)
+        self.shown.setCurrentIndex(max(self.shown.findData(wanted), 0))
+        self.shown.blockSignals(False)
+        script_order = self.order.findData('script')
+        self.order.model().item(script_order).setEnabled(bool(script.lines))
+        if self.order.currentData() == 'script' and not script.lines:
+            self.order.setCurrentIndex(0)
+
+    def show_takes(self, shown=None, order=None):
+        """Narrow the list, or put it in another order: `shown` and `order` are keys of SHOWN and ORDERS."""
+        if shown is not None:
+            self.shown.setCurrentIndex(max(self.shown.findData(shown), 0))
+        if order is not None:
+            self.order.setCurrentIndex(max(self.order.findData(order), 0))
+        self.refresh_takes()
+
     def refresh_takes(self):
         takes = self.session.workspace.takes
+        script = self.session.script
         words = self._words()
-        shown = [t for t in takes if self._matches(t, words)] if words else list(takes)
+        matching = [t for t in takes if self._matches(t, words)] if words else list(takes)
+        shown_key = self.shown.currentData() or 'all'
+        shown = arrange(matching, self.order.currentData() or 'newest', shown_key, script.lines, script.current)
         self.model.show(takes, shown, self.model.live is not None)
         self._follow_current()
         self.count.setText(str(len(takes)) if len(shown) == len(takes) else f'{len(shown)} of {len(takes)}')
-        self.empty.setText(tr(EMPTY_TEXT) if not takes else f'{tr("No take has all of these words:")}\n{" ".join(words)}')
+        self.refresh_totals()
+        if takes and words:
+            self.empty.setText(f'{tr("No take has all of these words:")}\n{" ".join(words)}')
+        elif takes:
+            self.empty.setText(tr('No takes of this line yet.') if shown_key == 'line' else tr('No takes of this kind.'))
+        elif self.session.workspace.root_problem is not None:
+            self.empty.setText(tr(OUT_OF_REACH_TEXT))
+        else:
+            self.empty.setText(tr(EMPTY_TEXT))
         none = not self.model.items
         self.empty.setVisible(none)
         self.list.setVisible(not none)
         self.filter.setVisible(bool(takes) or bool(words))
+        self.choices.setVisible(bool(takes))
 
     def take_changed(self, take):
         self.model.changed(take)

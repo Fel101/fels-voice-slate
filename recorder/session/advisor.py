@@ -8,6 +8,7 @@ from collections import namedtuple
 
 from .. import clean
 from ..core import autofix
+from ..i18n import tr
 from .measure import take_key
 
 Advice = namedtuple('Advice', 'key diagnosis error')            # diagnosis is None when the clip could not be looked at
@@ -48,15 +49,17 @@ class Advisor:
         """One line for the status bar: how much there is to look at and whether Auto fix has anything ready."""
         diagnosis = advice.diagnosis
         if diagnosis is None:
-            return f'Could not analyze the clip: {advice.error}'
+            return tr('Could not analyze the clip: {error}').format(error=advice.error)
         problems = [f for f in diagnosis.findings if f.status != 'ok']
         if not problems:
-            return 'Auto analyze: nothing to fix. The Check tab has the measurements.'
-        text = f'Auto analyze: {len(problems)} thing{"" if len(problems) == 1 else "s"} to look at.'
+            return tr('Auto analyze: nothing to fix. The Check tab has the measurements.')
+        text = tr('Auto analyze: {count} thing to look at.' if len(problems) == 1 else
+                  'Auto analyze: {count} things to look at.').format(count=len(problems))
         if diagnosis.has_fixes:
             steps = len(diagnosis.steps)
-            return f'{text} Auto fix has {steps} step{"" if steps == 1 else "s"} ready.'
-        return f'{text} Auto fix has nothing it can repair.'
+            return text + ' ' + tr('Auto fix has {count} step ready.' if steps == 1 else
+                                   'Auto fix has {count} steps ready.').format(count=steps)
+        return text + ' ' + tr('Auto fix has nothing it can repair.')
 
     # ---- the two commands ---------------------------------------------------------------------------------------------
 
@@ -109,7 +112,7 @@ class Advisor:
 
         def work():
             diagnosis = autofix.diagnose(take.samples, take.rate, history, lambda recipe: lib.before_level(take, recipe),
-                                         denoise_ok=can_clean, purpose=purpose)
+                                         denoise_ok=can_clean, purpose=purpose, mono=take.mono)
             return Advice(key, diagnosis, '')
 
         def arrived(result):
@@ -124,7 +127,7 @@ class Advisor:
         def failed(error):
             arrived(Advice(key, None, str(error)))
 
-        self.jobs.submit(work, arrived, failed)
+        self.jobs.submit(work, arrived, failed, about=take)
 
     def _fix_if_asked(self, take, advice):
         """Auto fix was pressed before the plan was known: apply it now, unless the clip has been changed since."""
@@ -138,7 +141,7 @@ class Advisor:
 
     def _apply(self, take, advice):
         if advice.diagnosis is None:
-            self.bus.status(f'Auto fix could not look at the clip: {advice.error}')
+            self.bus.status(tr('Auto fix could not look at the clip: {error}').format(error=advice.error))
             return False
         diagnosis = advice.diagnosis
         if not diagnosis.has_fixes:

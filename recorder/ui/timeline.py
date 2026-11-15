@@ -12,6 +12,7 @@ from PySide6.QtGui import QBrush, QFont, QImage, QPainter, QPen, QPixmap, QPolyg
 from PySide6.QtWidgets import QWidget
 
 from .. import audio_core as ac
+from ..i18n import tr
 from . import theme
 from .palette import color
 
@@ -140,6 +141,31 @@ def envelope_polygon(xs, hi, lo, mid, scale, floor=0.003):
     return polygon(np.concatenate([xs, xs[::-1]]), np.concatenate([top, bottom[::-1]]))
 
 
+def draw_markers(p, markers, rect, x_of, numbered=True):
+    """Each marker as a dashed line down the clip, with its number in a flag at the top when `numbered`, so that the keys
+    that go from one to the next can be followed."""
+    if not markers:
+        return
+    p.save()
+    p.setFont(theme.ui_font(10, QFont.Weight.Bold))
+    metrics = p.fontMetrics()
+    for number, moment in enumerate(markers, 1):
+        x = x_of(moment)
+        if not rect.left() - 1 <= x <= rect.right() + 1:
+            continue
+        p.setPen(QPen(color('amber'), 1.2, Qt.PenStyle.DashLine))
+        p.drawLine(QPointF(x, rect.top()), QPointF(x, rect.bottom()))
+        if numbered:
+            text = str(number)
+            flag = QRectF(x, rect.top() + 2, metrics.horizontalAdvance(text) + 8, 15)
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(color('amber'))
+            p.drawRoundedRect(flag, 3, 3)
+            p.setPen(color('bg0'))
+            p.drawText(flag, int(Qt.AlignmentFlag.AlignCenter), text)
+    p.restore()
+
+
 def draw_edit(p, edit, rect, x_of, strong=True):
     """One operation on the master timeline: a cut is hatched red, silence grey, a fade a wedge, a gain amber."""
     a, b = edit['start_seconds'], edit['end_seconds']
@@ -232,6 +258,9 @@ class TimelineView(QWidget):
         take = self.session.current
         for edit in take.history.edits:
             draw_edit(p, edit, rect, self.x_of, strong)
+
+    def paint_markers(self, p, rect, numbered=True):
+        draw_markers(p, self.session.current.meta.get('markers') or [], rect, self.x_of, numbered)
 
     def paint_selection(self, p, rect, handles=True):
         editor = self.session.editor
@@ -426,7 +455,10 @@ class WaveformView(TimelineView):
         return RULER + area / 2, area / 2 * 0.90
 
     def _layer_for(self, take):
+        """The waveform drawn for the view, or None while a long take's peaks are still being worked out."""
         pyramid = self.session.measure.pyramid(take)
+        if pyramid is None:
+            return None
         dpr = self.devicePixelRatioF()
         key = (take.id, id(pyramid), round(self.view.t0, 6), round(self.view.t1, 6), self.width(), self.height(), dpr)
         if key == self._layer_key:
@@ -477,8 +509,15 @@ class WaveformView(TimelineView):
         rect = self.plot_rect()
         draw_amplitude_grid(p, rect, mid, scale, self.width())
         self.paint_edits(p, rect)
-        p.drawPixmap(0, 0, self._layer_for(take))
+        layer = self._layer_for(take)
+        if layer is None:
+            p.setPen(color('dim'))
+            p.setFont(theme.ui_font(12))
+            p.drawText(rect, int(Qt.AlignmentFlag.AlignCenter), tr('Drawing the waveform...'))
+        else:
+            p.drawPixmap(0, 0, layer)
         draw_ruler(p, self.width(), self.view.t0, self.view.t1, self.x_of)
+        self.paint_markers(p, rect)
         self.paint_selection(p, rect)
         self.paint_playhead(p)
         if self.hasFocus():
@@ -541,7 +580,7 @@ class SpectrogramView(TimelineView):
         if image is None:
             p.setPen(color('dim'))
             p.setFont(theme.ui_font(12))
-            p.drawText(rect, int(Qt.AlignmentFlag.AlignCenter), 'Analyzing the spectrogram...')
+            p.drawText(rect, int(Qt.AlignmentFlag.AlignCenter), tr('Analyzing the spectrogram...'))
         else:
             frames = image.width()
             src = QRectF(self.view.t0 / spec.hop_seconds, 0, self.view.span / spec.hop_seconds, image.height())
@@ -552,6 +591,7 @@ class SpectrogramView(TimelineView):
             p.drawImage(target, image, src)
             self._paint_axis(p, spec, image)
         self.paint_edits(p, rect, strong=False)
+        self.paint_markers(p, rect, numbered=False)
         self.paint_selection(p, rect, handles=False)
         self.paint_playhead(p)
 
@@ -619,6 +659,8 @@ class Minimap(QWidget):
     def _layer_for(self, take):
         dpr = self.devicePixelRatioF()
         pyramid = self.session.measure.pyramid(take)
+        if pyramid is None:                 # a long take's, still being worked out
+            return None
         key = (take.id, id(pyramid), self.width(), self.height(), dpr)
         if key == self._layer_key:
             return self._layer
@@ -646,7 +688,9 @@ class Minimap(QWidget):
         take = self.session.current
         if take is None or self.view.seconds <= 0:
             return
-        p.drawPixmap(0, 0, self._layer_for(take))
+        layer = self._layer_for(take)
+        if layer is not None:
+            p.drawPixmap(0, 0, layer)
         plot = self._plot()
         for edit in take.history.edits:
             if edit.get('op', 'cut') == 'cut':
@@ -656,6 +700,10 @@ class Minimap(QWidget):
         if sel is not None:
             a, b = self._x_of(sel[0]), self._x_of(sel[1])
             p.fillRect(QRectF(a, plot.top(), max(2.0, b - a), plot.height()), color('accent', 70))
+        p.setPen(QPen(color('amber'), 1.5))
+        for moment in take.meta.get('markers') or []:
+            x = self._x_of(moment)
+            p.drawLine(QPointF(x, plot.top() + 1), QPointF(x, plot.top() + 7))
         box = QRectF(self._x_of(self.view.t0), plot.top(), self._x_of(self.view.t1) - self._x_of(self.view.t0),
                      plot.height())
         p.setBrush(color('accent', 36))
@@ -677,13 +725,15 @@ class LiveWaveView(QWidget):
         self.rows = np.zeros((0, 3), dtype=np.float32)
         self.elapsed = 0.0
         self.limit = ac.PURPOSES[ac.DEFAULT_PURPOSE].record_limit
+        self.markers = []
         self.setMinimumHeight(140)
         self.setAccessibleName('The recording so far')
 
-    def set_state(self, rows, elapsed, limit=None):
+    def set_state(self, rows, elapsed, limit=None, markers=()):
         self.rows = rows if rows is not None else np.zeros((0, 3), dtype=np.float32)
         self.elapsed = float(elapsed)
         self.limit = limit or self.limit
+        self.markers = list(markers)
         self.update()
 
     def window_end(self):
@@ -713,6 +763,7 @@ class LiveWaveView(QWidget):
             p.setBrush(color('accent', 235))
             p.drawPolygon(envelope_polygon(xs[first], hi, lo, mid, scale))
         draw_ruler(p, w, 0.0, end, x_of)
+        draw_markers(p, self.markers, QRectF(GUTTER, RULER, plot_w, h - RULER), x_of)
         x = x_of(min(self.elapsed, end))
         p.setPen(QPen(color('red'), 2))
         p.drawLine(QPointF(x, RULER), QPointF(x, h))

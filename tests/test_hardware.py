@@ -35,7 +35,7 @@ class FakeStream:
         pass
 
 
-def sound_library(monkeypatch, inputs=2, outputs=('Speakers', 'Headphones')):
+def sound_library(monkeypatch, inputs=2, outputs=('Speakers', 'Headphones'), api='WASAPI'):
     """A stand-in for sounddevice with one input device and some outputs. Returns the streams it was asked for."""
     streams = []
     devices = [{'name': 'Interface', 'hostapi': 0, 'max_input_channels': inputs, 'max_output_channels': 0,
@@ -48,10 +48,13 @@ def sound_library(monkeypatch, inputs=2, outputs=('Speakers', 'Headphones')):
         return streams[-1]
 
     def query_devices(device=None, kind=None):
+        if device is None and kind:         # Windows' default of that kind: here the first device that has one
+            return next(d for d in devices if d[f'max_{kind}_channels'] > 0)
         return devices if device is None else devices[device]
 
     fake = SimpleNamespace(query_devices=query_devices, InputStream=stream, OutputStream=stream,
-                           query_hostapis=lambda index=None: [{'name': 'WASAPI'}] if index is None else {'name': 'WASAPI'})
+                           WasapiSettings=lambda **options: SimpleNamespace(**options),
+                           query_hostapis=lambda index=None: [{'name': api}] if index is None else {'name': api})
     monkeypatch.setitem(__import__('sys').modules, 'sounddevice', fake)
     return streams
 
@@ -206,25 +209,25 @@ def test_no_hint_once_an_input_has_been_chosen(session):
 # ---- the device chosen is remembered -------------------------------------------------------------------------------------------
 
 def test_the_device_chosen_comes_back_after_a_restart(make_session, monkeypatch):
-    monkeypatch.setattr(cap, 'list_microphones', lambda: [(1, 'First'), (2, 'Second')])
+    monkeypatch.setattr(cap, 'list_microphones', lambda every=False: [(1, 'First'), (2, 'Second')])
     session = make_session()
     session.capturing.select_device(2)
     assert make_session().capturing.device == 2
 
 
 def test_the_choice_follows_the_name_when_the_numbers_change(make_session, monkeypatch):
-    monkeypatch.setattr(cap, 'list_microphones', lambda: [(1, 'First'), (2, 'Second')])
+    monkeypatch.setattr(cap, 'list_microphones', lambda every=False: [(1, 'First'), (2, 'Second')])
     session = make_session()
     session.capturing.select_device(2)
-    monkeypatch.setattr(cap, 'list_microphones', lambda: [(7, 'Second'), (1, 'First')])
+    monkeypatch.setattr(cap, 'list_microphones', lambda every=False: [(7, 'Second'), (1, 'First')])
     assert make_session().capturing.device == 7
 
 
 def test_a_device_that_has_gone_falls_back_to_the_default(make_session, monkeypatch):
-    monkeypatch.setattr(cap, 'list_microphones', lambda: [(1, 'First'), (2, 'Second')])
+    monkeypatch.setattr(cap, 'list_microphones', lambda every=False: [(1, 'First'), (2, 'Second')])
     session = make_session()
     session.capturing.select_device(2)
-    monkeypatch.setattr(cap, 'list_microphones', lambda: [(1, 'First')])
+    monkeypatch.setattr(cap, 'list_microphones', lambda every=False: [(1, 'First')])
     assert make_session().capturing.device == 1
 
 
@@ -265,6 +268,27 @@ def test_the_default_needs_no_choice(monkeypatch):
     player.stop()
 
 
+def test_windows_is_asked_to_convert_for_a_wasapi_output(monkeypatch):
+    """Without it a WASAPI output opens only at the rate the device runs at, and a 24 kHz take would not play."""
+    streams = sound_library(monkeypatch)
+    player = audio_io.Player()
+    player.device = 2
+    player.load(np.zeros(2400, np.float32), 24000)
+    player.play()
+    assert streams[0].options['extra_settings'].auto_convert is True and streams[0].options['samplerate'] == 24000
+    player.stop()
+
+
+def test_other_interfaces_are_not_given_wasapi_settings(monkeypatch):
+    """The sound library refuses settings meant for another interface."""
+    streams = sound_library(monkeypatch, api='MME')
+    player = audio_io.Player()
+    player.load(np.zeros(2400, np.float32), 24000)
+    player.play()
+    assert streams[0].options['extra_settings'] is None
+    player.stop()
+
+
 def test_the_session_starts_on_the_saved_output(make_session, monkeypatch, player):
     sound_library(monkeypatch)
     session = make_session()
@@ -291,6 +315,63 @@ def test_the_window_applies_the_output_chosen(window, session, dialogs, player, 
     assert settings.load(session.settings_file)['output_device'] == 'Headphones  [WASAPI]'
 
 
+def test_settings_can_list_every_interface_and_keeps_the_output_chosen(qapp):
+    dialog = dialog_mod.SettingsDialog({'outputs': ['Speakers'], 'output_device': 'Speakers',
+                                        'outputs_every': ['Speakers  [MME]', 'Speakers  [Windows WASAPI]']})
+    assert not dialog.every.isChecked() and dialog.output.currentText() == 'Speakers'
+    dialog.every.setChecked(True)
+    names = [dialog.output.itemText(i) for i in range(dialog.output.count())]
+    assert names == ["Windows' default", 'Speakers  [MME]', 'Speakers  [Windows WASAPI]']
+    assert dialog.values()['output_device'] == 'Speakers  [Windows WASAPI]' and dialog.values()['all_interfaces'] is True
+    dialog.every.setChecked(False)
+    assert dialog.values()['output_device'] == 'Speakers' and dialog.values()['all_interfaces'] is False
+
+
+def test_settings_shows_an_output_chosen_in_0_6_as_the_device_it_is(qapp):
+    """0.6 kept the interface after the name. The device is still there, so it is not "not connected now"."""
+    dialog = dialog_mod.SettingsDialog({'outputs': ['Speakers (Realtek(R) Audio)'],
+                                        'output_device': 'Speakers (Realtek(R) Audio)  [Windows WASAPI]'})
+    assert [dialog.output.itemText(i) for i in range(dialog.output.count())] == ["Windows' default",
+                                                                                 'Speakers (Realtek(R) Audio)']
+    assert dialog.values()['output_device'] == 'Speakers (Realtek(R) Audio)'
+
+
+def test_the_settings_rows_are_never_cut_off_at_the_right(qapp):
+    """On a short screen the rows scroll, and the scroll bar took the room the widest row needed, so the right edge of
+    the Browse buttons and of the notes was cut off."""
+    from PySide6.QtWidgets import QScrollArea
+    dialog = dialog_mod.SettingsDialog({'outputs': ['Speakers (Realtek(R) Audio)']})
+    dialog.resize(dialog.width(), 420)
+    dialog.show()
+    qapp.processEvents()
+    area = dialog.findChild(QScrollArea)
+    assert area.verticalScrollBar().isVisible()
+    assert area.widget().width() <= area.viewport().width()
+    dialog.close()
+
+
+def test_the_window_lists_every_interface_when_settings_says_so(window, session, dialogs, monkeypatch):
+    asked = []
+
+    def microphones(every=False):
+        asked.append(every)
+        return [(1, 'Test microphone  [MME]'), (2, 'Test microphone  [Windows WASAPI]')] if every else [(2, 'Test microphone')]
+
+    monkeypatch.setattr(cap, 'list_microphones', microphones)
+    monkeypatch.setattr(cap, 'default_microphone', lambda: 2)
+    dialogs.settings_answer = {'root': None, 'tail_seconds': 0.5, 'ffmpeg': None, 'asr_python': None, 'asr_model': None,
+                               'output_device': None, 'all_interfaces': True}
+    window.open_settings()
+    window.flush()
+    assert settings.load(session.settings_file)['all_interfaces'] is True and asked[-1] is True
+    assert window.topbar.device.count() == 2 and window.topbar.device.currentText() == 'Test microphone  [Windows WASAPI]'
+    dialogs.settings_answer = {**dialogs.settings_answer, 'all_interfaces': False}
+    window.open_settings()
+    window.flush()
+    assert 'all_interfaces' not in settings.load(session.settings_file) and asked[-1] is False
+    assert window.topbar.device.count() == 1
+
+
 # ---- the record key ----------------------------------------------------------------------------------------------------------------
 
 @pytest.mark.parametrize('text, expected', [
@@ -314,8 +395,8 @@ def test_a_key_of_another_command_is_refused_in_settings(qapp):
     dialog = dialog_mod.SettingsDialog({})
     dialog.record_key.setKeySequence(QKeySequence('Ctrl+Z'))
     assert 'Undo' in dialog.key_note.text() and not dialog.ok.isEnabled()
-    dialog.record_key.setKeySequence(QKeySequence('F8'))
-    assert dialog.ok.isEnabled() and dialog.values()['record_key'] == 'F8'
+    dialog.record_key.setKeySequence(QKeySequence('F7'))
+    assert dialog.ok.isEnabled() and dialog.values()['record_key'] == 'F7'
 
 
 def test_a_key_that_could_be_typed_is_refused_in_settings(qapp):

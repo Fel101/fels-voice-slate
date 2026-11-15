@@ -40,13 +40,14 @@ class InfoRow(QWidget):
         self.zoom.setFont(theme.mono_font(11))
         layout.addWidget(self.zoom_label)
         layout.addWidget(self.zoom)
-        self.hint = ElidedLabel('Wheel zooms  ·  Shift+wheel pans', drop=True)
+        self.hint = ElidedLabel(tr('Wheel zooms  ·  Shift+wheel pans'), drop=True)
         self.hint.setProperty('role', 'dim')
         self.hint.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         layout.addWidget(self.hint, 1)
         view.changed.connect(self.refresh)
 
     def _spin(self, layout, name, short, done, tip):
+        name, short, tip = tr(name), tr(short), tr(tip)         # _apply puts them back as the room changes
         cell = hbox(spacing=5)
         title = label(name, 'dim')
         cell.addWidget(title)
@@ -174,13 +175,60 @@ class EmptyState(QFrame):
         layout.addStretch(1)
 
 
+class OutOfReachState(QFrame):
+    """Shown instead of the welcome screen when the output folder cannot be reached: which folder, why, that the recordings
+    in it are not lost, and the two ways on. To everything else, a drive that is not there looks like an empty library."""
+
+    retryRequested = Signal()
+    settingsRequested = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName('empty')
+        layout = vbox(self, (40, 40, 40, 40), 10)
+        layout.addStretch(1)
+        title = label('Your recordings folder cannot be reached', size=20, weight=QFont.Weight.DemiBold)
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setWordWrap(True)
+        layout.addWidget(title)
+        self.text = label('', 'muted', wrap=True)
+        self.text.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.text.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)     # the folder can be copied
+        column = hbox()
+        column.addStretch(1)
+        column.addWidget(self.text, 8)
+        column.addStretch(1)
+        layout.addLayout(column)
+        layout.addSpacing(10)
+        row = hbox(spacing=10)
+        row.addStretch(1)
+        self.retry = button('Try again', 'primary', None, 'Look for the folder again, once the drive is connected')
+        self.retry.clicked.connect(self.retryRequested)
+        self.settings = button('Settings...', None, 'settings', 'Choose another output folder (Ctrl+,)')
+        self.settings.clicked.connect(self.settingsRequested)
+        row.addWidget(self.retry)
+        row.addWidget(self.settings)
+        row.addStretch(1)
+        layout.addLayout(row)
+        layout.addStretch(1)
+
+    def show_problem(self, text):
+        """`text` says which folder, why and what to do, already in the person's language."""
+        if self.text.text() != text:
+            self.text.setText(text)
+            self.text.setAccessibleName(text)
+
+
 class EditorPanel(QWidget):
-    """Script line on top, then one of: the editor, the live recording view or the welcome screen."""
+    """Script line on top, then one of: the editor, the live recording view, the welcome screen, or what to do about an
+    output folder that cannot be reached."""
 
     recordRequested = Signal()
     importRequested = Signal()
+    retryRequested = Signal()
+    settingsRequested = Signal()
 
-    EMPTY, EDIT, LIVE = 0, 1, 2
+    EMPTY, EDIT, LIVE, FOLDER = 0, 1, 2, 3
 
     def __init__(self, session, actions, parent=None):
         super().__init__(parent)
@@ -234,6 +282,11 @@ class EditorPanel(QWidget):
 
         self.live = RecordPanel()
         self.stack.addWidget(self.live)
+
+        self.out_of_reach = OutOfReachState()
+        self.out_of_reach.retryRequested.connect(self.retryRequested)
+        self.out_of_reach.settingsRequested.connect(self.settingsRequested)
+        self.stack.addWidget(self.out_of_reach)
 
     def set_mode(self, mode):
         self.stack.setCurrentIndex(mode)

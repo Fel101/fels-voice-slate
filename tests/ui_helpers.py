@@ -64,9 +64,10 @@ class StubDialogs:
         self.asked = []                          # (what, details) of each question about files, in order
         self.keep_many_answer = None             # (origin, allowed use), or None to back out
         self.speaker_answer = None               # what the Speaker details dialog returns
-        self.dataset_answer = None               # (scope, layout, rate, from originals)
+        self.dataset_answer = None               # (scope, layout, rate, from originals, percent for validation)
         self.settings_answer = None
         self.settings_seen = None
+        self.hands_free_answer = None             # the hands-free options chosen, or None to back out
 
     def notice(self, level, title, text):
         # `busy`: a wait cursor was still showing when the dialog opened, so it would sit over the dialog
@@ -106,8 +107,8 @@ class StubDialogs:
         self.asked.append(('copy', SimpleNamespace(name=name, kept_rate=kept_rate)))
         return self.copy_answer
 
-    def manifest_options(self, speaker_name):
-        self.asked.append(('manifest', SimpleNamespace(speaker=speaker_name)))
+    def manifest_options(self, speaker_name, totals=None):
+        self.asked.append(('manifest', SimpleNamespace(speaker=speaker_name, totals=totals)))
         return self.manifest_answer
 
     def keep_many(self, speaker_name, takes, defaults):
@@ -118,13 +119,17 @@ class StubDialogs:
         self.asked.append(('speaker', SimpleNamespace(name=name, record=record, has_file=has_file)))
         return self.speaker_answer
 
-    def dataset_options(self, speaker_name):
-        self.asked.append(('dataset', SimpleNamespace(speaker=speaker_name)))
+    def dataset_options(self, speaker_name, totals=None):
+        self.asked.append(('dataset', SimpleNamespace(speaker=speaker_name, totals=totals)))
         return self.dataset_answer
 
     def settings(self, values):
         self.settings_seen = dict(values)
         return self.settings_answer
+
+    def hands_free(self, values, record_key):
+        self.asked.append(('hands_free', SimpleNamespace(values=dict(values), record_key=record_key)))
+        return self.hands_free_answer
 
     def about(self):
         self.shown.append('about')

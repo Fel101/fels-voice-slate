@@ -12,6 +12,8 @@ import time
 
 import numpy as np
 
+from . import devices
+
 # A device that has sent nothing for this long has stopped. Before its first block we allow more time,
 # because a cold start can take a moment.
 STALL_SECONDS = 2.0
@@ -36,21 +38,15 @@ def _span(x):
 
 # ---- device lists ---------------------------------------------------------------------------------------------------
 
-def list_microphones():
-    """[(index, label)] for input devices, host API included (the Windows device names repeat across APIs)."""
-    import sounddevice as sd
-    apis = sd.query_hostapis()
-    out = []
-    for i, d in enumerate(sd.query_devices()):
-        if d['max_input_channels'] > 0:
-            out.append((i, f"{d['name']}  [{apis[d['hostapi']]['name']}]"))
-    return out
+def list_microphones(every=False):
+    """[(index, label)] for input devices: each once by its full name, or with `every` through every Windows audio
+    interface (see devices.py)."""
+    return devices.entries('input', every)
 
 
 def default_microphone():
-    import sounddevice as sd
-    index = sd.default.device[0]
-    return index if isinstance(index, int) and index >= 0 else None
+    """The microphone Windows' Sound settings name as the default, or None."""
+    return devices.default('input')
 
 
 def input_channels(device):
@@ -82,8 +78,9 @@ def default_loopback():
 
 class _MicBackend:
     """One microphone. With `channel`, one input of the device (from 0) is recorded as a mono take: mixing a voice on input 1
-    with a silent input 2 halves it, which is 6 dB. The device is opened with all its inputs for that, because not every
-    Windows audio interface can open a part of them."""
+    with a silent input 2 halves it, which is 6 dB. Without, the first two inputs are recorded and mixed later. Either way
+    the device is opened with all its inputs and the callback takes what is wanted, because not every Windows audio
+    interface can open a part of them: WASAPI may refuse two inputs of a device that has eight."""
 
     kind = 'mic'
 
@@ -97,15 +94,16 @@ class _MicBackend:
         self.rate = int(info['default_samplerate'])
         self.channel = channel if channel is not None and 0 <= channel < inputs else None
         self.channels = 1 if self.channel is not None else max(1, min(2, inputs))
-        self._opened = inputs if self.channel is not None else self.channels
+        self._opened = max(1, inputs)
         self.hostapi = sd.query_hostapis(info['hostapi'])['name']
         self._stream = None
 
     def open(self, on_block):
-        picked = self.channel
+        picked = [self.channel] if self.channel is not None else list(range(self.channels))
+        whole = picked == list(range(self._opened))
 
         def callback(indata, frames, time_info, status):
-            block = indata if picked is None else indata[:, [picked]]
+            block = indata if whole else indata[:, picked]
             on_block(np.array(block, dtype=np.float32), bool(status.input_overflow or status.input_underflow))
 
         self._stream = self._sd.InputStream(device=self.device, samplerate=self.rate, channels=self._opened,
@@ -148,6 +146,7 @@ class _LoopbackBackend:
         self._out = None
         self._feed = None
         self._stop_feed = threading.Event()
+        self.sample_format = None           # what the loopback was opened with: floating point, or 16-bit if refused
 
     def _feed_output(self):
         """The output endpoint behind this loopback, found by name; the default output when the name does not match."""
@@ -163,21 +162,40 @@ class _LoopbackBackend:
 
     def open(self, on_block):
         pa = self._pa
-        self._out = self._p.open(format=pa.paInt16, channels=self._out_channels, rate=self.rate, output=True,
-                                 output_device_index=self._out_index, frames_per_buffer=1024)
-        self._stop_feed.clear()
-        self._feed = threading.Thread(target=self._keep_fed, name='loopback-feed', daemon=True)
-        self._feed.start()
+        try:
+            self._out = self._p.open(format=pa.paInt16, channels=self._out_channels, rate=self.rate, output=True,
+                                     output_device_index=self._out_index, frames_per_buffer=1024)
+            self._stop_feed.clear()
+            self._feed = threading.Thread(target=self._keep_fed, name='loopback-feed', daemon=True)
+            self._feed.start()
 
-        def callback(in_data, frame_count, time_info, status):
-            x = np.frombuffer(in_data, dtype='<i2').astype(np.float32) / 32768.0
-            on_block(x.reshape(-1, self.channels), bool(status & (pa.paInputOverflow | pa.paInputUnderflow)))
-            return None, pa.paContinue
+            def callback(in_data, frame_count, time_info, status):
+                if self.sample_format == pa.paFloat32:
+                    x = np.frombuffer(in_data, dtype='<f4').copy()
+                else:
+                    x = np.frombuffer(in_data, dtype='<i2').astype(np.float32) / 32768.0
+                on_block(x.reshape(-1, self.channels), bool(status & (pa.paInputOverflow | pa.paInputUnderflow)))
+                return None, pa.paContinue
 
-        self._stream = self._p.open(format=pa.paInt16, channels=self.channels, rate=self.rate, input=True,
-                                    input_device_index=self.device, frames_per_buffer=1024,
-                                    stream_callback=callback)
-        self._stream.start_stream()
+            self._stream = self._open_input(callback)
+            self._stream.start_stream()
+        except Exception:
+            self.close()                    # the silent feed stops with it
+            raise
+
+    def _open_input(self, callback):
+        """The loopback in floating point, which is how Windows mixes what it plays, so nothing is lost before the original
+        is saved in 24 bits. 16-bit was asked for until 0.7, and is the fallback for a device that refuses floating point."""
+        pa = self._pa
+        refused = None
+        for sample_format in (pa.paFloat32, pa.paInt16):
+            self.sample_format = sample_format
+            try:
+                return self._p.open(format=sample_format, channels=self.channels, rate=self.rate, input=True,
+                                    input_device_index=self.device, frames_per_buffer=1024, stream_callback=callback)
+            except OSError as e:            # PortAudio's "Sample format not supported", and the like
+                refused = e
+        raise refused
 
     def _keep_fed(self):
         silence = b'\x00' * (1024 * self._out_channels * 2)
@@ -228,6 +246,7 @@ class Capture:
         self._recording = False
         self._frames = 0
         self._columns = []                     # (frames so far, lowest, highest) per recorded block: the live waveform
+        self._loudness = []                    # (frames so far, RMS dBFS) per recorded block: when the voice was last heard
         self._spooled = 0                      # how many of the blocks new_blocks has handed out
         self.dropouts = 0                      # how many times the device said it lost audio during this take
         self._loudest = np.zeros(2)            # the highest peak so far on each of two inputs
@@ -264,6 +283,16 @@ class Capture:
         out[:, 0] /= self.rate
         return out.astype(np.float32)
 
+    def loudness(self):
+        """How loud what has been recorded is, pre-roll included: rows of (end second, RMS dBFS), one per block."""
+        with self._lock:
+            rows = list(self._loudness)
+        if not rows or not self.rate:
+            return np.zeros((0, 2))
+        out = np.array(rows, dtype=np.float64)
+        out[:, 0] /= self.rate
+        return out
+
     def _on_block(self, x, lost=False):
         """A block from the device. `lost` says the device lost audio just before it. The first block of a stream can say
         that about nothing but the stream starting, so it is not counted."""
@@ -282,6 +311,7 @@ class Capture:
                 self._frames += len(x)
                 if len(x):
                     self._columns.append((self._frames, *_span(x)))
+                    self._loudness.append((self._frames, levels[1]))
             elif self.pre_roll > 0:
                 self._ring.append(x)
                 self._ring_frames += len(x)
@@ -297,11 +327,12 @@ class Capture:
         with self._lock:
             self._blocks = list(self._ring)
             self._frames = self._ring_frames
-            self._columns, frames = [], 0
+            self._columns, self._loudness, frames = [], [], 0
             for block in self._blocks:                    # the pre-roll is part of the take, so it is drawn too
                 frames += len(block)
                 if len(block):
                     self._columns.append((frames, *_span(block)))
+                    self._loudness.append((frames, _mono_levels(block)[1]))
             self._ring.clear()
             self._ring_frames = 0
             self._spooled = 0

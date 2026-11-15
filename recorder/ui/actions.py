@@ -46,13 +46,17 @@ SPEC = {
     'select_all': ('Select all', None, ['Ctrl+A'], 'Select the whole clip', False),
     'set_in': ('Set in point', None, ['['], 'Put the start of the selection at the playhead', False),
     'set_out': ('Set out point', None, [']'], 'Put the end of the selection at the playhead', False),
+    'marker': ('Marker', None, ['M'], 'Mark the moment being heard or recorded, to find it again. On a marker, take it '
+                                      'away', False),
+    'prev_marker': ('Previous marker', None, ['Alt+Left'], 'Move the playhead to the marker before it', False),
+    'next_marker': ('Next marker', None, ['Alt+Right'], 'Move the playhead to the marker after it', False),
     # view
     'zoom_in': ('Zoom in', 'zoom_in', ['+', '=', 'Ctrl++'], 'Zoom in (the mouse wheel zooms too)', False),
     'zoom_out': ('Zoom out', 'zoom_out', ['-', 'Ctrl+-'], 'Zoom out', False),
     'fit': ('Fit', 'fit', ['0', 'Ctrl+0'], 'Show the whole clip', False),
     'zoom_selection': ('Zoom to selection', None, ['Z'], 'Fill the view with the selection', False),
     # takes and files
-    'keep': ('Keep clip', None, ['Ctrl+S'], 'Write the 24 kHz WAV and its sidecar', False),
+    'keep': ('Keep clip', None, ['Ctrl+S'], 'Write the WAV and its sidecar', False),     # the window names the format
     'discard': ('Discard take...', 'trash', [], 'Move this take to the Recycle Bin', False),
     'rerecord': ('Re-record', None, [], 'Move this take to the Recycle Bin and record again', False),
     'rename': ('Rename take', None, ['F2'], 'Give this take a label to find it by', False),
@@ -62,6 +66,9 @@ SPEC = {
                                                            'permission for all of them', False),
     'discard_selected': ('Discard selected takes...', None, [], 'Move the takes selected in the list to the Recycle Bin',
                          False),
+    'discard_others': ('Discard the other takes of this line...', None, [], 'Move the takes of this script line that are '
+                                                                             'not kept, apart from this one, to the Recycle '
+                                                                             'Bin', False),
     'move_selected': ('Move selected takes to speaker...', None, [], 'File the takes selected in the list under a different '
                                                                       'speaker', False),
     'import_recording': ('Import recording...', 'import', ['Ctrl+O'], 'Copy one or more recordings in as new takes',
@@ -78,16 +85,27 @@ SPEC = {
                   'Save a copy of this kept clip as WAV, FLAC, MP3 or Ogg, at the sample rate you choose', False),
     'export_manifest': ('Export manifest...', None, [],
                         'List the kept clips with their transcripts in a CSV or JSON Lines file, for other programs', False),
-    'export_dataset': ('Export dataset...', None, [], 'Gather the kept clips in one new folder, as clips with their sidecars or '
-                                                      'in the LJSpeech layout, at the sample rate you choose', False),
+    'export_dataset': ('Export dataset...', None, [], 'Gather the kept clips in one new folder, in the layout a speech tool '
+                                                      'reads, at the sample rate you choose', False),
     'refresh_devices': ('Refresh devices', None, [], 'Look for microphones and outputs again', False),
+    'room_check': ('Check the room and level...', None, [], 'Listen to the room and to your voice for a few seconds, and say '
+                                                            'whether the room is quiet enough and the microphone level '
+                                                            'right. Nothing it hears is kept', False),
     'open_folder': ('Open output folder', 'folder', ['Ctrl+Shift+O'], 'Show the output folder in Explorer', False),
+    'back_up': ('Back up recordings...', None, [], 'Copy the whole output folder to a place you choose, and check every '
+                                                   'file', False),
+    'bring_in': ('Bring in a backup...', None, [], 'Copy a backup into the output folder while it has no recordings, and '
+                                                   'check every file', False),
     'load_script': ('Load script...', None, ['Ctrl+Shift+L'], 'Read prompts from a text file, one line per take', False),
     'clear_script': ('Clear script', None, [], 'Stop using the script', False),
     'prev_line': ('Previous script line', 'chevron_left', ['Ctrl+Up'], 'Go back one line of the script', False),
     'next_line': ('Next script line', 'chevron_right', ['Ctrl+Down'], 'Go to the next line of the script', False),
     'next_open': ('Next line to record', None, ['Ctrl+Shift+Down'], 'Go to the next line of the script that has no kept clip',
                   False),
+    'again': ('Read the line again', None, ['F8'], 'Record the script line just read once more. Its take stays, so you can '
+                                                    'choose between them', False),
+    'hands_free': ('Hands-free reading...', None, ['Ctrl+Shift+H'], 'Go to the next line, end a take after a pause, and '
+                                                                     'count in the next take, by themselves', False),
     # the program
     'settings': ('Settings...', 'settings', ['Ctrl+,'], 'Output folder, record key, FFmpeg and draft transcripts', False),
     'shortcuts': ('Keyboard shortcuts', None, ['F1'], 'List every shortcut', False),
@@ -105,11 +123,11 @@ def shortcut_text(keys):
 def key_problem(text):
     """Why a key cannot be the record key, in words the person can read, or '' when it can."""
     if hotkey.parse_key(text) is None:
-        return 'Use a function key such as F9, or a letter or number held with Ctrl or Alt.'
+        return tr('Use a function key such as F9, or a letter or number held with Ctrl or Alt.')
     wanted = QKeySequence(text)
     for name, (label, _, keys, _, _) in SPEC.items():
         if name != 'record' and any(QKeySequence(key) == wanted for key in keys):
-            return f'That key is already used for {label.rstrip(".")}.'
+            return tr('That key is already used for {command}.').format(command=tr(label).rstrip('.'))
     return ''
 
 

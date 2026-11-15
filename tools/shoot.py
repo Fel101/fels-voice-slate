@@ -20,9 +20,13 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-STATES = ['edit', 'process', 'check', 'analyze', 'record', 'empty', 'compact', 'reading', 'script', 'light', 'settings', 'about',
-          'shortcuts', 'copy', 'manifest', 'dataset', 'speaker', 'keepmany']
-DIALOGS = ('settings', 'about', 'shortcuts', 'copy', 'manifest', 'dataset', 'speaker', 'keepmany')
+STATES = ['edit', 'process', 'check', 'analyze', 'record', 'empty', 'compact', 'reading', 'script', 'countin', 'light',
+          'settings', 'about', 'shortcuts', 'copy', 'manifest', 'dataset', 'speaker', 'keepmany', 'handsfree', 'roomcheck']
+DIALOGS = ('settings', 'about', 'shortcuts', 'copy', 'manifest', 'dataset', 'speaker', 'keepmany', 'handsfree',
+           'roomcheck', 'roomspeak')
+RUN = ('countin', 'runlisten', 'runheard')
+# drawn only when asked for with --only, to look at a state the documents do not show
+CHECKS = ['unreachable', 'runlisten', 'runheard', 'roomspeak', 'delivery', 'markers']
 SAMPLE = ('The morning ferry left the harbour just as the fog began to lift from the water, and the gulls followed '
           'it out past the lighthouse.')
 SCRIPT = ('The morning ferry left the harbour just as the fog began to lift.\n'
@@ -38,26 +42,34 @@ def parse():
     parser.add_argument('--size', default='1440x960', help='window size, WIDTHxHEIGHT')
     parser.add_argument('--theme', default='dark', choices=('dark', 'light', 'contrast'), help='the look of the window')
     parser.add_argument('--language', default='en', help='the language of the window, such as de')
-    parser.add_argument('--only', nargs='*', choices=STATES, help='render only these states')
+    parser.add_argument('--only', nargs='*', choices=STATES + CHECKS, help='render only these states')
     return parser.parse_args()
 
 
-def build_session(work):
+def free_drive():
+    """A drive letter with nothing on it, so the picture of a folder that cannot be reached shows no real folder."""
+    import string
+    return next(Path(f'{letter}:/') for letter in reversed(string.ascii_uppercase[3:]) if not Path(f'{letter}:/').exists())
+
+
+def build_session(work, root=None):
     from recorder import capture, settings
     from recorder.jobs import Jobs
     from recorder.session import Session
     from recorder.store import Library
     import synthetic
 
-    capture.list_microphones = lambda: [(1, 'Studio Microphone  [Windows WASAPI]'), (2, 'Headset Microphone  [MME]')]
+    capture.list_microphones = lambda every=False: [(1, 'Microphone (Studio USB Microphone)'),
+                                                    (2, 'Headset Microphone (Realtek(R) Audio)')]
     capture.default_microphone = lambda: 1
     capture.list_loopbacks = lambda: [(9, 'Speakers [Loopback]')]
     capture.default_loopback = lambda: 9
     capture.input_channels = lambda device: 1
     settings_file = work / 'settings.json'
-    settings.update({'root': str(work / 'clips')}, settings_file)
+    root = root or work / 'clips'
+    settings.update({'root': str(root)}, settings_file)
     session = Session(settings_file=settings_file, jobs=Jobs(inline=True), player=synthetic.NullPlayer(),
-                      library=Library(work / 'clips', trash=lambda paths: None))
+                      library=Library(root, trash=lambda paths: None))
     return session
 
 
@@ -174,22 +186,68 @@ def reading_take(app, window):
     window.flush()
     settle(app, session)
     measure(app, window)
-    window._show_status('Reading check: 2 places differ from the script. The Clip tab shows where. Listen: the recognizer can be '
-                        'wrong too.')
+    from recorder.i18n import tr
+    window._show_status(tr('Reading check: {count} places differ from the script. The Clip tab shows where. Listen: the '
+                           'recognizer can be wrong too.').format(count=2))
 
 
 def script_take(app, window):
-    """The Script tab, part of the way through a script."""
+    """The Script tab, part of the way through a script, with a line read twice: once with a word that differs, then as
+    written. The list shows the takes in script order, each with its reading check."""
     session = window.session
     session.script.load_text(SCRIPT)
     read_a_line(session)
     session.workspace.set_meta(consent_confirmed=True)
     session.keep()
+    read_a_line(session, 'A few gulls followed it out past the light.')
     read_a_line(session)
     window.flush()
+    window.library.show_takes(order='script')
     settle(app, session)
     measure(app, window)
     window.inspector.show_tab(window.inspector.SCRIPT_TAB)
+
+
+def run_take(app, window, state):
+    """A hands-free run through the script: the next line counted in, then recorded, before and after the voice is heard."""
+    import synthetic
+    from recorder import capture
+    session = window.session
+    seconds = {'countin': 0.1, 'runlisten': 0.7, 'runheard': 3.6}[state]
+
+    def opened(source, device, pre_roll, channel=None):
+        made = synthetic.SyntheticCapture(seconds)
+        made.recording = False                  # armed for the count-in, recording once it is over
+        return made
+
+    capture.open_capture = opened
+    session.script.load_text(SCRIPT)
+    session.script.step(1)
+    session.run.set_options(next_line=True, stop_after_pause=True, pause_seconds=1.5, auto_start=True, count_in=3)
+    session.record_pressed()
+    if state != 'countin':
+        session.run._deadline = 0.0             # the count-in is over
+        session.tick()
+        session.run.heard = state == 'runheard'
+    window.flush()
+    window._tick()
+    window._refresh_run()
+
+
+def room_dialog(session, state):
+    """The room and level check: what one check found, with a voice a little low, or the step of reading the sentence. No
+    microphone is opened: the result is given, as the check would leave it."""
+    from recorder.core.analysis import Room
+    from recorder.ui.roomcheck import RoomCheckDialog
+    if state == 'speak':
+        session.room.phase = 'speak'
+    else:
+        session.room.result = Room(heard=True, floor_db=-71.8, speech_db=-25.4, floor_at_target_db=-66.4, peak_dbfs=-9.6,
+                                   clipped=0.0, hum=None, room='ok', level='warn', headroom='ok')
+    dialog = RoomCheckDialog(session)
+    if state == 'speak':
+        dialog.meter.set_levels(-18.0, -27.0)
+    return dialog
 
 
 def save_picture(widget, path, scale):
@@ -203,7 +261,8 @@ def save_picture(widget, path, scale):
     print('wrote', path)
 
 
-def render(window, app, path, size, scale):
+def render(window, app, path, size, scale, before=None):
+    """`before` runs once the window has its size, just before the picture is taken: to scroll, say."""
     from PySide6.QtCore import Qt
     window.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)
     window.resize(*size)
@@ -211,7 +270,16 @@ def render(window, app, path, size, scale):
     for _ in range(6):
         app.processEvents()
     settle(app, window.session)                  # the outlines in the list are asked for as the rows are first drawn
+    if before is not None:
+        before()
+        app.processEvents()
     save_picture(window, path, scale)
+
+
+def scroll_to_end(window):
+    """The inspector's page scrolled to its end."""
+    bar = window.inspector.pages.currentWidget().verticalScrollBar()
+    bar.setValue(bar.maximum())
 
 
 def main():
@@ -237,27 +305,35 @@ def main():
                 continue
             folder = work / state
             folder.mkdir()
-            session = build_session(folder)
+            session = build_session(folder, free_drive() / 'voice-clips' if state == 'unreachable' else None)
             if state in DIALOGS:
                 from types import SimpleNamespace
 
                 from PySide6.QtCore import Qt
 
                 from recorder import clean
+                from recorder.session import run
                 from recorder.ui import dialogs
                 clean.locate = lambda configured=None: Path(r'C:\Tools\ffmpeg\bin\ffmpeg.exe')   # no real paths in pictures
                 fake = {'root': r'C:\Users\you\Recordings\voice-clips', 'asr_language': 'en', 'tail_seconds': 0.5,
-                        'outputs': ['Speakers  [Windows WASAPI]']}
+                        'outputs': ['Speakers (Realtek(R) Audio)'], 'output_device': 'Speakers (Realtek(R) Audio)'}
                 said = {'origin': 'Recorded by me, in my room, microphone only', 'allowed_use': 'Personal voice projects'}
+                totals = {'speaker': (48, 1234.5), 'all': (112, 3001.0)}
                 release = {'file': 'signed-release.pdf', 'signed': '2026-09-02', 'expires': '2027-09-02',
                            'notes': 'Covers the narrator of the game, and nothing else.'}
                 dialog = {'settings': lambda: dialogs.SettingsDialog(fake),
                           'about': dialogs.AboutDialog, 'shortcuts': dialogs.ShortcutsDialog,
                           'copy': lambda: dialogs.CopyDialog('Welcome back, take two'),
-                          'manifest': lambda: dialogs.ManifestDialog('My voice'),
-                          'dataset': lambda: dialogs.DatasetDialog('My voice'),
+                          'manifest': lambda: dialogs.ManifestDialog('My voice', totals),
+                          'dataset': lambda: dialogs.DatasetDialog('My voice', totals),
                           'speaker': lambda: dialogs.SpeakerDialog('Sam Rivera', release, True),
-                          'keepmany': lambda: dialogs.KeepManyDialog('My voice', [SimpleNamespace(meta=said)] * 12, said)}[state]()
+                          'keepmany': lambda: dialogs.KeepManyDialog('My voice', [SimpleNamespace(meta=said)] * 12, said),
+                          'roomcheck': lambda: room_dialog(session, 'done'),
+                          'roomspeak': lambda: room_dialog(session, 'speak'),
+                          'handsfree': lambda: dialogs.HandsFreeDialog({**run.OPTIONS, 'next_line': True, 'stop_after_pause': True,
+                                                                        'auto_start': True}, 'F9')}[state]()
+                from recorder.ui.translate import translate_tree
+                translate_tree(dialog)                  # as dialogs.Dialogs does before it shows one
                 dialog.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)        # drawn, but never on the person's screen
                 dialog.show()
                 for _ in range(4):
@@ -265,11 +341,13 @@ def main():
                 save_picture(dialog, out / f'{state}.png', args.scale)
                 dialog.close()
                 continue
-            if state == 'empty':
+            if state in ('empty', 'unreachable'):
                 window = make_window(app, session)
-                render(window, app, out / 'empty.png', size, args.scale)
+                render(window, app, out / f'{state}.png', size, args.scale)
                 window.close()
                 continue
+            if state == 'delivery':                     # an Audition, so the Check tab also measures it against ACX
+                session.workspace.set_purpose('audition')
             seed(session, rough=state == 'analyze')
             window = make_window(app, session)
             window.flush()
@@ -284,8 +362,11 @@ def main():
                 window.flush()
                 window._tick()
                 window.timer.stop()
-                window._show_status('Recording. Press F9 or Stop when finished.')
+                window._show_status(i18n.tr('Recording. Press {key} or Stop when finished.').format(key='F9'))
                 render(window, app, out / 'record.png', size, args.scale)
+            elif state in RUN:
+                run_take(app, window, state)
+                render(window, app, out / f'{state}.png', size, args.scale)
             elif state == 'analyze':
                 analyze_take(app, window)
                 render(window, app, out / 'analyze.png', size, args.scale)
@@ -301,9 +382,16 @@ def main():
                     window.flush()
                     measure(app, window)
                     window.inspector.show_tab(1)
-                elif state == 'check':
+                elif state in ('check', 'delivery'):
                     window.inspector.show_tab(2)
-                render(window, app, out / f'{state}.png', (1100, 640) if state == 'compact' else size, args.scale)
+                elif state == 'markers':                    # three moments marked, the playhead gone to the second
+                    for moment in (2.4, 6.35, 9.1):
+                        session.editor.toggle_marker(moment)
+                    session.editor.set_playhead(6.35)
+                    session.editor.went_to_marker(6.35, True)
+                    window.flush()
+                render(window, app, out / f'{state}.png', (1100, 640) if state == 'compact' else size, args.scale,
+                       before=(lambda: scroll_to_end(window)) if state == 'delivery' else None)    # down to the ACX rows
             window.timer.stop()
             window.close()
     finally:

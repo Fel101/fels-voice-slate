@@ -276,7 +276,7 @@ def test_noise_cleaning_is_not_kept_when_it_does_not_help():
     d, _ = advise(voice(noise=0.012), denoise=identity)
     noise = find(d, 'noise')
     assert 'denoise' not in d.chain and noise.fix == ''
-    assert 'Not fixed: noise cleaning did not lower it enough' in noise.detail
+    assert 'Not fixed: noise reduction did not lower it enough' in noise.detail
 
 
 def test_noise_cleaning_is_set_from_the_noise_the_clip_has():

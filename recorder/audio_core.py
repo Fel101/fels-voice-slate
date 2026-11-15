@@ -11,6 +11,8 @@ from math import gcd
 import numpy as np
 from scipy.signal import resample_poly
 
+from .i18n import tr
+
 EXPORT_RATE = 24000             # the kept clip of a Reference or a Sentence; see PURPOSES
 MIN_SECONDS = 6.0               # below this a clip cannot be kept as a reference
 TARGET_MIN_SECONDS = 10.0       # the range the meter marks green
@@ -39,7 +41,6 @@ class Purpose:
     """
     key: str
     name: str
-    a_name: str                 # the name in a sentence: "kept as a reference"
     about: str
     min_seconds: float          # shorter clips cannot be kept
     best_from: float            # the range the meter marks green
@@ -60,11 +61,11 @@ class Purpose:
 
 
 PURPOSES = {
-    'reference': Purpose('reference', 'Reference', 'a reference', 'One good clip of a voice, for a text-to-speech tool',
+    'reference': Purpose('reference', 'Reference', 'One good clip of a voice, for a text-to-speech tool',
                          MIN_SECONDS, TARGET_MIN_SECONDS, TARGET_MAX_SECONDS, MAX_SECONDS, 120.0, EXPORT_RATE, 16),
-    'sentence': Purpose('sentence', 'Sentence', 'a sentence', 'One sentence per take, for a dataset or voice banking',
+    'sentence': Purpose('sentence', 'Sentence', 'One sentence per take, for a dataset or voice banking',
                         1.0, 2.0, 10.0, 15.0, 60.0, EXPORT_RATE, 16),
-    'audition': Purpose('audition', 'Audition', 'an audition', 'A full performance, kept at the best quality',
+    'audition': Purpose('audition', 'Audition', 'A full performance, kept at the best quality',
                         3.0, 30.0, 180.0, 600.0, 900.0, 48000, 24, own_rate=True),
 }
 DEFAULT_PURPOSE = 'reference'
@@ -84,35 +85,101 @@ def _db(value):
     return 20.0 * math.log10(max(float(value), 1e-12))
 
 
-def measure(x, rate):
-    """Level and length measurements on the mono mix. Clipping is counted at the flag level and at the 0.1% level."""
+BLOCK = 1 << 20     # samples worked on at a time, so a long recording is measured without copies of all of it in 64-bit numbers
+
+
+def frame_energy(x, rate):
+    """The mean square of each 20 ms frame of the mono mix, the last partial frame dropped. Worked out a block at a time,
+    so that an hour of audio needs a few megabytes here and not gigabytes. Every level measure reads it, so a caller that
+    measures one clip several ways works it out once and passes it on."""
+    m = to_mono(x)
+    frame = max(1, int(rate * FRAME_SECONDS))
+    count = len(m) // frame
+    out = np.empty(count, dtype=np.float64)
+    step = max(1, BLOCK // frame)
+    for first in range(0, count, step):
+        last = min(first + step, count)
+        chunk = m[first * frame:last * frame].reshape(-1, frame).astype(np.float64)
+        out[first:last] = np.mean(chunk ** 2, axis=1)
+    return out
+
+
+def energy_db(energy):
+    """Frame levels in dB from frame_energy."""
+    return 20.0 * np.log10(np.sqrt(energy) + 1e-12)
+
+
+def measure(x, rate, energy=None):
+    """Level and length measurements on the mono mix. Clipping is counted at the flag level and at the 0.1% level.
+    `energy` is frame_energy of the same clip, when it has been worked out already."""
     m = to_mono(x)
     n = len(m)
     if n == 0 or not rate:
         return {'seconds': 0.0, 'peak_dbfs': -240.0, 'rms_dbfs': -240.0, 'clipped': False,
                 'clipped_fraction': 0.0, 'silence_fraction': 1.0}
-    m64 = m.astype(np.float64)
-    frame = max(1, int(rate * FRAME_SECONDS))
-    usable = n // frame * frame
-    frames = m64[:usable].reshape(-1, frame) if usable else m64.reshape(1, -1)
-    frame_db = 20.0 * np.log10(np.sqrt(np.mean(frames * frames, axis=1)) + 1e-12)
+    energy = frame_energy(m, rate) if energy is None else energy
+    squares = flagged = near = 0
+    for first in range(0, n, BLOCK):
+        chunk = m[first:first + BLOCK].astype(np.float64)
+        squares += float(np.dot(chunk, chunk))
+        size = np.abs(chunk)
+        flagged += int(np.count_nonzero(size >= CLIP_FLAG))
+        near += int(np.count_nonzero(size >= CLIP_LAB))
+    if not energy.size:                     # shorter than one frame: the clip is its own frame
+        energy = np.array([squares / n])
     return {
         'seconds': round(n / rate, 3),
-        'peak_dbfs': round(_db(np.max(np.abs(m64))), 2),
-        'rms_dbfs': round(_db(math.sqrt(float(np.mean(m64 * m64)))), 2),
-        'clipped': bool(np.any(np.abs(m64) >= CLIP_FLAG)),
-        'clipped_fraction': round(float(np.mean(np.abs(m64) >= CLIP_LAB)), 6),
-        'silence_fraction': round(float(np.mean(frame_db < SILENCE_FRAME_DB)), 3),
+        'peak_dbfs': round(_db(max(float(m.max()), -float(m.min()))), 2),
+        'rms_dbfs': round(_db(math.sqrt(squares / n)), 2),
+        'clipped': flagged > 0,
+        'clipped_fraction': round(near / n, 6),
+        'silence_fraction': round(float(np.mean(energy_db(energy) < SILENCE_FRAME_DB)), 3),
     }
 
 
-def resample(x, rate_in, rate_out):
-    """Polyphase resampling (SciPy)."""
-    x = np.asarray(x, dtype=np.float64)
-    if rate_in == rate_out:
-        return x.astype(np.float32)
+def _resample_plan(rate_in, rate_out):
     g = gcd(int(rate_in), int(rate_out))
-    return resample_poly(x, int(rate_out) // g, int(rate_in) // g).astype(np.float32)
+    up, down = int(rate_out) // g, int(rate_in) // g
+    # SciPy's filter reaches 10 * max(up, down) samples either side at the higher rate: this many input samples, rounded up
+    # to a whole number of `down`, so that every block starts on an input sample that has an output sample of its own.
+    reach = -(-(10 * max(up, down) + 1) // up) + 4
+    pad = -(-reach // down) * down
+    block = max(BLOCK // down, 1) * down
+    return up, down, pad, block
+
+
+def resample_blocks(x, rate_in, rate_out):
+    """Polyphase resampling (SciPy), a block at a time: each block is resampled with enough of its neighbours either side
+    for the filter to see what it would see in the whole recording, so the pieces join into exactly what one call over
+    everything gives (to float rounding), without a 64-bit copy of everything. Yields the output in order, as float32."""
+    x = np.asarray(x)
+    up, down, pad, block = _resample_plan(rate_in, rate_out)
+    n = len(x)
+    total = -(-n * up // down)
+    for first in range(0, n, block):
+        last = min(first + block, n)
+        a, b = max(first - pad, 0), min(last + pad, n)
+        out = resample_poly(np.asarray(x[a:b], dtype=np.float64), up, down, axis=0)
+        offset = (first - a) * up // down
+        end = total if last == n else last * up // down
+        yield out[offset:offset + end - first * up // down].astype(np.float32)
+
+
+def resample(x, rate_in, rate_out):
+    """Polyphase resampling (SciPy). A long input is done a block at a time (resample_blocks)."""
+    if rate_in == rate_out:
+        return np.array(x, dtype=np.float32)
+    x = np.asarray(x)
+    if len(x) <= 2 * BLOCK:
+        g = gcd(int(rate_in), int(rate_out))
+        return resample_poly(np.asarray(x, dtype=np.float64), int(rate_out) // g, int(rate_in) // g).astype(np.float32)
+    up, down, _, _ = _resample_plan(rate_in, rate_out)
+    out = np.empty((-(-len(x) * up // down),) + x.shape[1:], dtype=np.float32)
+    at = 0
+    for piece in resample_blocks(x, rate_in, rate_out):
+        out[at:at + len(piece)] = piece
+        at += len(piece)
+    return out
 
 
 def _snap(mono, index, rate):
@@ -203,14 +270,14 @@ TARGET_VOICED_DB = -20.0        # Normalize level aims the voiced part at this R
 NORMALIZE_PEAK = 0.95           # and, without the limiter, never lets a peak pass this
 
 
-def voiced_rms_db(x, rate):
-    """RMS of the voiced part only: 20 ms frames within 30 dB of the loudest frame and above the silence floor."""
-    m = to_mono(x).astype(np.float64)
-    frame = max(1, int(rate * FRAME_SECONDS))
-    usable = len(m) // frame * frame
-    if usable == 0:
+def voiced_rms_db(x, rate, energy=None):
+    """RMS of the voiced part only: 20 ms frames within 30 dB of the loudest frame and above the silence floor. `energy` is
+    frame_energy of the same clip, when it has been worked out already."""
+    energy = frame_energy(x, rate) if energy is None else energy
+    if not energy.size:
+        m = to_mono(x).astype(np.float64)
         return _db(math.sqrt(float(np.mean(m * m))) if len(m) else 0.0)
-    rms = np.sqrt(np.mean(m[:usable].reshape(-1, frame) ** 2, axis=1))
+    rms = np.sqrt(energy)
     frame_db = 20.0 * np.log10(rms + 1e-12)
     voiced = frame_db > max(SILENCE_FRAME_DB, frame_db.max() - 30.0)
     if not voiced.any():
@@ -264,26 +331,32 @@ def take_warnings(stats, flags=(), purpose=None):
     seconds = stats['seconds']
     rules = purpose or PURPOSES[DEFAULT_PURPOSE]
     items = []
+    length = {'seconds': f'{seconds:.1f}', 'low': f'{rules.min_seconds:g}', 'high': f'{rules.max_seconds:g}',
+              'start': f'{rules.best_from:g}', 'end': f'{rules.best_to:g}'}
     if seconds < rules.min_seconds:
-        items.append(Issue(f'Too short ({seconds:.1f} s; {rules.min_seconds:g} s minimum): cannot be kept as {rules.a_name}',
+        key = rules.key
+        items.append(Issue(tr('Too short ({seconds} s; {low} s minimum): cannot be kept as a sentence' if key == 'sentence'
+                              else 'Too short ({seconds} s; {low} s minimum): cannot be kept as an audition'
+                              if key == 'audition' else
+                              'Too short ({seconds} s; {low} s minimum): cannot be kept as a reference').format(**length),
                            True, 'short'))
     if seconds > rules.max_seconds:
-        items.append(Issue(f'Too long ({seconds:.1f} s; {rules.max_seconds:g} s maximum): cannot be kept', True, 'long'))
+        items.append(Issue(tr('Too long ({seconds} s; {high} s maximum): cannot be kept').format(**length), True, 'long'))
     elif seconds > rules.best_to:
-        items.append(Issue(f'Long ({seconds:.1f} s): fine up to {rules.max_seconds:g} s, {rules.best_from:g} to '
-                           f'{rules.best_to:g} s works best', False, 'target'))
+        items.append(Issue(tr('Long ({seconds} s): fine up to {high} s, {start} to {end} s works best').format(
+            **length), False, 'target'))
     if stats['rms_dbfs'] < SILENT_DB:
-        items.append(Issue('Silent: cannot be kept', True, 'silent'))
+        items.append(Issue(tr('Silent: cannot be kept'), True, 'silent'))
     elif stats['rms_dbfs'] < QUIET_DB:
-        items.append(Issue(f"Quiet ({stats['rms_dbfs']:.0f} dBFS RMS): advisory", False, 'quiet'))
+        items.append(Issue(tr('Quiet ({rms} dBFS RMS): advisory').format(rms=f"{stats['rms_dbfs']:.0f}"), False, 'quiet'))
     if stats.get('clipped') or stats.get('recording_clipped'):
-        items.append(Issue('Clipped: some samples reach full scale; consider re-recording', False, 'clipped'))
+        items.append(Issue(tr('Clipped: some samples reach full scale; consider re-recording'), False, 'clipped'))
     if stats.get('silence_fraction', 0) > MOSTLY_SILENT:
-        items.append(Issue('Mostly silence', False, 'mostly_silent'))
+        items.append(Issue(tr('Mostly silence'), False, 'mostly_silent'))
     if 'interrupted' in flags:
-        items.append(Issue('Interrupted: the device stopped during this take', False, 'interrupted'))
+        items.append(Issue(tr('Interrupted: the device stopped during this take'), False, 'interrupted'))
     if 'dropouts' in flags:
-        items.append(Issue('Dropouts: the device lost some audio during this take; listen for gaps', False, 'dropouts'))
+        items.append(Issue(tr('Dropouts: the device lost some audio during this take; listen for gaps'), False, 'dropouts'))
     return items
 
 
@@ -292,12 +365,13 @@ def keep_problems(meta, warnings):
     problems = []
     text = str(meta.get('transcript') or '').strip()
     if not (TRANSCRIPT_MIN <= len(text) <= TRANSCRIPT_MAX):
-        problems.append(f'The transcript must be {TRANSCRIPT_MIN} to {TRANSCRIPT_MAX} characters.')
+        problems.append(tr('The transcript must be {low} to {high} characters.').format(low=TRANSCRIPT_MIN,
+                                                                                     high=TRANSCRIPT_MAX))
     if not str(meta.get('origin') or '').strip():
-        problems.append('Enter where the recording came from (origin).')
+        problems.append(tr('Enter where the recording came from (origin).'))
     if not str(meta.get('allowed_use') or '').strip():
-        problems.append('Enter what the voice may be used for (allowed use).')
+        problems.append(tr('Enter what the voice may be used for (allowed use).'))
     if meta.get('consent_confirmed') is not True:
-        problems.append('Tick the permission box: you have the right to use this voice for the purpose you entered.')
+        problems.append(tr('Tick the permission box: you have the right to use this voice for the purpose you entered.'))
     problems.extend(w.text for w in warnings if w.blocks)
     return problems

@@ -14,10 +14,11 @@ back in seconds of the edited clip and are kept in seconds of the master, as the
 """
 import time
 
-from .. import settings, transcript
+from .. import clean, settings, transcript
 from ..clean import CleanError
 from ..core import reading, render
 from ..core.edits import words_key
+from ..i18n import tr
 from .measure import frozen
 from .workspace import reading_of
 
@@ -32,6 +33,7 @@ class Drafts:
         self.settings_file = settings_file
         self.clock = clock
         self._due = None                # (take, time) of a draft wanted after the latest edits
+        self._waiting = 0               # how many drafts were queued or being made at the last tick
         self.worker = transcript.Worker()   # the recognizer kept running, so a draft after a cut does not reload the model
 
     def _recognizer(self):
@@ -66,30 +68,50 @@ class Drafts:
             if not automatic:
                 self.bus.status(transcript.NOT_SET_UP)
             return False
+        recipe = frozen(take.history)
+        if recipe.chain['denoise']['enabled']:
+            try:
+                clean.find_ffmpeg()             # the render happens later, in the drafts' lane; say at once what it lacks
+            except CleanError as e:
+                self.bus.status(tr('Transcript draft not started: {error}').format(error=e))
+                return False
         request = (object(), take.meta['transcript'], words_key(take.history))
-        try:
-            export = self.workspace.lib.export_for(take, frozen(take.history))
-        except CleanError as e:                 # cleaning is on and FFmpeg is missing or failed: say so, change nothing
-            self.bus.status(f'Transcript draft not started: {e}')
-            return False
         take.draft_request = request
-        segments = render.segments_of(take.samples, take.rate, take.history.edits)
-        language = self._language()
-        self.bus.status('Drafting the transcript from the audio. This takes a few seconds...')
+        lib, language, rate = self.workspace.lib, self._language(), take.export_rate
+        if not automatic or take is self.workspace.current:
+            self.bus.status('Drafting the transcript from the audio. This takes a few seconds...')
         self.bus.notify('meta')                 # the Clip tab shows that a draft is on its way
-
-        rate = take.export_rate
+        self.bus.notify('drafts')
 
         def work():
-            return transcript.suggest(export, python, model, language, rate, self.worker)
+            # Rendered here, in the drafts' own lane, so that a long take or many imported ones never hold up the window.
+            export = lib.export_for(take, recipe)
+            segments = render.segments_of(take.mono, take.rate, recipe.edits)
+            result = transcript.suggest(export, python, model, language, rate, self.worker)
+            return result, segments
 
-        self.jobs.submit(
-            work,
-            lambda result: self.receive(take, result['text'], None, replace, request, result.get('tidied', False),
-                                        self._on_master(result.get('words'), segments, take.rate)),
-            lambda error: self.receive(take, None, str(error) if isinstance(error, transcript.DraftUnavailable)
-                                       else f'Transcript draft failed: {error}', replace, request))
+        def done(answer):
+            result, segments = answer
+            self.receive(take, result['text'], None, replace, request, result.get('tidied', False),
+                         self._on_master(result.get('words'), segments, take.rate))
+
+        def failed(error):
+            if isinstance(error, CleanError):   # cleaning is on and FFmpeg is missing or failed: say so, change nothing
+                message = tr('Transcript draft not started: {error}').format(error=error)
+            elif isinstance(error, transcript.DraftUnavailable):
+                message = str(error)
+            else:
+                message = tr('Transcript draft failed: {error}').format(error=error)
+            self.receive(take, None, message, replace, request)
+
+        # Dropped before it runs if the take has been discarded, or a newer draft has been asked for since.
+        self.jobs.submit(work, done, failed, lane='drafts', about=take, wanted=lambda: take.draft_request is request)
         return True
+
+    @property
+    def waiting(self):
+        """How many drafts are queued or being made."""
+        return self.jobs.waiting('drafts')
 
     @staticmethod
     def _on_master(words, segments, rate):
@@ -132,12 +154,14 @@ class Drafts:
     def _reading_message(take):
         check = reading_of(take)
         if check is None:
-            return 'Draft ready. Your typed transcript was kept; use Suggest from audio to replace it.'
+            return tr('Draft ready. Your typed transcript was kept; use Suggest from audio to replace it.')
         count = reading.differences(check)
         if not count:
-            return 'Reading check: the line was read as written.'
-        return (f'Reading check: {count} place{"s differ" if count != 1 else " differs"} from the script. The Clip tab shows '
-                'where. Listen: the recognizer can be wrong too.')
+            return tr('Reading check: the line was read as written.')
+        return tr('Reading check: {count} place differs from the script. The Clip tab shows where. Listen: the recognizer '
+                  'can be wrong too.' if count == 1 else
+                  'Reading check: {count} places differ from the script. The Clip tab shows where. Listen: the recognizer '
+                  'can be wrong too.').format(count=count)
 
     # ---- following the edits ------------------------------------------------------------------------------------------
 
@@ -159,6 +183,10 @@ class Drafts:
             and take.meta.get('draft_heard') != words_key(take.history)
 
     def tick(self):
+        waiting = self.waiting
+        if waiting != self._waiting:    # a draft arrived, or one was dropped: the window says how many are left
+            self._waiting = waiting
+            self.bus.notify('drafts')
         if self._due is None:
             return
         take, due = self._due

@@ -90,12 +90,14 @@ A recording of a voice is **personal data**, and a voiceprint can identify a per
 - **Never publish them by accident.** Do not commit recordings to a public repository, post them in an issue, or send them
   in a bug report. This project's `.gitignore` leaves audio out, and bug reports should use synthetic or your own audio.
 - **Share only for the allowed use**, and send the clip's sidecar file with it, so the permission travels with the audio.
-  Dragging a clip out of the window or saving a copy of it sends only the audio, so add the sidecar yourself. A manifest, and the
+  Dragging a clip out of the window or saving a copy of it sends the audio with one line inside it, its id and allowed use,
+  but not the origin or the rest of the record, so add the sidecar yourself. A manifest, and the
   `manifest.jsonl` of a dataset, carry each clip's origin and allowed use in their rows, but they are lists of clips, not
   releases. Do not train on a dataset for anything its allowed use does not cover.
 - **Delete on request, and when you no longer need them.** **Discard** in the program moves a take's files to the
   Recycle Bin, which is not a secure erase: empty it. To remove everything for a speaker, use **Delete speaker...**, which moves
-  their whole folder there, with their release. Remember any copies you made: a dataset, a manifest, a saved copy.
+  their whole folder there, with their release. Remember any copies you made: a dataset, a manifest, a saved copy, and any
+  backup, which holds every recording and release.
 
 ## Rules that may apply to you
 

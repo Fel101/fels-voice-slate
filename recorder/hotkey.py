@@ -12,6 +12,8 @@ from ctypes import wintypes
 
 from PySide6.QtCore import QAbstractNativeEventFilter, QCoreApplication, QObject, Signal
 
+from .i18n import tr
+
 WM_HOTKEY = 0x0312
 MOD_NOREPEAT = 0x4000                   # holding the key down gives one press, not a stream of them
 VK_F9 = 0x78
@@ -117,12 +119,13 @@ class GlobalKey(QObject):
             return True
         app = QCoreApplication.instance()
         if app is None:
-            self.problem = 'the program is not running yet'
+            self.problem = tr('the program is not running yet')
             return False
         error = self.api.register(KEY_ID, self.modifiers, self.vk)
         if error:
-            self.problem = (f'another program already uses {self.name}' if error == ERROR_HOTKEY_ALREADY_REGISTERED
-                            else f'Windows would not allow it (error {error})')
+            self.problem = (tr('another program already uses {key}').format(key=self.name)
+                            if error == ERROR_HOTKEY_ALREADY_REGISTERED else
+                            tr('Windows would not allow it (error {code})').format(code=error))
             return False
         self._filter = _Filter(KEY_ID, self.pressed.emit)
         app.installNativeEventFilter(self._filter)

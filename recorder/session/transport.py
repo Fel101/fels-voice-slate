@@ -11,6 +11,7 @@ import numpy as np
 from ..audio_io import Player, find_output
 from ..clean import CleanError
 from ..core import render
+from ..i18n import tr
 
 
 REFRESH_DELAY = 0.15            # seconds an edit waits, so a slider dragged during playback re-renders once, not per step
@@ -37,9 +38,10 @@ class Transport:
         elif topic == 'edits' and self.mode == 'edited' and self.player.active and self._stale_since is None:
             self._stale_since = self.clock()
 
-    def set_output(self, name):
-        """Play through the output device called `name` from the next Play on. An empty name is Windows' default."""
-        self.player.device = find_output(name)
+    def set_output(self, name, every=False):
+        """Play through the output device called `name` from the next Play on. An empty name is Windows' default. `every`
+        says which list the name was chosen from: each device once, or every Windows audio interface."""
+        self.player.device = find_output(name, every)
 
     # ---- state --------------------------------------------------------------------------------------------------------
 
@@ -70,7 +72,7 @@ class Transport:
     def _buffer(self, take, mode):
         if mode == 'edited':
             return (self.workspace.lib.process_native(take),
-                    render.segments_of(take.samples, take.rate, take.history.edits))
+                    render.segments_of(take.mono, take.rate, take.history.edits))
         return take.mono, None
 
     def _to_buffer_time(self, master_seconds):
@@ -112,6 +114,7 @@ class Transport:
             return False
         self.bus.status('Playing the edited clip from the playhead. The playhead follows it.' if mode == 'edited'
                         else 'Playing the original from the playhead.')
+        self._say_where_it_plays()
         self.bus.notify('transport')
         return True
 
@@ -122,10 +125,17 @@ class Transport:
             self.player.play(begin, loop=self._loop_range() if looping else None)
         except Exception as e:                  # the sound library's own errors; a missing output device is the usual one
             self.mode = None
-            self.bus.notice('error', 'Could not play', f'The sound could not be played: {e}')
+            self.bus.notice('error', 'Could not play', tr('The sound could not be played: {error}').format(error=e))
             self.bus.notify('transport')
             return False
         return True
+
+    def _say_where_it_plays(self):
+        """When the output chosen in Settings would not play and Windows' default does, say so, so that the sound coming
+        out of other speakers is not a surprise. It replaces the line about what is playing."""
+        if getattr(self.player, 'fallback', None) is not None:
+            self.bus.status("The output chosen in Settings would not play this, so it is playing through Windows' default. "
+                            'Choose another output in Settings if this is not the one you want.')
 
     def toggle(self):
         """Space: pause what is playing, resume what is paused, otherwise play the edited clip from the playhead."""
@@ -228,7 +238,7 @@ class Transport:
         except CleanError as e:
             self.bus.status(str(e))
             return False
-        joins = render.join_positions(render.segments_of(take.samples, take.rate, take.history.edits))
+        joins = render.join_positions(render.segments_of(take.mono, take.rate, take.history.edits))
         if not joins:
             return False
         gap = np.zeros(int(0.5 * take.rate), dtype=np.float32)
@@ -239,6 +249,7 @@ class Transport:
         if not self._start(np.concatenate(pieces), take.rate, 0.0):
             return False
         self.bus.status('Playing 1 s either side of each join.')
+        self._say_where_it_plays()
         self.bus.notify('transport')
         return True
 
