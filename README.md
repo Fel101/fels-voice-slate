@@ -15,6 +15,12 @@ what is in it and whether you had the right to record it.
 > **Record only voices you own or have permission to use.** The app will not keep a clip until you confirm that, and
 > [Responsible use](docs/responsible-use.md) explains what it means and why it asks.
 
+Version 0.7 in 3 minutes, with sound: the program itself, filmed while a script drives it through a session. Wren
+narrates and Mira is the voice being recorded. Both voices were designed in [Fel's Voice
+Lab](https://github.com/Fel101/fels-voice-lab) from written descriptions, so no person's recording is in it.
+
+https://github.com/user-attachments/assets/9c4553c8-8d69-43e4-bf3e-e3256375cf52
+
 ## What it does
 
 - **Three purposes.** A *Reference* is 6 to 40 seconds at 24 kHz, a *Sentence* is 1 to 15 seconds for a dataset or voice
@@ -26,7 +32,11 @@ what is in it and whether you had the right to record it.
   and with FFmpeg also the M4A that phones and Windows' Sound Recorder make, and the sound of a video.
 - **Long sessions.** A script shows one prompt per take, remembers your place, and shows which lines have a kept clip. It can
   be read hands-free: the next line comes when a take ends, a take ends after a pause, and the next one starts after a count-in
-  on the screen. Keys walk the takes, and several takes can be kept, discarded or moved together.
+  on the screen. Keys walk the takes, and several takes can be kept, discarded or moved together. The takes of a line can
+  be listed in script order to choose the best, and the rest sent to the Recycle Bin in one step. Beside the list, a total
+  says how many clips you have kept and how long they are.
+- **Room and level check.** Before a session it listens to a few seconds of quiet and to you reading one sentence, and
+  says whether the room is quiet enough and the microphone set right. Nothing it hears is kept.
 - **Reading check** (needs draft transcripts). A take read from a script is compared with what the recognizer heard, and the
   places that differ are shown.
 - **Never loses a take.** A take is written to disk while you record it, and the original recording is written the moment
@@ -251,7 +261,8 @@ Read [docs/responsible-use.md](docs/responsible-use.md) before you record anyone
 | Audition | 3 s to 10 minutes | 30 s to 3 minutes | 15 minutes | up to 48 kHz, 24-bit, never above the recording's own rate |
 
 - The window needs at least 1100 by 600 of the screen, so a very large size setting may not fit a small screen.
-- The translations cover the window, and not yet every message or the documents.
+- The translations cover the window, and not yet every message or the documents. They are machine-made and have not
+  been checked by native speakers: corrections are welcome.
 - It is a voice-clip recorder, not a general audio editor: there is one track, and no effects beyond those listed above.
 
 ## Documentation
