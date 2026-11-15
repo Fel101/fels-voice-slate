@@ -98,6 +98,11 @@ the project uses [Semantic Versioning](https://semver.org/).
   Spanish, and "Yesterday 23:59 · Sys" in English. Only a take's own label was cut with "…". Now a line too wide first has
   the spaces around its dot taken in and is then cut with "…", and today, yesterday or any month, from any source, fits
   whole in every language: French says "Auj." for today, and Spanish "Importada" and "sep".
+- **The Keep card no longer flickers with its lines cut as a take opens.** For about 80 ms after Stop, the Keep card was
+  drawn with its new lines squeezed into its old height: the permission statement had 26 of the 48 pixels it needs, so its
+  first and last lines were cut, and "Measuring the clip..." and the lines under it were a pixel or four high. Qt shows new
+  lines, then lays out the card, then the panel around it, each at a later turn of the event loop, and frames were drawn in
+  between. The card is now laid out as soon as its lines change, and as soon as the take opens.
 - **Every playback device plays every take.** A WASAPI device chosen in Settings refused any take that was not at the rate
   the device runs at ("Invalid sample rate"), and some WDM-KS devices refused 24 kHz and below. Windows now converts for a
   WASAPI device, a take that a device still refuses is converted to the device's own rate, and the playhead stays with the

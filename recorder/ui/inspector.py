@@ -18,7 +18,7 @@ from . import theme
 from .library import reading_said
 from .palette import PALETTE, color
 from .widgets import (Segmented, Switch, button, caption, card, chip, clear_layout, flow, format_total, hbox, label,
-                      set_chip, vbox)
+                      lay_out_now, set_chip, vbox)
 
 
 # ---- the Clip page ----------------------------------------------------------------------------------------------------
@@ -911,6 +911,7 @@ class ReadyCard(QFrame):
         self.keep.setToolTip(self._keep_tip(take) if readiness.ready else tr('Fix the items above first'))
         self.discard.setEnabled(take is not None)
         self.rerecord.setEnabled(take is not None)
+        lay_out_now(self)
 
 
 # ---- while recording --------------------------------------------------------------------------------------------------
@@ -1076,6 +1077,8 @@ class Inspector(QWidget):
             self.record_card.refresh()
         self._mode = mode
         self.modes.setCurrentIndex(mode)
+        if mode == self.REVIEW:
+            lay_out_now(self.ready)                 # its lines changed while it was hidden, as a take is recorded
 
     def show_tab(self, index):
         self.tabs.set_current(index)

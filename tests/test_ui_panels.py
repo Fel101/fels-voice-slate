@@ -156,6 +156,48 @@ def test_a_refused_speaker_change_during_a_recording_does_not_lock_the_picker(wi
     assert window.library.speakers.isEnabled() and window.library.add_speaker.isEnabled()
 
 
+def keep_card_is_laid_out(card):
+    """Every line of the Keep card is shown, with the height its words need, in a card as tall as they make it."""
+    from PySide6.QtWidgets import QLabel
+    lines = [item for item in card.findChildren(QLabel) if item.wordWrap()]
+    return (bool(lines) and all(item.isVisible() and item.height() >= item.heightForWidth(item.width()) for item in lines)
+            and card.height() >= card.heightForWidth(card.width()))
+
+
+def test_the_keep_card_is_laid_out_as_soon_as_a_take_opens_after_stop(qapp, window, session, open_fake, clock):
+    """Qt shows a card's new lines, lays out the card, then the panel around it, each at a later turn of the event loop, and
+    the real window drew frames in between for about 80 ms after Stop: the permission statement had 26 of the 48 pixels it
+    needs, so its first and last lines were cut, and the lines above it had 1 to 4. They are now laid out at once."""
+    for _ in range(2):
+        session.capturing.start()
+        window.flush()
+        ui_helpers.pump(qapp)
+        session.capturing.stop()
+        clock.advance(1.0)                              # the stop tail passes, the take is saved and opens
+        window._tick()
+        window.flush()                                  # and no turn of the event loop before looking
+        assert keep_card_is_laid_out(window.inspector.ready)
+        ui_helpers.pump(qapp)
+    assert len(session.workspace.takes) == 2
+
+
+def test_the_keep_card_is_laid_out_as_soon_as_its_lines_change(qapp, window, session):
+    """A kept take edited: Measuring the clip..., the transcript to check and a note join the card's lines."""
+    record(session, 12.0)
+    window.flush()
+    session.jobs.drain()
+    window.flush()
+    fill(session)
+    session.keep()
+    session.jobs.drain()
+    window.flush()
+    ui_helpers.pump(qapp)
+    session.editor.set_selection(1.0, 1.5)
+    session.editor.cut_selection()
+    window.flush()
+    assert keep_card_is_laid_out(window.inspector.ready)
+
+
 def test_the_live_card_shows_what_has_been_recorded_so_far(window, session, open_fake, clock):
     session.capturing.start()
     window.flush()

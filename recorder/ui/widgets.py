@@ -112,6 +112,22 @@ def clear_layout(layout):
             inner.deleteLater()
 
 
+def lay_out_now(widget):
+    """Show what was just put in a visible widget's layout, and lay out the widget and the layout it sits in, at once.
+    Qt waits for the event loop to do each, one after the other, and a frame drawn in between had the new lines squeezed
+    into the widget's old height: just after Stop, the permission statement on the Keep card was cut top and bottom."""
+    if not widget.isVisible():
+        return                                      # laid out as it is shown
+    for child in widget.findChildren(QWidget):
+        if child.isHidden() and not child.testAttribute(Qt.WidgetAttribute.WA_WState_ExplicitShowHide):
+            child.show()                            # added since the last turn of the event loop, and not hidden on purpose
+    widget.layout().activate()
+    widget.updateGeometry()
+    outer = widget.parentWidget().layout() if widget.parentWidget() is not None else None
+    if outer is not None:
+        outer.activate()
+
+
 def tagged(widget, **props):
     """Set dynamic properties the stylesheet selects on, and have the style look again."""
     for key, value in props.items():
