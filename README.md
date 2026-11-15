@@ -35,7 +35,8 @@ what is in it and whether you had the right to record it.
   changed.
 - **Edit** by dragging on the waveform: cut, trim, silence, fade in and out, gain on a part, trim the pauses at the
   ends, shorten long pauses, and compare the original with the edited clip. Undo and redo have a clickable history. With a
-  draft transcript you can also cut by clicking the words, and a long take can be split at its pauses.
+  draft transcript you can also cut by clicking the words, and a long take can be split at its pauses. Press `M` to mark a
+  moment, while recording too, and `Alt+Left` or `Alt+Right` to go back to it.
 - **Process** the whole take: high-pass filter, mains-hum notch (50 or 60 Hz), noise reduction (optional, needs
   FFmpeg), a Normalize button that sets the speech to -20 dB, and a peak limiter.
 - **Check** the clip as it will be saved: length, speech level, peak, clipping, loudness, noise floor, bandwidth, hum and

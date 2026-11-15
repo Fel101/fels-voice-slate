@@ -397,6 +397,24 @@ If you cut or silence a part that might hold spoken words, the transcript has to
 the clip: read it against the clip and choose **It matches**. Fades, gain and the Process settings change no words, so they
 do not ask, and neither does undoing back to the cuts you confirmed.
 
+### Markers
+
+A marker notes a moment to come back to: a slip in a long reading, say, or the start of the line you liked best. Press `M`:
+
+- **while recording**, it marks the newest sound, and the take keeps the marker when it ends. It counts the half second kept
+  from before you pressed Record, as the take does. The live waveform shows each one.
+- **while listening**, it marks the moment you hear.
+- **otherwise**, it marks the playhead.
+
+Each marker is a dashed line across the waveform, numbered in order at the top. `Alt+Right` moves the playhead to the next marker
+and `Alt+Left` to the one before, and the sound goes with it if it is playing; the status line says which marker it is. Press `M`
+on a marker to take it away.
+
+Markers are on the original recording's timeline, like the edits, so a cut does not move them; a marker inside a cut stays where
+it was. They are saved with the take, and when it is kept, in its sidecar (`markers`, see the
+[clip format](clip-format.md)). They say nothing about the sound, so adding one to a kept clip writes it into the sidecar at
+once and leaves the clip as it was kept: there is nothing to update. Undo does not take back a marker; `M` does.
+
 ## Splitting a long take
 
 **Split at pauses** (the toolbar's **...** menu or the gear menu) makes a new take of each part of a long take, cut in the middle
@@ -406,7 +424,7 @@ the speaker stopped. A last part too short to keep joins the one before.
 
 The long take stays as it is, so nothing is lost, and each part starts from the original recording, without the long take's
 edits. If the long take had a draft transcript, each part gets its share of the words; otherwise each is drafted by itself if you
-set that up. Each part is an ordinary take: edit it, keep it or discard it. Its sidecar says which take it came from
+set that up. Each part also gets the markers that fall inside it. Each part is an ordinary take: edit it, keep it or discard it. Its sidecar says which take it came from
 (`split_from`). When you have what you want, discard the long take.
 
 The parts are made one at a time, each written to the `masters` folder as it is made, with how far it has got in the status line.

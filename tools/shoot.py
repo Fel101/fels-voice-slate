@@ -26,7 +26,7 @@ DIALOGS = ('settings', 'about', 'shortcuts', 'copy', 'manifest', 'dataset', 'spe
            'roomcheck', 'roomspeak')
 RUN = ('countin', 'runlisten', 'runheard')
 # drawn only when asked for with --only, to look at a state the documents do not show
-CHECKS = ['unreachable', 'runlisten', 'runheard', 'roomspeak', 'delivery']
+CHECKS = ['unreachable', 'runlisten', 'runheard', 'roomspeak', 'delivery', 'markers']
 SAMPLE = ('The morning ferry left the harbour just as the fog began to lift from the water, and the gulls followed '
           'it out past the lighthouse.')
 SCRIPT = ('The morning ferry left the harbour just as the fog began to lift.\n'
@@ -381,6 +381,12 @@ def main():
                     window.inspector.show_tab(1)
                 elif state in ('check', 'delivery'):
                     window.inspector.show_tab(2)
+                elif state == 'markers':                    # three moments marked, the playhead gone to the second
+                    for moment in (2.4, 6.35, 9.1):
+                        session.editor.toggle_marker(moment)
+                    session.editor.set_playhead(6.35)
+                    session.editor.went_to_marker(6.35, True)
+                    window.flush()
                 render(window, app, out / f'{state}.png', (1100, 640) if state == 'compact' else size, args.scale,
                        before=(lambda: scroll_to_end(window)) if state == 'delivery' else None)    # down to the ACX rows
             window.timer.stop()

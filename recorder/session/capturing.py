@@ -48,6 +48,7 @@ class Capturing:
         self.level = (-120.0, -120.0)       # peak and RMS in dBFS, from the last tick
         self.elapsed = 0.0
         self.take_script_line = None
+        self.markers = []                   # the moments marked in the take being recorded, in seconds from its start
         self.tail_seconds = settings.tail_seconds(settings.load(settings_file))
         self._stop = None                   # (capture, deadline) while a stop tail is pending
         self._stay_armed = False            # the input was armed when this take started, so it is armed again after it
@@ -233,6 +234,7 @@ class Capturing:
             capture = self._ensure_capture()
             self.take_script_line = self.script.current
             self.interrupted = False
+            self.markers = []
             capture.start()
         except Exception as e:
             self.bus.notice('error', 'Could not start recording', str(e))
@@ -240,6 +242,17 @@ class Capturing:
             return False
         self._set_state('recording')
         self.bus.status(self._open_spool(capture) or f'Recording. Press {self.record_key} or Stop when finished.')
+        return True
+
+    def add_marker(self):
+        """Mark the newest sound of the take being recorded, to find it again afterwards. The time counts the half second
+        kept from before Record, as the take does. Returns False when nothing is being recorded."""
+        capture = self.capture
+        if capture is None or not capture.recording:
+            return False
+        self.markers.append(round(capture.elapsed, 3))
+        self.bus.status(tr('Marker {number} at {seconds} s. It stays with the take.').format(
+            number=len(self.markers), seconds=f'{capture.elapsed:.1f}'))
         return True
 
     def stop(self):
@@ -327,7 +340,9 @@ class Capturing:
         self.close_capture()
         flags = (['interrupted'] if self.interrupted else []) + (['dropouts'] if dropouts else [])
         # If this fails the spool stays on disk: it is the take, for the next start to pick up.
-        take = self.workspace.add_take(samples, rate, kind, device, flags, script_line=self.take_script_line)
+        take = self.workspace.add_take(samples, rate, kind, device, flags, script_line=self.take_script_line,
+                                       markers=self.markers)
+        self.markers = []
         self._drop_spool(take)
         if take is None:
             self._set_state('idle')

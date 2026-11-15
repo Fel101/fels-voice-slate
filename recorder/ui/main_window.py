@@ -197,6 +197,9 @@ class MainWindow(QMainWindow):
         a.select_all.triggered.connect(self._select_all)
         a.set_in.triggered.connect(editor.set_in)
         a.set_out.triggered.connect(editor.set_out)
+        a.marker.triggered.connect(self._toggle_marker)
+        a.prev_marker.triggered.connect(lambda: self._jump_marker(False))
+        a.next_marker.triggered.connect(lambda: self._jump_marker(True))
         view = self.editor_panel.view
         a.zoom_in.triggered.connect(lambda: view.zoom_by(1.5, self._zoom_anchor()))
         a.zoom_out.triggered.connect(lambda: view.zoom_by(1 / 1.5, self._zoom_anchor()))
@@ -381,6 +384,7 @@ class MainWindow(QMainWindow):
         if 'meta' in topics and 'current' not in topics:
             self.inspector.refresh_meta(self._derived())
             self.library.refresh_takes()
+            self._repaint_timelines()               # the markers are drawn on them
         if 'edits' in topics and 'current' not in topics:
             self._measure_edited()
             self.inspector.refresh_edits()
@@ -518,6 +522,9 @@ class MainWindow(QMainWindow):
             'auto_analyze': has_take, 'auto_fix': has_take,
             'auto_trim': has_take, 'shorten': has_take, 'cut_start': has_take, 'cut_end': has_take,
             'select_all': has_take, 'set_in': has_take, 'set_out': has_take, 'check_joins': has_take and bool(history.cuts),
+            'marker': has_take or s.capturing.recording,
+            'prev_marker': has_take and bool(take.meta.get('markers')),
+            'next_marker': has_take and bool(take.meta.get('markers')),
             'play': has_take, 'stop': has_take and s.transport.active, 'loop': has_take, 'ab': has_take,
             'zoom_in': has_take, 'zoom_out': has_take, 'fit': has_take,
             'keep': has_take, 'discard': has_take, 'rerecord': has_take, 'rename': has_take,
@@ -573,7 +580,7 @@ class MainWindow(QMainWindow):
         capturing = s.capturing
         if capturing.recording:
             rows, elapsed, rules = capturing.envelope(), capturing.elapsed, s.workspace.purpose
-            self.editor_panel.live.set_state(rows, elapsed, rules)
+            self.editor_panel.live.set_state(rows, elapsed, rules, capturing.markers)
             self.library.set_live(rows, elapsed)
             sub = tr('stopping...') if capturing.finishing else \
                 tr('recording  ·  max {time}').format(time=format_clock(rules.record_limit)[:5])
@@ -687,6 +694,26 @@ class MainWindow(QMainWindow):
     def _clicked(self, t):
         self.session.editor.clear_selection()
         self.session.transport.seek(t)
+
+    def _toggle_marker(self):
+        """M: while recording, mark the newest sound; else mark the moment being heard, or the playhead, or take away the
+        marker there."""
+        s = self.session
+        if s.capturing.recording:
+            s.capturing.add_marker()
+            return
+        head = s.transport.head
+        s.editor.toggle_marker(s.editor.playhead if head is None else head)
+
+    def _jump_marker(self, forward):
+        """Alt+Left and Alt+Right: the playhead, and the sound if it is playing, go to the marker before or after it."""
+        s = self.session
+        head = s.transport.head
+        moment = s.editor.marker_beside(s.editor.playhead if head is None else head, forward)
+        if moment is not None:
+            s.transport.seek(moment)
+            self.editor_panel.view.ensure_visible(moment)
+        s.editor.went_to_marker(moment, forward)
 
     def _select_all(self):
         """Ctrl+A: every take when the list has the focus, otherwise the whole clip."""

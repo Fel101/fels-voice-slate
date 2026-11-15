@@ -49,6 +49,11 @@ the project uses [Semantic Versioning](https://semver.org/).
   submission requirements (April 2026): -23 to -18 dB RMS over the whole file, peaks no higher than -3 dB, and a noise floor
   no higher than -60 dB RMS. Each row says what to change in Process when a limit is not met. It is advice, and never stops
   Keep.
+- **Markers.** `M` marks a moment to come back to: the newest sound while recording, the moment heard while playing, or the
+  playhead; on a marker it takes it away. `Alt+Left` and `Alt+Right` go to the marker before or after, and each is a numbered
+  dashed line on the waveform. They are on the original's timeline like the edits, are saved with the take, and go into the
+  sidecar as `markers`, which on a kept clip changes alone without changing the clip. A split take's parts keep the markers
+  inside them.
 
 ### Changed
 

@@ -58,6 +58,12 @@ Because the original is written to disk the moment recording stops and the recip
 non-destructive: **Keep** renders the recipe to a new file, and the sidecar stores the recipe, so a kept clip can be
 opened again and its edits are still editable.
 
+A take's **label** and **markers** are not part of the recipe. They say nothing about the sound, so they are left out of
+what tells a kept take that it has changed (`store._work_of`), have no undo steps, and on a kept clip go straight into its
+sidecar (`Library._save_label_and_markers`), leaving the WAV and its SHA-256 alone. Markers are seconds on the original's
+timeline, like the recipe's times. While recording, `Capturing.markers` collects them from `Capture.elapsed`, which counts
+the pre-roll, and `Workspace.add_take` gives them to the take.
+
 ## Rendering
 
 `core/render.py` turns an original and a recipe into a clip, in a fixed order: mix to mono; silence, fades and region

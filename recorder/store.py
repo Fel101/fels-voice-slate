@@ -61,6 +61,7 @@ SPOOL_SUFFIX = '.spool'
 AUTOSAVE_TEXT_MAX = 20000           # a text field in an autosave file is cut to this when it is read back
 TRANSCRIPT_STATUSES = ('typed', 'read_from_script', 'asr_draft', 'edited')
 LABEL_MAX = 80
+MARKERS_MAX = 1000                  # markers kept on one take: far more than anyone drops, few enough to read at once
 RELEASE_FOLDER = 'release'
 RELEASE_FILE = 'release.json'
 RELEASE_SCHEMA = 'voice-slate-release-v1'
@@ -215,8 +216,34 @@ def _label_of(data):
     return clean_label(label) if isinstance(label, str) else ''
 
 
+def clean_markers(values, seconds=None):
+    """A take's markers as they are kept: moments in seconds on its original's timeline, to the millisecond, each once,
+    in order, and inside the recording when its length `seconds` is given. Anything that is not such a moment is dropped."""
+    kept = set()
+    for value in values or ():
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+            continue
+        moment = round(float(value), 3)
+        if moment >= 0.0 and (seconds is None or moment <= seconds):
+            kept.add(moment)
+    return sorted(kept)[:MARKERS_MAX]
+
+
+def _markers_of(data, seconds=None):
+    """The `markers` of a sidecar or autosave file, [{"seconds": 4.21}, ...], as a take keeps them."""
+    found = data.get('markers')
+    if not isinstance(found, list):
+        return []
+    return clean_markers([item.get('seconds') for item in found if isinstance(item, dict)], seconds)
+
+
+def _markers_json(markers):
+    return [{'seconds': moment} for moment in markers]
+
+
 def _work_of(take):
-    """What Keep writes of a take, apart from its label, which reaches the sidecar by its own way. Every card in the list
+    """What Keep writes of a take, apart from its label and markers, which reach the sidecar by their own way: they say
+    nothing about the sound, so changing them on a kept clip leaves it as it was kept. Every card in the list
     asks this on every keystroke, so nothing is copied: a state of the recipe is replaced and never changed in place."""
     history, meta = take.history, take.meta
     text = ('transcript', 'origin', 'allowed_use', 'source_url', 'notes')
@@ -318,6 +345,7 @@ class Take:
             self.history = History(seconds=self.seconds)
         self.meta.setdefault('purpose', ac.DEFAULT_PURPOSE)
         self.meta.setdefault('label', '')
+        self.meta.setdefault('markers', [])
         self.meta.setdefault('transcript', '')
         self.meta.setdefault('transcript_status', 'typed')
         self.meta.setdefault('origin', '')
@@ -1323,6 +1351,8 @@ class Library:
                           'consent_confirmed_at': confirmed_at if isinstance(confirmed_at, str) else '',
                           'saved_transcript': text['transcript'], 'label': label, 'saved_label': label,
                           'script_line': self._script_line(data, status)})
+        take.meta['markers'] = _markers_of(data, frames / rate if rate else None)
+        take.meta['saved_markers'] = list(take.meta['markers'])
         if isinstance(data.get('consent_batch'), int):
             take.meta['consent_batch'] = data['consent_batch']
         take.meta['draft_words'] = clean_words(data.get('words'))
@@ -1500,6 +1530,7 @@ class Library:
         take.kept_work = _work_of(take)
         take.confirmed_words = words_key(take.history)
         take.meta['saved_label'] = clean_label(take.meta.get('label'))
+        take.meta['saved_markers'] = _markers_of(sidecar)
         take.meta['saved_transcript'] = sidecar['transcript']
         self.remove_autosave(take)                  # the sidecar holds the work from here on
         try:
@@ -1564,6 +1595,9 @@ class Library:
         label = clean_label(take.meta.get('label'))
         if label:                                   # a take with no label has no such field, as before
             sidecar['label'] = label
+        markers = clean_markers(take.meta.get('markers'), take.seconds)
+        if markers:                                 # nor does one with no markers
+            sidecar['markers'] = _markers_json(markers)
         if take.moves:                              # nor does a clip that was never moved to another speaker
             sidecar['moves'] = list(take.moves)
         return sidecar
@@ -1588,13 +1622,13 @@ class Library:
     def autosave(self, take):
         """Save what has changed on a take since Keep last wrote it. Returns True if a file was written.
 
-        A take that is not kept gets an autosave file beside its original, holding its cuts, Process settings, text and
-        label. So does a kept take that has been changed since, until Keep writes the changes; its label goes straight into
-        its sidecar, and a kept take that has been put back as it was loses the file. A take whose original is not on disk
+        A take that is not kept gets an autosave file beside its original, holding its cuts, Process settings, text, label
+        and markers. So does a kept take that has been changed since, until Keep writes the changes; its label and markers
+        go straight into its sidecar, and a kept take that has been put back as it was loses the file. A take whose original is not on disk
         (yet, or any more) has nowhere to be saved, and nothing is written. Raises OSError or ValueError when the write
         fails.
         """
-        wrote = self._save_label(take) if take.kept else False
+        wrote = self._save_label_and_markers(take) if take.kept else False
         master = self._master_file(take)
         if master is None or not master.is_file():
             return wrote
@@ -1631,6 +1665,7 @@ class Library:
             'join_fade_ms': recipe['join_fade_ms'],
             'chain': recipe['chain'],
             'label': clean_label(meta.get('label')),
+            'markers': _markers_json(clean_markers(meta.get('markers'), take.seconds)),
             'purpose': take.purpose.key,
             **text,
             'transcript_status': str(meta.get('transcript_status') or 'typed'),
@@ -1685,7 +1720,8 @@ class Library:
             if any(meta.get(key, '').strip() != take.meta[key].strip() for key in ('origin', 'allowed_use')):
                 take.meta.update(consent_confirmed=False, consent_confirmed_at='')
         else:
-            meta['label'] = _label_of(data)         # a kept take's label went straight into its sidecar
+            meta['label'] = _label_of(data)         # a kept take's label and markers went straight into its sidecar
+            meta['markers'] = _markers_of(data, take.seconds)
         take.history = history
         take.meta.update(meta)
         take.needs_transcript_review = bool(data.get('needs_transcript_review')) and history.words_changed
@@ -1701,22 +1737,26 @@ class Library:
                 take.flags = ['recovered'] + [f for f in flags if isinstance(f, str) and f != 'recovered']
         take.restored = True
 
-    def _save_label(self, take):
-        """Write a kept take's label into its sidecar, leaving everything else in the file as it is."""
+    def _save_label_and_markers(self, take):
+        """Write a kept take's label and markers into its sidecar, leaving everything else in the file as it is: the WAV
+        and the SHA-256 that names it do not change."""
         label = clean_label(take.meta.get('label'))
+        markers = clean_markers(take.meta.get('markers'), take.seconds)
         path = take.sidecar_path
-        if label == clean_label(take.meta.get('saved_label')) or path is None or not Path(path).is_file():
+        if (label, markers) == (clean_label(take.meta.get('saved_label')), take.meta.get('saved_markers') or []) \
+                or path is None or not Path(path).is_file():
             return False
         path = Path(path)
         data = json.loads(path.read_text(encoding='utf-8'))
         if not isinstance(data, dict):
             raise ValueError('the sidecar is not a clip description')
-        if label:
-            data['label'] = label
-        else:
-            data.pop('label', None)
+        for key, value in (('label', label), ('markers', _markers_json(markers))):
+            if value:
+                data[key] = value
+            else:
+                data.pop(key, None)
         self._write_json(path, data)
-        take.meta['saved_label'] = label
+        take.meta['saved_label'], take.meta['saved_markers'] = label, markers
         return True
 
     def revert(self, take):

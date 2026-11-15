@@ -153,9 +153,9 @@ class RecordPanel(QWidget):
         self.wave.setVisible(not counting)
         self.length_box.setVisible(not counting)
 
-    def set_state(self, rows, elapsed, purpose=None):
+    def set_state(self, rows, elapsed, purpose=None, markers=()):
         rules = purpose or ac.PURPOSES[ac.DEFAULT_PURPOSE]
-        self.wave.set_state(rows, elapsed, rules.record_limit)
+        self.wave.set_state(rows, elapsed, rules.record_limit, markers)
         self.target.set_seconds(elapsed, rules)
         self.length.setText(f'{elapsed:.1f} s  ·  ' + tr('aim for {low} to {high} s, {least} to {most} s can be kept').format(
             low=f'{rules.best_from:g}', high=f'{rules.best_to:g}', least=f'{rules.min_seconds:g}',

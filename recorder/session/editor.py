@@ -10,9 +10,13 @@ from ..clean import CleanError
 from ..core import analysis, autofix, chain as chain_mod
 from ..core import render
 from ..core.edits import WORD_OPS, words_key
+from ..i18n import tr
+from ..store import clean_markers
 
 Normalized = namedtuple('Normalized', 'gain_db wanted_db capped')
 GAIN_STEP_LIMITS = chain_mod.LIMITS[('level', 'gain_db')]
+MARKER_REACH = 0.05             # seconds: a marker this near the moment marked is the one taken away instead
+MARKER_PASSED = 0.001           # a marker this near the playhead is the one it is on, not the next
 
 
 class Editor:
@@ -48,6 +52,50 @@ class Editor:
     def set_playhead(self, t):
         self.playhead = self._clamp(t)
         self.bus.notify('playhead')
+
+    # ---- markers --------------------------------------------------------------------------------------------------------
+
+    def markers(self):
+        take = self.take
+        return list(take.meta.get('markers') or []) if take is not None else []
+
+    def toggle_marker(self, t=None):
+        """Drop a marker at `t` (the playhead if not given), or take away the one already there. Markers are saved with the
+        take, and with a kept clip in its sidecar alone: they do not change the sound, so the clip stays as it was kept."""
+        take = self.take
+        if take is None:
+            return
+        t = self._clamp(self.playhead if t is None else t)
+        markers = self.markers()
+        near = min(markers, key=lambda m: abs(m - t), default=None)
+        if near is not None and abs(near - t) <= MARKER_REACH:
+            markers.remove(near)
+            message = tr('Marker taken away at {seconds} s.').format(seconds=f'{near:.2f}')
+        else:
+            markers.append(t)
+            ordered = clean_markers(markers, take.seconds)
+            message = tr('Marker {number} of {count} at {seconds} s. Press M on it to take it away.').format(
+                number=ordered.index(round(t, 3)) + 1, count=len(ordered), seconds=f'{t:.2f}')
+        take.meta['markers'] = clean_markers(markers, take.seconds)
+        self.bus.notify('meta', take)
+        self.bus.status(message)
+
+    def marker_beside(self, t, forward):
+        """The first marker after `t`, or the last one before it; None when there is none that way."""
+        markers = self.markers()
+        if forward:
+            return next((m for m in markers if m > t + MARKER_PASSED), None)
+        return next((m for m in reversed(markers) if m < t - MARKER_PASSED), None)
+
+    def went_to_marker(self, moment, forward):
+        """Say which marker the playhead went to, or with `moment` None that there is none that way."""
+        markers = self.markers()
+        if moment is None or moment not in markers:
+            self.bus.status(tr('There is no marker after the playhead.') if forward else
+                            tr('There is no marker before the playhead.'))
+            return
+        self.bus.status(tr('Marker {number} of {count}, at {seconds} s.').format(
+            number=markers.index(moment) + 1, count=len(markers), seconds=f'{moment:.2f}'))
 
     def set_selection(self, a, b):
         """Select a range (in either order). A range of no length clears the selection."""

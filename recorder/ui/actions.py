@@ -46,6 +46,10 @@ SPEC = {
     'select_all': ('Select all', None, ['Ctrl+A'], 'Select the whole clip', False),
     'set_in': ('Set in point', None, ['['], 'Put the start of the selection at the playhead', False),
     'set_out': ('Set out point', None, [']'], 'Put the end of the selection at the playhead', False),
+    'marker': ('Marker', None, ['M'], 'Mark the moment being heard or recorded, to find it again. On a marker, take it '
+                                      'away', False),
+    'prev_marker': ('Previous marker', None, ['Alt+Left'], 'Move the playhead to the marker before it', False),
+    'next_marker': ('Next marker', None, ['Alt+Right'], 'Move the playhead to the marker after it', False),
     # view
     'zoom_in': ('Zoom in', 'zoom_in', ['+', '=', 'Ctrl++'], 'Zoom in (the mouse wheel zooms too)', False),
     'zoom_out': ('Zoom out', 'zoom_out', ['-', 'Ctrl+-'], 'Zoom out', False),

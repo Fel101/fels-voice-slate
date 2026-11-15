@@ -15,7 +15,7 @@ from .. import settings
 from ..core import analysis, reading
 from ..core.edits import words_key
 from ..i18n import tr
-from ..store import Importing, Library, Take, now_iso, out_of_reach
+from ..store import Importing, Library, Take, clean_markers, now_iso, out_of_reach
 
 Step = namedtuple('Step', 'key label done detail')           # a rule that must be met before Keep
 Advice = namedtuple('Advice', 'key text')                     # something worth knowing that does not block Keep
@@ -264,8 +264,9 @@ class Workspace:
         if notes:
             self.bus.status(' '.join(notes))
 
-    def add_take(self, samples, rate, source, device, flags=(), script_line=None):
-        """A finished capture becomes a take: its original goes to the masters folder, then it is listed and opened."""
+    def add_take(self, samples, rate, source, device, flags=(), script_line=None, markers=()):
+        """A finished capture becomes a take: its original goes to the masters folder, then it is listed and opened.
+        `markers` are the moments marked while it was recorded, in seconds from its start."""
         samples = np.asarray(samples, dtype=np.float32)
         if samples.size == 0:
             self.bus.notice('warning', 'Nothing captured',
@@ -281,6 +282,7 @@ class Workspace:
                           'transcript_status': 'read_from_script' if script_line else 'typed',
                           'origin': '', 'allowed_use': '', 'consent_confirmed': False, 'source_url': '',
                           'notes': '', 'script_line': script_line})
+        take.meta['markers'] = clean_markers(markers, take.seconds)
         self.takes.insert(0, take)      # own the audio before any registry read, disk write, or window update can fail
         try:
             take.meta.update(self.lib.speaker_defaults(slug))
@@ -538,6 +540,8 @@ class Workspace:
                     meta={'origin': take.meta.get('origin', ''), 'allowed_use': take.meta.get('allowed_use', ''),
                           'purpose': take.purpose.key,
                           'split_from': {'take': take.id, 'start_seconds': round(begin, 3), 'end_seconds': round(stop, 3)}})
+        part.meta['markers'] = clean_markers([moment - begin for moment in take.meta.get('markers') or ()
+                                              if begin <= moment < stop], part.seconds)
         heard = reading.words_between(words, begin, stop)
         if heard:
             part.meta.update(transcript=heard, draft_text=heard, transcript_status='asr_draft',

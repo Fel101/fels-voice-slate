@@ -818,7 +818,8 @@ class AboutDialog(QDialog):
 
 SHORTCUT_GROUPS = (
     ('Record and listen', ('record', 'arm', 'play', 'loop', 'ab', 'escape', 'again', 'hands_free')),
-    ('Edit', ('undo', 'redo', 'cut', 'trim', 'silence', 'select_all', 'set_in', 'set_out')),
+    ('Edit', ('undo', 'redo', 'cut', 'trim', 'silence', 'select_all', 'set_in', 'set_out', 'marker', 'prev_marker',
+              'next_marker')),
     ('Check and repair', ('auto_analyze', 'auto_fix')),
     ('View', ('zoom_in', 'zoom_out', 'fit', 'zoom_selection')),
     ('Clips and files', ('keep', 'rename', 'next_take', 'prev_take', 'save_copy', 'import_recording', 'new_speaker',
