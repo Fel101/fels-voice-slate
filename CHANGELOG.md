@@ -34,7 +34,9 @@ the project uses [Semantic Versioning](https://semver.org/).
 - **Two larger speech models for draft transcripts**, for an accent or a language the smaller ones get wrong: `medium`
   (about 1,540 MB, with an English-only model too) and `large-v3-turbo` (about 1,630 MB, every language). The setup
   fetches each from where faster-whisper's own list of models says it is, and does not trust a turbo model that is
-  missing the file that says how it hears.
+  missing the file that says how it hears. A draft of a 9-second line takes about 7 seconds with either on an 8-core
+  Ryzen 7, against under a second with `base`, and they use about 2 GB of memory; the README's table now gives every
+  model's time and memory, measured on that PC.
 - **The permission travels inside the WAV.** A kept clip's WAV now carries one line of plain text in its standard
   information chunk: the clip's id, the name of its sidecar, the allowed use and the date the permission was given, but not
   the origin. Copies and dataset clips carry it too, also of clips kept before, which are not changed themselves.

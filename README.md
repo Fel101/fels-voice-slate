@@ -183,13 +183,18 @@ the reading check and cutting by clicking words possible. Press **Suggest from a
 double-click **`setup-transcripts.bat`** in the program folder, or answer `y` when `setup.bat` asks). It asks which speech model
 you want and which language you speak, tells you what it will download, and waits for your yes:
 
-| Model | Download | |
-|---|---|---|
-| `tiny` | about 80 MB | the fastest, and the roughest drafts |
-| `base` | about 150 MB | a good middle (the default) |
-| `small` | about 490 MB | more accurate, and slower |
-| `medium` | about 1,540 MB | for an accent or a language the smaller ones get wrong; slow |
-| `large-v3-turbo` | about 1,630 MB | the most accurate, in any language; slow |
+| Model | Download | A 9-second line | 50 seconds of speech | Memory | |
+|---|---|---|---|---|---|
+| `tiny` | about 80 MB | 0.5 s | 2 s | 0.3 GB | the fastest, and the roughest drafts |
+| `base` | about 150 MB | 0.9 s | 3.6 s | 0.4 GB | a good middle (the default) |
+| `small` | about 490 MB | 2.5 s | 8 s | 0.7 GB | more accurate, and slower |
+| `medium` | about 1,540 MB | 7 s | 26 s | 1.8 GB | for an accent or a language the smaller ones get wrong; slow |
+| `large-v3-turbo` | about 1,630 MB | 7.6 s | 17.5 s | 2.0 GB | the most accurate, in any language; slow |
+
+The times are how long a draft took on a PC with an 8-core AMD Ryzen 7 8845HS processor, for speech made by Windows' own
+voice. The recognizer runs on the processor alone, not on a graphics card. The memory is the most it used. The
+first draft after Voice Slate starts also loads the model, which took from 1.5 seconds for `tiny` to 4.5 for
+`large-v3-turbo`. An older or smaller computer takes longer.
 
 For English, `tiny` to `medium` come as a model made for English alone, which suits it best; `large-v3-turbo` has only the
 model for every language. The two larger ones are for when the smaller ones keep getting your words wrong: they take
