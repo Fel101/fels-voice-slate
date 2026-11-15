@@ -356,10 +356,10 @@ class SettingsDialog(QDialog):
         return self.record_key.keySequence().toString(QKeySequence.SequenceFormat.PortableText)
 
     def _folder(self, start):
-        return QFileDialog.getExistingDirectory(self, 'Choose a folder', start)
+        return QFileDialog.getExistingDirectory(self, tr('Choose a folder'), start)
 
     def _file(self, start, filter):
-        return QFileDialog.getOpenFileName(self, 'Choose a file', start, filter)[0]
+        return QFileDialog.getOpenFileName(self, tr('Choose a file'), start, filter)[0]
 
     def _check_ffmpeg(self):
         path = self.ffmpeg.text()
@@ -695,7 +695,7 @@ class SpeakerDialog(QDialog):
         return edit
 
     def _choose(self, start):
-        return QFileDialog.getOpenFileName(self, 'Choose the signed release', start, 'All files (*)')[0]
+        return QFileDialog.getOpenFileName(self, tr('Choose the signed release'), start, 'All files (*)')[0]
 
     def values(self):
         def date(known, edit):
