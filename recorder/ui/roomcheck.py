@@ -170,6 +170,12 @@ class RoomCheckDialog(QDialog):
         reason = room.refused()
         self.start_button.setEnabled(room.active or not reason)
         self.start_button.setToolTip(tr(reason) if reason and not room.active else tr('Listen to the room, then to you'))
+        # The meter and the sentence come and go with the steps. The dialog's minimum width keeps Qt from growing it on
+        # its own, so it is sized again whenever they change: the sentence to read is never cut off.
+        parts = (self.meter.isVisibleTo(self), self.sentence.isVisibleTo(self))
+        if parts != getattr(self, '_parts', None):
+            self._parts = parts
+            self.adjustSize()
 
     def tick(self):
         """Called by the window's timer while a check listens: the meter and the countdown."""

@@ -114,6 +114,27 @@ def test_the_check_goes_through_its_steps_and_shows_what_it_found(window, sessio
     assert window.topbar.device.isEnabled() and window.actions.settings.isEnabled()
 
 
+def clipped(dialog):
+    """The words in the dialog that its height cuts off: each shown label shorter than its text needs."""
+    from PySide6.QtWidgets import QLabel
+    return [w.text()[:40] for w in dialog.findChildren(QLabel)
+            if w.isVisible() and w.wordWrap() and w.height() < w.heightForWidth(w.width())]
+
+
+def test_the_dialog_grows_with_each_step_so_nothing_is_cut_off(window, session, checking, microphone):
+    # The meter and the sentence to read are shown as the check goes on: the dialog grows to hold them, and the
+    # sentence is never cut off at the bottom, which a fixed minimum width alone did not do.
+    dialog, heard = checking, Heard(session)
+    assert clipped(dialog) == []
+    dialog.start_button.click()
+    window.flush()
+    assert clipped(dialog) == []
+    assert run_until(window, session, microphone, heard, lambda: session.room.phase == 'speak')
+    assert dialog.sentence.isVisible() and clipped(dialog) == []
+    assert run_until(window, session, microphone, heard, lambda: not session.room.active)
+    assert dialog.found.isVisible() and clipped(dialog) == []
+
+
 def test_esc_stops_the_check(window, session, checking, microphone):
     checking.start_button.click()
     window.flush()
