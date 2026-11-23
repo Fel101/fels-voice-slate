@@ -39,7 +39,7 @@ recorder/
   launch.py      what a windowless start needs: a log file, one copy at a time, and an error window instead of a console
   shortcut.py    the icon in the program folder, on the desktop or in the Start menu (a Windows .lnk file made through the shell's own COM interfaces)
   hotkey.py      F9 while another program is in front: Windows' RegisterHotKey, heard in Qt's event loop
-  resources/     the program's icon, drawn by tools/make_icon.py, and the language files
+  resources/     the program's SVG icon, its PNG and ICO renders, and the language files
 installer/       the Inno Setup script of the Windows installer
 tools/           shoot.py draws the screenshots; synthetic.py makes test audio and a fake capture; make_icon.py draws the icon;
                  build_installer.py builds the installer; strings.py lists the text there is to translate
@@ -54,6 +54,9 @@ tested without a display, a microphone or a speaker. The window is a thin view o
 `recorder/fels_suite.py` and `tests/suite_vectors.json` are verbatim copies from Voice Lab's `main` under the Fel's Studio
 suite contract. Always update them by copying both files unchanged from Voice Lab. Slate's file handoffs use `suite_dir`,
 `inbox_dir` and `inbox_write`. The test suite runs the shared vectors with the same runner as Voice Lab.
+
+Voice Slate's SVG uses the Fel's Studio icon family's shared rounded tile and a lavender waveform. The window reads
+the SVG, and `tools/make_icon.py` draws it at seven sizes for the ICO used by the Windows installer and shortcuts.
 
 ## A take and its recipe
 

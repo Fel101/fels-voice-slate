@@ -2,9 +2,9 @@
 
     python tools/make_icon.py
 
-The picture is the one the window draws for itself (recorder/ui/icons.py: app_pixmap), so the window, the taskbar and a
-desktop shortcut all show the same icon. The .ico holds PNG pictures at 16, 24, 32, 48, 64, 128 and 256 px, which every
-Windows from Vista on reads. Run it again after changing the drawing, and commit the two files it writes.
+The window and this tool draw recorder/resources/voice-slate.svg through the same renderer. The .ico supplies the
+installer and shortcuts with PNG pictures at 16, 24, 32, 48, 64, 128 and 256 px. Run this after changing the SVG, and
+commit the two files it writes.
 """
 import os
 import struct

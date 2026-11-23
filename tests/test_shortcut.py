@@ -79,15 +79,20 @@ def test_the_icon_file_holds_every_size_as_a_png():
     assert sizes == [16, 24, 32, 48, 64, 128, 256]
 
 
-def test_the_icon_tool_writes_what_the_window_draws(tmp_path, monkeypatch, qapp):
+def test_the_icon_files_match_what_the_window_draws(qapp):
+    from PySide6.QtGui import QImage
+
     sys.path.insert(0, str(settings.program_dir() / 'tools'))
     try:
         import make_icon
     finally:
         sys.path.pop(0)
     from recorder.ui import icons
-    monkeypatch.setattr(make_icon, 'OUT', tmp_path)
-    pictures = [(size, make_icon.png_bytes(icons.app_pixmap(size))) for size in icons.APP_ICON_SIZES]
-    assert all(png.startswith(PNG) for _, png in pictures)
-    data = make_icon.ico_bytes(pictures)
-    assert struct.unpack_from('<HHH', data) == (0, 1, len(pictures))
+
+    icon = settings.program_dir() / shortcut.ICON
+    data = icon.read_bytes()
+    for index, size in enumerate(icons.APP_ICON_SIZES):
+        length, offset = struct.unpack_from('<II', data, 6 + 16 * index + 8)
+        drawn = QImage.fromData(make_icon.png_bytes(icons.app_pixmap(size)), 'PNG')
+        assert QImage.fromData(data[offset:offset + length], 'PNG') == drawn, size
+    assert QImage(str(icon.with_suffix('.png'))) == drawn

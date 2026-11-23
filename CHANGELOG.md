@@ -13,6 +13,10 @@ the project uses [Semantic Versioning](https://semver.org/).
 - Window notices, progress, transcript setup and file dialogs follow the selected window language.
 - Fel's Studio links in About and a Check for updates command that opens the releases page in your browser.
 
+### Changed
+
+- Voice Slate uses the Fel's Studio icon family in its window, taskbar, installer and shortcuts.
+
 ## [0.7.0] - 2026-11-15
 
 ### Added

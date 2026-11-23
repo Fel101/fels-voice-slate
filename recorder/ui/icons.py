@@ -4,6 +4,7 @@ They are plain geometry (no icon font and no third-party artwork), so they look 
 stay sharp at any display scale. `icon(name, color)` returns a QIcon with a normal and a dimmed (disabled) picture.
 """
 from functools import lru_cache
+from pathlib import Path
 
 from PySide6.QtCore import QByteArray, QRectF, Qt
 from PySide6.QtGui import QColor, QIcon, QImage, QPainter, QPixmap
@@ -101,25 +102,19 @@ def icon(name, color='text', size=18):
 
 
 APP_ICON_SIZES = (16, 24, 32, 48, 64, 128, 256)
-APP_BACK, APP_BARS = '#b18cff', '#17121f'           # the program's icon is the same in every theme
+APP_ICON_SOURCE = Path(__file__).resolve().parents[1] / 'resources' / 'voice-slate.svg'
 
 
 def app_pixmap(size):
-    """The program's own icon at one size: a violet rounded square with a few waveform bars."""
+    """Draw the suite's Voice Slate icon at one size, using its fixed colors in every theme."""
+    renderer = QSvgRenderer(str(APP_ICON_SOURCE))
+    if not renderer.isValid():
+        raise ValueError(f'Could not read the app icon: {APP_ICON_SOURCE}')
     pixmap = QPixmap(size, size)
     pixmap.fill(Qt.GlobalColor.transparent)
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    painter.setPen(Qt.PenStyle.NoPen)
-    painter.setBrush(QColor(APP_BACK))
-    painter.drawRoundedRect(QRectF(0, 0, size, size), size * 0.22, size * 0.22)
-    painter.setBrush(QColor(APP_BARS))
-    heights = (0.28, 0.5, 0.74, 0.44, 0.6, 0.32)
-    slot = size * 0.64 / len(heights)
-    for i, h in enumerate(heights):
-        x = size * 0.18 + i * slot + slot * 0.18
-        bar = size * h * 0.8
-        painter.drawRoundedRect(QRectF(x, (size - bar) / 2, slot * 0.64, bar), slot * 0.32, slot * 0.32)
+    renderer.render(painter, QRectF(0, 0, size, size))
     painter.end()
     return pixmap
 
