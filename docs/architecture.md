@@ -14,6 +14,7 @@ recorder/
                  being recorded, the autosave files of takes not kept yet, moving a take to another speaker, and moving a
                  whole output folder (Relocation). A take reads its audio only when it is asked for (_Resident)
   share.py       a copy of a kept clip as WAV, FLAC, MP3 or Ogg at another sample rate (SoundFile's libsndfile, no FFmpeg)
+  fels_suite.py  shared Fel's Studio code for the suite folder and inbox handoffs
   manifest.py    a list of the kept clips, as JSON Lines or CSV, for programs that read a whole set
   dataset.py     the kept clips gathered in one new folder, in four layouts (clips, LJSpeech, Hugging Face, Kaldi)
   audio_core.py  small pure helpers, the purposes, and the rules for what can be kept
@@ -46,6 +47,12 @@ tests/           the test suite
 
 The dependencies point downward. `core/` and `session/` never import PySide6, so almost everything the program does is
 tested without a display, a microphone or a speaker. The window is a thin view over the session.
+
+## Shared suite code
+
+`recorder/fels_suite.py` and `tests/suite_vectors.json` are verbatim copies from Voice Lab's `main` under the Fel's Studio
+suite contract. Always update them by copying both files unchanged from Voice Lab. Slate's file handoffs use `suite_dir`,
+`inbox_dir` and `inbox_write`. The test suite runs the shared vectors with the same runner as Voice Lab.
 
 ## A take and its recipe
 

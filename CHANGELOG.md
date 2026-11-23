@@ -5,6 +5,10 @@ the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Shared Fel's Studio code and contract tests for file handoffs to Voice Lab.
+
 ## [0.7.0] - 2026-11-15
 
 ### Added
