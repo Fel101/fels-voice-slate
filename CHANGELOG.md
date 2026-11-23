@@ -17,6 +17,10 @@ the project uses [Semantic Versioning](https://semver.org/).
 
 - Voice Slate uses the Fel's Studio icon family in its window, taskbar, installer and shortcuts.
 
+### Fixed
+
+- Log when Voice Slate falls back to the default Fel's Studio folder because `FELS_SUITE_DIR` cannot be used.
+
 ## [0.7.0] - 2026-11-15
 
 ### Added

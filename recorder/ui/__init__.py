@@ -22,7 +22,7 @@ def run(argv=None):
     from PySide6.QtCore import Qt
     from PySide6.QtWidgets import QApplication
 
-    from .. import __version__, i18n, launch, settings
+    from .. import __version__, handoff, i18n, launch, settings
     from ..hotkey import GlobalKey
     from . import theme
     from .main_window import MainWindow
@@ -45,6 +45,7 @@ def run(argv=None):
     theme.install(app, settings.theme(data))
     hotkey = GlobalKey(settings.record_key())
     window = MainWindow(hotkey=hotkey)
+    handoff.log_suite_folder_fallback(window.session.lib.root)
     launch.report_errors_to(lambda error: window.unexpected.emit(str(error) or type(error).__name__))
     window.closed.connect(lambda: launch.report_errors_to(None))
     app.aboutToQuit.connect(lambda: hotkey.set_enabled(False))

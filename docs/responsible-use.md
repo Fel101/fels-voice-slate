@@ -77,6 +77,8 @@ Do not use Voice Slate, or clips made with it, to:
 Changes that would make these easier, such as hiding or skipping the consent step, or removing the origin and allowed-use
 fields, will not be accepted into this project.
 
+Fel's Studio add-ons are separate downloads, and the core app's responsible-use rules apply to them.
+
 ## Handling the recordings
 
 A recording of a voice is **personal data**, and a voiceprint can identify a person. Treat it with care:

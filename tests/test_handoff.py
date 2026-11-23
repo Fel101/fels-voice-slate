@@ -8,7 +8,7 @@ import zipfile
 import pytest
 
 from helpers import fill, record
-from recorder import handoff
+from recorder import fels_suite, handoff
 
 
 @pytest.fixture
@@ -125,3 +125,20 @@ def test_save_keeps_existing_files_and_never_writes_in_the_library(kept, session
     monkeypatch.setenv('FELS_SUITE_DIR', str(configured))
     assert not handoff.inbox_exists(session.lib.root)
     assert not configured.exists()
+
+
+def test_an_unusable_suite_folder_is_logged_at_startup(kept, session, tmp_path, monkeypatch, caplog):
+    configured = tmp_path / 'suite-is-a-file'
+    configured.touch()
+    monkeypatch.setenv('FELS_SUITE_DIR', str(configured))
+    default = tmp_path / 'default-suite-folder'
+    monkeypatch.setattr(fels_suite, 'default_suite_dir', lambda **kwargs: default)
+    inbox = default / 'inbox' / 'voice-lab'
+    inbox.mkdir(parents=True)
+
+    handoff.log_suite_folder_fallback(session.lib.root)
+    assert handoff.inbox_exists(session.lib.root)
+    clip = handoff.Clip.from_take(kept).check()
+    assert clip.write(session.lib.root).parent == inbox
+    assert [message for message in caplog.messages if 'FELS_SUITE_DIR' in message] == [
+        "Could not use FELS_SUITE_DIR. Using the default Fel's Studio folder."]

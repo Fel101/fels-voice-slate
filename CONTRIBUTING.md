@@ -104,3 +104,20 @@ right to give it. There is no contributor agreement to sign.
 ## Project layout
 
 See [docs/architecture.md](docs/architecture.md).
+
+## Fel's Studio ports
+
+Voice Slate sends clips through the shared inbox and has no listening port. When a documentation example needs an
+unassigned port, use `8775`.
+
+| What | Port |
+|---|---|
+| Voice Lab | 8765 |
+| NPC Forge | 8766 (was 8765) |
+| Fel's Altera | 8767 for new installs (was 5001) |
+| A second copy of NPC Forge | 8768 |
+| Voice Lab's MCP server over HTTP | 8769 |
+| Altera's own voice service | 8770 |
+| ComfyUI | 8188 |
+| LM Studio | 1234 |
+| Ollama | 11434 |

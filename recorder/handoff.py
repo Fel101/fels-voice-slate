@@ -2,6 +2,7 @@
 import hashlib
 import io
 import json
+import logging
 import os
 import re
 import tempfile
@@ -35,6 +36,19 @@ def inbox_exists(library):
         return _inbox(library).is_dir()
     except (HandoffError, OSError):
         return False
+
+
+def log_suite_folder_fallback(library):
+    """At startup, log when the handoff uses the default suite folder instead of the configured one."""
+    configured = os.environ.get('FELS_SUITE_DIR', '').strip()
+    if not configured:
+        return
+    try:
+        inbox = _inbox(library)
+    except (HandoffError, OSError):
+        return
+    if inbox.parents[1] != Path(configured):
+        logging.getLogger(__name__).warning("Could not use FELS_SUITE_DIR. Using the default Fel's Studio folder.")
 
 
 def _read(path, limit, too_large):

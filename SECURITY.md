@@ -45,6 +45,9 @@ program does read and write files, and it starts other programs, so these are th
   would run as a formula. Dragging a kept card out of the window hands that clip's WAV to the program you drop it on, as a
   copy and nothing else. A manifest holds transcripts and the notes on where each voice came from, so it is personal data
   too.
+- **Voice Lab handoffs.** A `.voiceslate` file carries the kept WAV and JSON sidecar, including the transcript and
+  permission details. It is written to a local suite inbox or a folder you choose. Treat the handoff with the same
+  care as the kept recording. [Clip format](docs/clip-format.md#voice-slate-handoff-files)
 - **What it stores.** Recordings and sidecars are personal data. They are written where you choose, and are not encrypted
   by the program. See [Responsible use](docs/responsible-use.md) for how to look after them.
 - **What else it creates.** `voice-slate.log` (and `voice-slate-crash.log`, only after a crash) beside the settings
