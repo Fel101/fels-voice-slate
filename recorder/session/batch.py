@@ -16,6 +16,7 @@ import time
 from pathlib import Path
 
 from ..clean import CleanError
+from ..handoff import HandoffError
 from ..i18n import tr
 from ..store import KeepBlocked, TrashUnavailable, now_iso
 
@@ -42,12 +43,18 @@ class Batch:
         self.stop_tip = STOP_TIP    # what Stop does to the job under way
         self._step = None
         self._finish = None
+        self._waiting_for_handoff = False
+        self._stop_requested = False
 
     # ---- state --------------------------------------------------------------------------------------------------------
 
     @property
     def running(self):
         return self._step is not None
+
+    @property
+    def finishing_handoff(self):
+        return self._waiting_for_handoff
 
     @property
     def progress_text(self):
@@ -135,6 +142,35 @@ class Batch:
             self.bus.status(text)
 
         self._start('Exporting a dataset', rows, step, finish)
+
+    def handoff(self, title, clips, jobs, operation, finished):
+        """Check or write each clip on a worker. Stop after the current clip, keeping any files already published."""
+        pending = None
+        results = []
+
+        def step(clip):
+            nonlocal pending
+            if pending is None:
+                pending = []
+                self._waiting_for_handoff = True
+                jobs.submit(lambda: operation(clip), lambda value: pending.append((value, None)),
+                            lambda error: pending.append((None, error)))
+                return WAIT
+            if not pending:
+                return WAIT
+            (result, error), = pending
+            pending = None
+            self._waiting_for_handoff = False
+            if error is not None:
+                reason = str(error) if isinstance(error, HandoffError) else tr(
+                    'The handoff could not finish. Check that the clip and destination are accessible, then try again.')
+                self.left_out.append((clip.name, reason))
+                self.cancel()
+            else:
+                results.append(result)
+                self.ok += 1
+
+        self._start(title, clips, step, lambda stopped: finished(results, stopped, bool(self.left_out)))
 
     def relocate(self, relocation, arrived):
         """Move a whole output folder (store.Relocation). `arrived()` puts the workspace on the new folder, once every file
@@ -324,6 +360,7 @@ class Batch:
         self.title, self.items, self.stop_tip = title, list(items), stop_tip
         self.done, self.ok, self.left_out, self.part = 0, 0, [], None
         self._step, self._finish = step, finish
+        self._stop_requested = False
         self.bus.notify('batch')
 
     def tick(self):
@@ -341,15 +378,19 @@ class Batch:
                     break
             else:
                 self.part = None
+                if self.running and self._stop_requested:
+                    self._end(True)
         if self.running and self.done >= len(self.items):
             self._end(False)
         elif self.running:
-            self.bus.status(self.progress_text + '...')
+            self.bus.status(tr('Stopping after the current clip...') if self._stop_requested else self.progress_text + '...')
             self.bus.notify('batch')
 
     def cancel(self):
         """Stop. What has been done stays done; a recording being imported is left out."""
-        if self.running:
+        if self._waiting_for_handoff:
+            self._stop_requested = True
+        elif self.running:
             self._end(True)
 
     def _end(self, stopped):

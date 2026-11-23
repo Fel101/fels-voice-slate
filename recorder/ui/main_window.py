@@ -12,7 +12,7 @@ from PySide6.QtCore import QByteArray, QSize, QStandardPaths, Qt, QTimer, Signal
 from PySide6.QtGui import QAccessible, QAccessibleAnnouncementEvent, QGuiApplication, QKeySequence
 from PySide6.QtWidgets import QApplication, QLabel, QMainWindow, QMenu, QWidget
 
-from .. import asr_setup, audio_import, dataset, launch, manifest, share, transcript
+from .. import asr_setup, audio_import, dataset, handoff, launch, manifest, share, transcript
 from .. import clean, settings
 from ..audio_io import list_outputs
 from ..clean import CleanError
@@ -62,6 +62,7 @@ class MainWindow(QMainWindow):
         self._notices = []
         self._flush_queued = False
         self._shut = False                  # set when the window has closed for good
+        self._close_after_handoff = False
         self._last_head = None
         self._edited_seconds = 0.0
         self.room_dialog = None                 # the room and level check, made the first time it is asked for
@@ -152,13 +153,14 @@ class MainWindow(QMainWindow):
     def _build_menu(self):
         a, menu = self.actions, self.topbar.menu
         for group in (('settings', 'import_recording', 'new_speaker', 'rename_speaker', 'speaker_details', 'delete_speaker'),
-                      ('move_take', 'save_copy', 'export_manifest', 'export_dataset', 'split_take'),
+                      ('move_take', 'save_copy', 'lab_handoff', 'export_manifest', 'export_dataset', 'split_take'),
                       ('keep_selected', 'discard_selected', 'move_selected', 'discard_others'),
                       ('load_script', 'hands_free', 'clear_script'),
                       ('open_folder', 'back_up', 'bring_in')):
             for name in group:
                 menu.addAction(a[name])
             menu.addSeparator()
+        menu.aboutToShow.connect(lambda: a.lab_handoff.setText(self._handoff_label()))
         menu.addAction(a.refresh_devices)
         menu.addAction(a.room_check)
         menu.addSeparator()
@@ -217,6 +219,7 @@ class MainWindow(QMainWindow):
         a.export_dataset.triggered.connect(self.export_dataset)
         a.move_take.triggered.connect(self.move_take)
         a.save_copy.triggered.connect(self.save_copy)
+        a.lab_handoff.triggered.connect(lambda: self.lab_handoff())
         a.export_manifest.triggered.connect(self.export_manifest)
         a.open_folder.triggered.connect(self.open_folder)
         a.back_up.triggered.connect(self.back_up)
@@ -425,6 +428,9 @@ class MainWindow(QMainWindow):
         if 'batch' in topics:
             self.status_stop.setVisible(s.batch.running)
             self.status_stop.setToolTip(tr(s.batch.stop_tip))
+            if self._close_after_handoff and not s.batch.running:
+                self._close_after_handoff = False
+                QTimer.singleShot(0, self, self.close)
         if 'settings' in topics:
             self._refresh_status_items()
         elif 'drafts' in topics:
@@ -541,6 +547,7 @@ class MainWindow(QMainWindow):
             'export_dataset': idle and s.workspace.speaker is not None,
             'move_take': has_take and not take.unsaved and len(s.workspace.speakers) > 1,
             'save_copy': has_take and take.kept,
+            'lab_handoff': idle and (all(item.kept for item in chosen) if len(chosen) > 1 else take is not None and take.kept),
             'export_manifest': idle and s.workspace.speaker is not None,
             'prev_line': idle and bool(s.script.lines) and s.script.index > 0,
             'next_line': idle and bool(s.script.lines) and s.script.index < len(s.script.lines) - 1,
@@ -1190,6 +1197,75 @@ class MainWindow(QMainWindow):
             return
         s.bus.status(tr('Saved a copy ({rate}) to {path}').format(rate=share.rate_text(rate), path=path))
 
+    def _handoff_label(self):
+        return tr('Send to Voice Lab...' if handoff.inbox_exists(self.session.lib.root) else 'Save for Voice Lab...')
+
+    def lab_handoff(self, takes=None):
+        s = self.session
+        if s.capturing.recording or s.batch.running or s.run.active or s.room.active:
+            return
+        if takes is None:
+            selected = self.library.selected_takes()
+            takes = selected if len(selected) > 1 else [s.current]
+        if not takes or not all(take is not None and take.kept for take in takes):
+            return
+        sending = handoff.inbox_exists(s.lib.root)
+        clips = [handoff.Clip.from_take(take) for take in takes]
+
+        def checked(results, stopped, failed):
+            if not stopped:
+                QTimer.singleShot(0, self, lambda: self._write_handoff(results, takes, sending))
+            elif not failed:
+                s.bus.status(tr('Voice Lab handoff stopped.'))
+
+        s.batch.handoff('Checking clips for Voice Lab', clips, s.jobs, handoff.Clip.check, checked)
+
+    def _write_handoff(self, clips, takes, sending):
+        s = self.session
+        if self._shut or s.batch.running or s.capturing.recording or s.run.active or s.room.active:
+            return
+        draft = next((take for take, clip in zip(takes, clips) if clip.draft), None)
+        if draft is not None:
+            answer = self.dialogs.handoff_draft(sending)
+            if answer == 'review':
+                self._take_picked(draft)
+                self.inspector.show_tab(Inspector.CLIP_TAB)
+                self.inspector.clip.transcript.setFocus()
+            if answer != 'proceed':
+                s.bus.status(tr('Voice Lab handoff stopped.'))
+                return
+        destinations = {}
+        if not sending:
+            if not self.dialogs.handoff_save():
+                s.bus.status(tr('Voice Lab handoff stopped.'))
+                return
+            for clip in clips:
+                path = self.dialogs.handoff_destination(clip.name + handoff.EXTENSION)
+                if not path:
+                    s.bus.status(tr('Voice Lab handoff stopped.'))
+                    return
+                destinations[clip] = self._with_ending(path, handoff.EXTENSION, {handoff.EXTENSION})
+
+        def finished(paths, stopped, _failed):
+            if stopped:
+                text = (tr('Handoff stopped. Sent {count} of {total} clips to Voice Lab.') if sending else
+                        tr('Handoff stopped. Saved {count} of {total} files for Voice Lab.')).format(
+                            count=len(paths), total=len(clips))
+            elif sending:
+                text = tr('Sent 1 clip to Voice Lab. Open the Cast page in Voice Lab to add it.' if len(paths) == 1 else
+                          'Sent {count} clips to Voice Lab. Open the Cast page in Voice Lab to add them.').format(
+                              count=len(paths))
+            else:
+                text = tr('Saved 1 file for Voice Lab. In Cast, choose Import from Voice Slate.' if len(paths) == 1 else
+                          'Saved {count} files for Voice Lab. In Cast, choose Import from Voice Slate.').format(count=len(paths))
+            s.bus.status(text)
+            if not stopped:
+                s.bus.notice('info', 'Send to Voice Lab' if sending else 'Save for Voice Lab', text)
+
+        library = s.lib.root
+        s.batch.handoff('Sending clips to Voice Lab' if sending else 'Saving files for Voice Lab', clips, s.jobs,
+                        lambda clip: clip.write(library, None if sending else destinations[clip]), finished)
+
     def _export_totals(self, slug):
         """(clips, seconds) a manifest or dataset of this speaker, and of all speakers, would hold, from the sidecars."""
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
@@ -1493,6 +1569,7 @@ class MainWindow(QMainWindow):
         copy.setEnabled((take.export_path or take.master_path) is not None)
         if take.kept:
             menu.addAction('Save a copy...', lambda: (self._take_picked(take), self.save_copy()))
+            menu.addAction(self._handoff_label(), lambda: self.lab_handoff([take]))
         others = [] if take.unsaved else self._other_speakers(take)
         if others:
             move = menu.addMenu('Move to speaker')
@@ -1515,6 +1592,8 @@ class MainWindow(QMainWindow):
         menu = QMenu(self)
         count = len(takes)
         menu.addAction(tr('Keep {count} takes...').format(count=count), lambda: self.keep_selected(takes))
+        if all(take.kept for take in takes):
+            menu.addAction(self._handoff_label(), lambda: self.lab_handoff(takes))
         others = self._other_speakers(takes[0])
         if others:
             move = menu.addMenu(tr('Move {count} takes to speaker').format(count=count))
@@ -1573,6 +1652,11 @@ class MainWindow(QMainWindow):
             pass
 
     def closeEvent(self, event):
+        if self.session.batch.finishing_handoff:
+            self._close_after_handoff = True
+            self.session.batch.cancel()
+            event.ignore()
+            return
         failures = self.session.close()
         if failures:
             self.dialogs.notice('error', 'Could not save everything',

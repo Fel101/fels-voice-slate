@@ -23,6 +23,7 @@ from .translate import translate_tree
 from .widgets import button, clips_text, hbox, label, vbox
 
 AUDIO_FILTER = f'Audio files ({" ".join("*" + suffix for suffix in audio_import.SUFFIXES)});;All files (*)'
+VOICE_LAB_URL = 'https://github.com/Fel101/fels-voice-lab'
 THEME_NAMES = {'dark': 'Dark', 'light': 'Light', 'contrast': 'High contrast', 'system': 'As in Windows'}
 PREFERRED_HEIGHT = 820              # of the Settings dialog, when the screen has the room
 LEVEL_ICONS = {'info': QMessageBox.Icon.Information, 'warning': QMessageBox.Icon.Warning,
@@ -75,6 +76,29 @@ class Dialogs:
         path, _ = QFileDialog.getSaveFileName(self.parent, tr(title), str(start), filter)
         return path or None
 
+    def handoff_draft(self, sending):
+        box = QMessageBox(QMessageBox.Icon.Warning, tr('Check the transcript'),
+                          tr('Voice Lab will ask you to check its transcript. To review it in Voice Slate, open the '
+                             'transcript and keep the clip again.'), parent=self.parent)
+        review = box.addButton(tr('Open transcript'), QMessageBox.ButtonRole.ActionRole)
+        proceed = box.addButton(tr('Send anyway' if sending else 'Save anyway'), QMessageBox.ButtonRole.AcceptRole)
+        cancel = box.addButton(tr('Cancel'), QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(review)
+        box.setEscapeButton(cancel)
+        box.exec()
+        return {review: 'review', proceed: 'proceed'}.get(box.clickedButton())
+
+    def handoff_save(self):
+        return HandoffSaveDialog(self.parent).exec() == QDialog.DialogCode.Accepted
+
+    def handoff_destination(self, name):
+        chooser = QFileDialog(self.parent, tr('Save for Voice Lab'), '', tr('Voice Slate handoff (*.voiceslate)'))
+        chooser.setAcceptMode(QFileDialog.AcceptMode.AcceptSave)
+        chooser.setOption(QFileDialog.Option.DontConfirmOverwrite)
+        chooser.setDefaultSuffix('voiceslate')
+        chooser.selectFile(name)
+        return chooser.selectedFiles()[0] if chooser.exec() == QDialog.DialogCode.Accepted else None
+
     def choose_item(self, title, prompt, items):
         """The position of the item chosen from a list of names, or None."""
         item, ok = QInputDialog.getItem(self.parent, tr(title), tr(prompt), list(items), 0, False)
@@ -124,6 +148,33 @@ class Dialogs:
 
     def open_path(self, path):
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
+
+
+class HandoffSaveDialog(QDialog):
+    """Explain where to open a saved handoff before asking for its file name."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(tr('Save for Voice Lab'))
+        self.setMinimumWidth(430)
+        layout = vbox(self, margins=(18, 18, 18, 18), spacing=12)
+        layout.addWidget(label('Save a handoff file to open later in Voice Lab. In Cast, choose Import from Voice Slate.',
+                               wrap=True))
+        link = QLabel(f'<a href="{VOICE_LAB_URL}" style="color: {PALETTE["accent"]}">{html.escape(tr("Get Voice Lab"))}</a>')
+        link.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
+        link.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        link.setAccessibleName(tr('Get Voice Lab'))
+        link.linkActivated.connect(lambda address: QDesktopServices.openUrl(QUrl(address)))
+        layout.addWidget(link)
+        row = hbox(spacing=8)
+        row.addStretch()
+        cancel, save = button('Cancel', 'ghost'), button('Save...', 'primary')
+        cancel.clicked.connect(self.reject)
+        save.clicked.connect(self.accept)
+        save.setDefault(True)
+        row.addWidget(cancel)
+        row.addWidget(save)
+        layout.addLayout(row)
 
 
 # ---- settings ---------------------------------------------------------------------------------------------------------

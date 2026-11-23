@@ -162,12 +162,13 @@ def test_a_kept_card_says_it_can_be_dragged(window, session):
 # ---- save a copy --------------------------------------------------------------------------------------------------------
 
 def test_the_new_commands_are_in_the_gear_menu_in_groups(window):
+    window.topbar.menu.aboutToShow.emit()
     names = [a.text() for a in window.topbar.menu.actions()]
     start = names.index('Move take to speaker...')
-    assert names[start - 1] == '' and names[start:start + 5] == ['Move take to speaker...', 'Save a copy...',
-                                                                 'Export manifest...', 'Export dataset...',
-                                                                 'Split at pauses...']
-    assert names[start + 5] == ''
+    assert names[start - 1] == '' and names[start:start + 6] == ['Move take to speaker...', 'Save a copy...',
+                                                                 'Save for Voice Lab...', 'Export manifest...',
+                                                                 'Export dataset...', 'Split at pauses...']
+    assert names[start + 6] == ''
 
 
 def test_save_a_copy_has_its_own_shortcut_and_no_other_command_has_it(window):

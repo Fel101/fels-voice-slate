@@ -26,12 +26,12 @@ FILES = [*sorted((ROOT / 'recorder' / 'ui').glob('*.py')), ROOT / 'recorder' / '
          # and the history of edits, the status lines and the reasons a clip or a key is refused
          ROOT / 'recorder' / 'core' / 'edits.py', ROOT / 'recorder' / 'session' / '__init__.py',
          ROOT / 'recorder' / 'session' / 'autosave.py', ROOT / 'recorder' / 'manifest.py', ROOT / 'recorder' / 'share.py',
-         ROOT / 'recorder' / 'hotkey.py']
+         ROOT / 'recorder' / 'handoff.py', ROOT / 'recorder' / 'hotkey.py']
 CALLS = {'end', 'label', 'caption', 'button', 'chip', 'set_chip', 'setToolTip', 'setPlaceholderText', 'setText', 'setWindowTitle',
          'addRow', 'addItem', 'QCheckBox', 'QPushButton', 'QLabel', 'notice', 'confirm', 'ask_text', 'choose_item', 'addAction',
          'addMenu', 'setAccessibleName', 'setAccessibleDescription', 'set_tooltips', 'Segmented', 'status', 'tr', 'Step',
          'setStatusTip', 'StepCard', 'choose_file', 'choose_files', 'choose_folder', 'choose_save_file', 'add_note', '_field',
-         'PathRow', 'say', 'get', 'format', '_refused', '_busy', '_busy_with', '_start', '_spin'}
+         'PathRow', 'say', 'get', 'format', '_refused', '_busy', '_busy_with', '_start', '_spin', 'handoff'}
 NAMES = {'STATEMENT', 'EMPTY_TEXT', 'OUT_OF_REACH_TEXT', 'INTRO', 'SPEC', 'TABS', 'THEME_NAMES', 'MOUSE_ROWS', 'SHORTCUT_GROUPS',
          'STATES', 'SOURCES', 'STATUS_WORDS', 'GLYPH_WORDS', 'ORDERS', 'SHOWN', 'CHOICE_TIPS', 'SENTENCE',
          'WHERE_THE_LEVEL_IS', 'REFUSALS', 'LAYOUTS', 'SPLITS', 'STOP_TIP', 'STOP_COPY_TIP', 'MONTHS'}

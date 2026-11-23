@@ -83,6 +83,8 @@ SPEC = {
     'move_take': ('Move take to speaker...', None, [], 'File this take under a different speaker', False),
     'save_copy': ('Save a copy...', None, ['Ctrl+Shift+S'],
                   'Save a copy of this kept clip as WAV, FLAC, MP3 or Ogg, at the sample rate you choose', False),
+    'lab_handoff': ('Send to Voice Lab...', None, [], 'Prepare the kept clips for Voice Lab with their transcripts and '
+                                                      'permission details', False),
     'export_manifest': ('Export manifest...', None, [],
                         'List the kept clips with their transcripts in a CSV or JSON Lines file, for other programs', False),
     'export_dataset': ('Export dataset...', None, [], 'Gather the kept clips in one new folder, in the layout a speech tool '

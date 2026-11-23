@@ -15,6 +15,7 @@ from recorder.store import Library
 def isolated(tmp_path, monkeypatch):
     """Settings in a temporary file, no real devices, no recognizer, and FFmpeg looked up as each test says."""
     monkeypatch.setenv(settings.ENV_VAR, str(tmp_path / 'settings.json'))
+    monkeypatch.setenv('FELS_SUITE_DIR', str(tmp_path / 'suite'))
     monkeypatch.setattr(cap, 'list_microphones', lambda every=False: [(1, 'Test microphone')])
     monkeypatch.setattr(cap, 'default_microphone', lambda: 1)
     monkeypatch.setattr(cap, 'list_loopbacks', lambda: [(9, 'Test speakers [Loopback]')])

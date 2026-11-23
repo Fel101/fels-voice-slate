@@ -21,8 +21,9 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 STATES = ['edit', 'process', 'check', 'analyze', 'record', 'empty', 'compact', 'reading', 'script', 'countin', 'light',
-          'settings', 'about', 'shortcuts', 'copy', 'manifest', 'dataset', 'speaker', 'keepmany', 'handsfree', 'roomcheck']
-DIALOGS = ('settings', 'about', 'shortcuts', 'copy', 'manifest', 'dataset', 'speaker', 'keepmany', 'handsfree',
+          'settings', 'about', 'shortcuts', 'copy', 'handoff', 'manifest', 'dataset', 'speaker', 'keepmany', 'handsfree',
+          'roomcheck']
+DIALOGS = ('settings', 'about', 'shortcuts', 'copy', 'handoff', 'manifest', 'dataset', 'speaker', 'keepmany', 'handsfree',
            'roomcheck', 'roomspeak')
 RUN = ('countin', 'runlisten', 'runheard')
 # drawn only when asked for with --only, to look at a state the documents do not show
@@ -324,6 +325,7 @@ def main():
                 dialog = {'settings': lambda: dialogs.SettingsDialog(fake),
                           'about': dialogs.AboutDialog, 'shortcuts': dialogs.ShortcutsDialog,
                           'copy': lambda: dialogs.CopyDialog('Welcome back, take two'),
+                          'handoff': dialogs.HandoffSaveDialog,
                           'manifest': lambda: dialogs.ManifestDialog('My voice', totals),
                           'dataset': lambda: dialogs.DatasetDialog('My voice', totals),
                           'speaker': lambda: dialogs.SpeakerDialog('Sam Rivera', release, True),

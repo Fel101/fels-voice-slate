@@ -14,6 +14,7 @@ recorder/
                  being recorded, the autosave files of takes not kept yet, moving a take to another speaker, and moving a
                  whole output folder (Relocation). A take reads its audio only when it is asked for (_Resident)
   share.py       a copy of a kept clip as WAV, FLAC, MP3 or Ogg at another sample rate (SoundFile's libsndfile, no FFmpeg)
+  handoff.py     checks kept clips and writes Voice Lab handoff files
   fels_suite.py  shared Fel's Studio code for the suite folder and inbox handoffs
   manifest.py    a list of the kept clips, as JSON Lines or CSV, for programs that read a whole set
   dataset.py     the kept clips gathered in one new folder, in four layouts (clips, LJSpeech, Hugging Face, Kaldi)
@@ -282,6 +283,10 @@ None of these changes a kept clip, and none goes online.
   through SoundFile to a temporary name and then renames it. It writes 8192 frames at a time: libsndfile's Ogg Vorbis
   writer crashes the whole process (a stack overflow, which no `try` catches) when it is given half a minute of audio in
   one call, and the tests run every encoder on a long clip in a subprocess so that this cannot come back.
+- **Send to Voice Lab** and **Save for Voice Lab** use `handoff.py`. The batch checks every selected clip before writing
+  any handoff. It reads one clip at a time and checks the hashes again when it packages the kept WAV and sidecar.
+  `Batch.handoff` uses a worker for file I/O so the window can show progress and Stop. Each complete file is published
+  atomically, using the shared `inbox_write` for sends.
 - **Export manifest** is `manifest.collect` and `manifest.write`. A row is built from each sidecar, read by the rules of
   the library (a name that leaves the sidecar's folder is refused), and the WAV is hashed again; a clip that does not
   check out is left out and named. The escaping is described in [Clip format](clip-format.md#manifest-files).

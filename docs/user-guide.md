@@ -559,7 +559,7 @@ say), the program says so and offers to delete them permanently instead; it neve
 
 ## Sharing your clips
 
-A kept clip is an ordinary file in the speaker's folder. Voice Slate gives you four ways to hand clips on without
+A kept clip is an ordinary file in the speaker's folder. Voice Slate gives you five ways to hand clips on without
 searching through the folders. They only write files on your own computer, and none of them changes a kept clip.
 
 ### Drag a clip into another program
@@ -598,6 +598,24 @@ the same line about its allowed use as the kept clip, even for a clip kept befor
 taken off that line, because an MP3's tag would show them wrongly everywhere. It cannot
 be saved inside the output folder, so that it is not taken for a kept clip. FFmpeg is not needed. The file dialog asks
 before it replaces a file.
+
+### Sending clips to Voice Lab
+
+Right-click a kept clip and choose **Send to Voice Lab...**. To send several at once, select their cards with Ctrl or
+Shift and use the same command. You can also find it beside **Save a copy...** in the gear menu.
+
+Open **Cast** in Voice Lab, preview the waiting clips, then choose **Import as candidate** for each one you want to use.
+Voice Lab can be closed while you send. Each handoff carries the kept WAV, transcript, origin and permission details.
+
+If the menu says **Save for Voice Lab...**, choose where to save each `.voiceslate` file. Open the saved files in Voice
+Lab under **Cast → Import from Voice Slate**. You can get the app from the [Voice Lab project](https://github.com/Fel101/fels-voice-lab).
+
+![The Save for Voice Lab dialog with a link to get Voice Lab](images/handoff.png)
+
+Voice Lab needs a transcript, an origin, an allowed use and confirmed permission. Enter any missing details and keep
+the clip again before sending. For an unchecked speech-recognition draft, you can open the transcript in Slate or
+continue and review it in Voice Lab. A WAV over 32 MiB needs trimming or a shorter clip. During a batch, use **Stop**
+to finish the current clip and skip the rest.
 
 ### Export a manifest
 

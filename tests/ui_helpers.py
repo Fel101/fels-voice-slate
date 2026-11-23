@@ -58,6 +58,8 @@ class StubDialogs:
         self.file_answer = None
         self.files_answer = []                   # the files chosen where several can be
         self.save_answer = None                  # the file name chosen to save to
+        self.handoff_save_answer = True
+        self.handoff_draft_answer = None
         self.item_answer = None                  # the position chosen from a list
         self.copy_answer = None                  # (format, sample rate) for a copy of a clip
         self.manifest_answer = None              # ('speaker' or 'all', 'jsonl' or 'csv')
@@ -97,6 +99,18 @@ class StubDialogs:
 
     def choose_save_file(self, title, start='', filter=''):
         self.asked.append(('save', SimpleNamespace(title=title, start=str(start), filter=filter)))
+        return self.save_answer
+
+    def handoff_save(self):
+        self.asked.append(('handoff_save', None))
+        return self.handoff_save_answer
+
+    def handoff_draft(self, sending):
+        self.asked.append(('handoff_draft', sending))
+        return self.handoff_draft_answer
+
+    def handoff_destination(self, name):
+        self.asked.append(('handoff_destination', name))
         return self.save_answer
 
     def choose_item(self, title, prompt, items):
