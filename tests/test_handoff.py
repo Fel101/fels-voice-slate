@@ -45,11 +45,12 @@ def test_bundle_is_exactly_the_kept_files_and_works_with_sockets_disabled(kept, 
     assert re.fullmatch(r'\d{8}T\d{6}Z-voice-slate-smoke-speaker-First-line\.voiceslate', path.name)
     assert list(inbox.iterdir()) == [path]
     with zipfile.ZipFile(path) as bundle:
-        assert bundle.namelist() == ['clip.wav', 'clip.json']
+        # The suite clip format in docs/clip-format.md fixes the entry names and allows either order.
+        assert sorted(bundle.namelist()) == ['clip.json', 'clip.wav']
         assert all(member.compress_type == zipfile.ZIP_STORED and not member.flag_bits & 1 for member in bundle.infolist())
         assert bundle.read('clip.wav') == kept.export_path.read_bytes()
         assert bundle.read('clip.json') == kept.sidecar_path.read_bytes()
-        data = json.loads(bundle.read('clip.json'))
+        data = json.loads(bundle.read('clip.json').decode('utf-8'))
         assert data['export']['sha256'] == hashlib.sha256(bundle.read('clip.wav')).hexdigest()
     assert {path.relative_to(session.lib.root): path.read_bytes()
             for path in session.lib.root.rglob('*') if path.is_file()} == original

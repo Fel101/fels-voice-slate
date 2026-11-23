@@ -9,6 +9,7 @@ the project uses [Semantic Versioning](https://semver.org/).
 
 - Shared Fel's Studio code and contract tests for file handoffs to Voice Lab.
 - Send kept clips to Voice Lab's Cast inbox, or save `.voiceslate` files to open in Voice Lab later.
+- Documented the Fel's Studio clip format, with receiver checks and a `.voiceslate` writing example.
 
 ## [0.7.0] - 2026-11-15
 

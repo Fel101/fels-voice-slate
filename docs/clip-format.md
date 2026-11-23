@@ -1,7 +1,8 @@
 # Clip format
 
-What Voice Slate writes to disk, for people who want to use the clips in other programs. Everything is a plain WAV or
-JSON file, so no special reader is needed.
+What Voice Slate writes to disk, for people who want to use the clips in other programs. The kept WAV and its JSON
+sidecar together define the Fel's Studio suite clip format. A [`.voiceslate` handoff](#voice-slate-handoff-files) carries
+both files in a ZIP archive.
 
 ## Folder layout
 
@@ -89,7 +90,7 @@ A UTF-8 JSON object. An example, written compactly (the program writes it with o
 
 | Field | Meaning |
 |---|---|
-| `schema` | `voice-recorder-clip-v2`. Changes if a field is removed or changes meaning. Readers should ignore fields they do not know. The name comes from the program's first name and stays the same, so that programs that already read these files keep working. |
+| `schema` | `voice-recorder-clip-v2`. The `voice-recorder-clip-` prefix is permanent for compatibility. A change that removes a field or changes its meaning gets a new version number. Readers should ignore fields they do not recognise. |
 | `software` | The program and version that wrote the file. |
 | `id`, `created` | The take's id, and when it was made (ISO 8601 with the local UTC offset). |
 | `speaker` | The speaker's folder name. |
@@ -213,6 +214,55 @@ for sidecar in Path("voice-clips/my-voice").glob("*.json"):      # the output fo
     wav = sidecar.with_name(data["export"]["file"])
     intact = hashlib.sha256(wav.read_bytes()).hexdigest() == data["export"]["sha256"]
     print(wav.name, "intact" if intact else "CHANGED", "|", data["allowed_use"], "|", data["transcript"])
+```
+
+## Voice Slate handoff files
+
+A `.voiceslate` file carries one kept clip in the Fel's Studio suite clip format. Put exactly two case-sensitive entries at
+the root of a ZIP archive. Use ZIP method 0 (`Stored`) and leave encryption disabled for both entries. Entry order can vary.
+
+| ZIP entry | Contents | Maximum size |
+|---|---|---|
+| `clip.wav` | The exact bytes of the kept WAV, including its metadata chunks | 32 MiB (33,554,432 bytes) |
+| `clip.json` | The exact bytes of its sidecar as a UTF-8 JSON object without a byte-order mark | 1 MiB (1,048,576 bytes) |
+
+Voice Lab caps the whole ZIP at 33 MiB plus 4,096 bytes for ZIP overhead. Preserve both files byte for byte. The fixed ZIP
+entry names leave the original file names in the sidecar intact. The master recording and any release documents stay in the
+speaker's folder.
+
+### What the receiver checks
+
+- `schema` is `voice-recorder-clip-v1` or `voice-recorder-clip-v2`. The numeric suffix identifies the version.
+- `consent_confirmed` is the JSON boolean `true`. `transcript`, `origin` and `allowed_use` are strings with content after
+  trimming whitespace.
+- `id` is a string of 1 to 64 ASCII letters, digits, dots, underscores or hyphens, starting with a letter or digit.
+- `export.file` is the kept WAV's portable file name. It ends in `.wav` (case insensitive) and has 1 to 176 characters
+  before the extension. Exclude `< > : " / \ | ? *` and control characters U+0000 through U+001F. The stem before the first
+  dot must also avoid Windows device names (`CON`, `PRN`, `AUX`, `NUL`, `COM1`–`COM9`, `LPT1`–`LPT9`, and the `COM` and
+  `LPT` forms with superscript `¹`, `²` or `³`), ignoring case and trailing spaces.
+- `master.file` is a relative path inside the speaker's folder, such as `masters/take.raw.wav`. Reject drive prefixes,
+  `..` segments, colons and control characters. It names a different file from `export.file`. The receiver only needs this
+  reference in the sidecar.
+- `export.sha256` is a 64-digit hexadecimal SHA-256 that matches the bytes of `clip.wav`. The WAV container must be readable
+  and its sample rate, channel count and bit depth must match `export.sample_rate`, `export.channels` and `export.bit_depth`.
+  Voice Lab recognises 16-, 24- and 32-bit PCM for the bit-depth check.
+- `transcript_status: "asr_draft"` means the speech recognizer's transcript is unchecked. The receiver requires the person's
+  explicit acceptance before importing it.
+
+### Writing a handoff
+
+Starting with a kept WAV and its sidecar that pass those checks, create a new `.voiceslate` file with Python's standard
+library. Save this example as `make_handoff.py` and give it the two input paths and an output path such as
+`python make_handoff.py take.wav take.json take.voiceslate`.
+
+```python
+import sys
+from zipfile import ZIP_STORED, ZipFile
+
+wav_path, sidecar_path, output_path = sys.argv[1:]
+with ZipFile(output_path, "x", compression=ZIP_STORED) as handoff:
+    handoff.write(wav_path, "clip.wav")
+    handoff.write(sidecar_path, "clip.json")
 ```
 
 ## Manifest files

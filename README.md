@@ -271,7 +271,7 @@ Read [docs/responsible-use.md](docs/responsible-use.md) before you record anyone
 |---|---|
 | [User guide](docs/user-guide.md) | Every control, with tips and troubleshooting |
 | [Responsible use](docs/responsible-use.md) | Consent, privacy, and what this tool is not for |
-| [Clip format](docs/clip-format.md) | The folder layout and the sidecar JSON, for other programs |
+| [Clip format](docs/clip-format.md) | The suite's `.voiceslate` handoff, kept WAV and JSON sidecar |
 | [Architecture](docs/architecture.md) | How the code is organised, for contributors |
 | [Contributing](CONTRIBUTING.md) | Setting up, running the tests, and sending changes |
 | [Security](SECURITY.md) | Reporting a vulnerability |
