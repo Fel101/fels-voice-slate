@@ -174,11 +174,11 @@ class Workspace:
         """Remove a speaker, their clips and their release: to the Recycle Bin, or for good when `permanent`. Raises
         TrashUnavailable, with nothing removed, or ValueError when audio of theirs is only in memory."""
         if self.is_recording():
-            raise ValueError('Stop the recording before deleting a speaker.')
+            raise ValueError(tr('Stop the recording before deleting a speaker.'))
         scope = (self.lib.root.resolve(), slug)
         takes = self.takes if self._scope == scope else self._session_takes.get(scope, [])
         if any(take.unsaved for take in takes):
-            raise ValueError('A take of this speaker is only in memory. Keep or discard it first.')
+            raise ValueError(tr('A take of this speaker is only in memory. Keep or discard it first.'))
         self.lib.delete_speaker(slug, permanent)
         self._session_takes.pop(scope, None)
         if self.speaker == slug:

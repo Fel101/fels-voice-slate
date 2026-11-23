@@ -13,6 +13,7 @@ import time
 import numpy as np
 
 from . import devices
+from .i18n import tr
 
 # A device that has sent nothing for this long has stopped. Before its first block we allow more time,
 # because a cold start can take a moment.
@@ -132,7 +133,7 @@ class _LoopbackBackend:
         try:
             info = self._p.get_device_info_by_index(int(device))
             if not info.get('isLoopbackDevice'):
-                raise ValueError('That device is not a loopback device')
+                raise ValueError(tr('That device is not a loopback device'))
             self.device = int(device)
             self.name = info['name']
             self.rate = int(info['defaultSampleRate'])
@@ -415,7 +416,7 @@ def open_capture(source, device, pre_roll_seconds=0.0, channel=None):
     elif source == 'system':
         backend = _LoopbackBackend(device)
     else:
-        raise ValueError(f'Unknown source: {source}')
+        raise ValueError(tr('Unknown source: {source}').format(source=source))
     return Capture(backend, pre_roll_seconds)
 
 

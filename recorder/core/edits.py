@@ -21,25 +21,27 @@ SLACK = 0.001                           # sidecars round times to 0.1 ms
 def validate_edits(edits, seconds):
     """Check a stored operation list against the master length. Raises ValueError saying what is wrong."""
     if not isinstance(edits, list):
-        raise ValueError('the edit list must be a list')
+        raise ValueError(tr('the edit list must be a list'))
     for e in edits:
         if not isinstance(e, dict) or e.get('op') not in OPS:
-            raise ValueError(f'an entry is not a known edit: {str(e)[:60]!r}')
+            raise ValueError(tr('an entry is not a known edit: {edit!r}').format(edit=str(e)[:60]))
         try:
             a, b = float(e['start_seconds']), float(e['end_seconds'])
         except (KeyError, TypeError, ValueError):
-            raise ValueError('an edit has no usable start and end') from None
+            raise ValueError(tr('an edit has no usable start and end')) from None
         if not (0.0 <= a < b <= seconds + SLACK):
-            raise ValueError(f'an edit lies outside the clip ({a:.3f} to {b:.3f} s, clip is {seconds:.3f} s)')
+            raise ValueError(tr('an edit lies outside the clip ({start:.3f} to {end:.3f} s, clip is {seconds:.3f} s)').format(
+                start=a, end=b, seconds=seconds))
         if e['op'] == 'fade' and e.get('direction') not in ('in', 'out'):
-            raise ValueError('a fade must be "in" or "out"')
+            raise ValueError(tr('a fade must be "in" or "out"'))
         if e['op'] == 'gain':
             try:
                 gain = float(e['gain_db'])
             except (KeyError, TypeError, ValueError):
-                raise ValueError('a gain edit has no usable gain_db') from None
+                raise ValueError(tr('a gain edit has no usable gain_db')) from None
             if not math.isfinite(gain) or not GAIN_LIMITS[0] <= gain <= GAIN_LIMITS[1]:
-                raise ValueError(f'gain_db must be between {GAIN_LIMITS[0]:g} and {GAIN_LIMITS[1]:g}')
+                raise ValueError(tr('gain_db must be between {low:g} and {high:g}').format(
+                    low=GAIN_LIMITS[0], high=GAIN_LIMITS[1]))
     return True
 
 

@@ -9,6 +9,7 @@ import math
 import numpy as np
 from scipy.ndimage import minimum_filter1d, uniform_filter1d
 from scipy.signal import butter, filtfilt, iirnotch, sosfiltfilt
+from ..i18n import tr
 
 DEFAULT_CHAIN = {
     'highpass': {'enabled': False, 'hz': 80.0},
@@ -36,12 +37,12 @@ def normalize(chain=None):
     if chain is None:
         return out
     if not isinstance(chain, dict):
-        raise ValueError('the chain must be an object')
+        raise ValueError(tr('the chain must be an object'))
     for section, values in chain.items():
         if section not in out:
             continue
         if not isinstance(values, dict):
-            raise ValueError(f'chain.{section} must be an object')
+            raise ValueError(tr('chain.{section} must be an object').format(section=section))
         for key, value in values.items():
             if key not in out[section]:
                 continue
@@ -52,17 +53,18 @@ def normalize(chain=None):
 def _checked(section, key, value, kind):
     if kind is bool:
         if not isinstance(value, bool):
-            raise ValueError(f'chain.{section}.{key} must be true or false')
+            raise ValueError(tr('chain.{section}.{key} must be true or false').format(section=section, key=key))
         return value
     if isinstance(value, bool):
-        raise ValueError(f'chain.{section}.{key} must be a number')
+        raise ValueError(tr('chain.{section}.{key} must be a number').format(section=section, key=key))
     try:
         number = float(value)
     except (TypeError, ValueError):
-        raise ValueError(f'chain.{section}.{key} must be a number') from None
+        raise ValueError(tr('chain.{section}.{key} must be a number').format(section=section, key=key)) from None
     low, high = LIMITS[(section, key)]
     if not math.isfinite(number) or not low <= number <= high:
-        raise ValueError(f'chain.{section}.{key} must be between {low:g} and {high:g}')
+        raise ValueError(tr('chain.{section}.{key} must be between {low:g} and {high:g}').format(
+            section=section, key=key, low=low, high=high))
     return int(round(number)) if kind is int else number
 
 

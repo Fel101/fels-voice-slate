@@ -15,6 +15,7 @@ from pathlib import Path
 import soundfile as sf
 
 from . import clean
+from .i18n import tr
 
 SOUNDFILE_SUFFIXES = ('.wav', '.flac', '.ogg', '.opus', '.mp3', '.aif', '.aiff')
 FFMPEG_SUFFIXES = ('.m4a', '.aac', '.mp4', '.mov', '.3gp', '.amr', '.wma', '.webm')
@@ -99,7 +100,7 @@ def _decode(path, decoded):
     try:
         ffmpeg = clean.find_ffmpeg()
     except clean.NotFound:
-        raise AudioImportError(NEEDS_FFMPEG) from None
+        raise AudioImportError(tr(NEEDS_FFMPEG)) from None
     except clean.CleanError as e:              # the path in Settings is wrong
         raise AudioImportError(str(e)) from None
     command = [ffmpeg, '-hide_banner', '-nostdin', '-loglevel', 'error', '-y', '-i', str(path),
@@ -109,14 +110,15 @@ def _decode(path, decoded):
         reply = subprocess.run(command, capture_output=True, text=True, encoding='utf-8', errors='replace',
                                timeout=TIMEOUT_SECONDS, check=False, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
     except subprocess.TimeoutExpired:
-        raise AudioImportError('FFmpeg took too long to read it.') from None
+        raise AudioImportError(tr('FFmpeg took too long to read it.')) from None
     except OSError as e:
-        raise AudioImportError(f'FFmpeg could not be started: {e}') from None
+        raise AudioImportError(tr('FFmpeg could not be started: {error}').format(error=e)) from None
     if reply.returncode:
         detail = reply.stderr.strip()
         if 'matches no streams' in detail:      # -map 0:a:0 found no sound: a video without any, say
-            raise AudioImportError('the file holds no audio')
-        raise AudioImportError('FFmpeg could not read it: ' + (detail or f'exit code {reply.returncode}')[-300:])
+            raise AudioImportError(tr('the file holds no audio'))
+        reason = detail or tr('exit code {code}').format(code=reply.returncode)
+        raise AudioImportError(tr('FFmpeg could not read it: {detail}').format(detail=reason[-300:]))
     return decoded
 
 

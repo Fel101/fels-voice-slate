@@ -83,9 +83,9 @@ def save_copy(source, destination, kind=DEFAULT_KIND, rate=DEFAULT_RATE):
     The file appears whole or not at all, and is never the kept clip itself. Raises CopyError.
     """
     if kind not in FORMATS:
-        raise CopyError(f'Copies in {kind!r} are not offered')
+        raise CopyError(tr('Copies in {format!r} are not offered').format(format=kind))
     if rate not in RATES:
-        raise CopyError(f'A copy at {rate} Hz is not offered')
+        raise CopyError(tr('A copy at {rate} Hz is not offered').format(rate=rate))
     source, destination = Path(source), Path(destination)
     try:
         same = destination.exists() and destination.resolve() == source.resolve()

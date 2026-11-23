@@ -261,8 +261,8 @@ Read [docs/responsible-use.md](docs/responsible-use.md) before you record anyone
 | Audition | 3 s to 10 minutes | 30 s to 3 minutes | 15 minutes | up to 48 kHz, 24-bit, never above the recording's own rate |
 
 - The window needs at least 1100 by 600 of the screen, so a very large size setting may not fit a small screen.
-- The translations cover the window, and not yet every message or the documents. They are machine-made and have not
-  been checked by native speakers: corrections are welcome.
+- The window, dialogs and messages are available in English, German, Spanish and French. The translations are machine
+  drafts awaiting review by native speakers. The documentation is in English.
 - It is a voice-clip recorder, not a general audio editor: there is one track, and no effects beyond those listed above.
 
 ## Documentation

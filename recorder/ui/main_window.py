@@ -24,7 +24,7 @@ from ..session.measure import take_key
 from ..store import Backup, BringIn, KeepBlocked, Relocation, TrashUnavailable, clean_label
 from .actions import SPEC, Actions, shortcut_text
 from .badge import RecordingBadge
-from .dialogs import Dialogs
+from .dialogs import Dialogs, file_filter
 from .editor_panel import EditorPanel
 from .inspector import Inspector
 from .library import LibraryPanel
@@ -1178,7 +1178,7 @@ class MainWindow(QMainWindow):
         text, ending = share.FORMATS[kind][:2]
         known = {entry[1] for entry in share.FORMATS.values()}
         path = self.dialogs.choose_save_file('Save a copy', share.filename_for(name, Path(take.export_path).stem) + ending,
-                                             f'{text} (*{ending})')
+                                             file_filter(text, '*' + ending))
         if not path:
             return
         path = self._with_ending(path, ending, known)
@@ -1291,7 +1291,7 @@ class MainWindow(QMainWindow):
         known = {entry[1] for entry in manifest.FORMATS.values()}
         folder = s.lib.folder(slug) if scope == 'speaker' and s.lib.folder(slug).is_dir() else s.lib.root
         name = f'{slug}-manifest' if scope == 'speaker' else 'manifest'
-        path = self.dialogs.choose_save_file('Export manifest', folder / (name + ending), f'{text} (*{ending})')
+        path = self.dialogs.choose_save_file('Export manifest', folder / (name + ending), file_filter(text, '*' + ending))
         if not path:
             return
         path = self._with_ending(path, ending, known)
@@ -1421,7 +1421,7 @@ class MainWindow(QMainWindow):
         self.dialogs.open_path(folder)
 
     def load_script(self):
-        path = self.dialogs.choose_file('Load a script', self.session.lib.root, 'Text files (*.txt);;All files (*)')
+        path = self.dialogs.choose_file('Load a script', self.session.lib.root, file_filter('Text files', '*.txt', all_files=True))
         if path:
             self.session.script.load_file(path)
 
@@ -1434,7 +1434,7 @@ class MainWindow(QMainWindow):
 
         desktop = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DesktopLocation) or str(Path.home())
         start = Path(desktop) / f'voice-slate-diagnostics-{date.today()}.zip'
-        path = self.dialogs.choose_save_file('Export diagnostics', start, 'Zip files (*.zip);;All files (*)')
+        path = self.dialogs.choose_save_file('Export diagnostics', start, file_filter('Zip files', '*.zip', all_files=True))
         if not path:
             return
         try:
@@ -1448,9 +1448,9 @@ class MainWindow(QMainWindow):
 
     def _offer_transcript_setup(self):
         """Suggest from audio was pressed with no recognizer: say so, and offer the one-time setup that gets one."""
-        self.session.bus.status(transcript.NOT_SET_UP)
+        self.session.bus.status(transcript.not_set_up())
         script = settings.program_dir() / transcript.SETUP_SCRIPT
-        if script.is_file() and self.dialogs.confirm('Set up draft transcripts?', asr_setup.OFFER, yes='Open the setup',
+        if script.is_file() and self.dialogs.confirm('Set up draft transcripts?', asr_setup.offer(), yes='Open the setup',
                                                      no='Not now'):
             self.dialogs.open_path(script)
 

@@ -2,7 +2,9 @@
 import json
 import re
 import sys
+from collections import Counter
 from pathlib import Path
+from string import Formatter
 
 import pytest
 
@@ -13,13 +15,12 @@ from helpers import fill, record  # noqa: E402
 from recorder import i18n, settings  # noqa: E402
 from recorder.ui import dialogs as dialog_mod  # noqa: E402
 from recorder.ui.main_window import MainWindow  # noqa: E402
-from recorder.ui.translate import translate_tree  # noqa: E402
+from recorder.ui.translate import install_qt_language, translate_tree  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'tools'))
 import strings  # noqa: E402
 
 LANGUAGES = [code for code in i18n.LANGUAGES if code != 'en']
-FIELDS = re.compile(r'\{\w+\}')
 
 
 @pytest.fixture
@@ -82,8 +83,12 @@ def test_settings_offers_the_languages(qapp):
 @pytest.mark.parametrize('code', LANGUAGES)
 def test_a_translation_has_the_fields_of_its_english(code):
     """A field missing from a translation would stop the window with an error."""
+    def fields(message):
+        return Counter((field, spec, conversion) for _, field, spec, conversion in Formatter().parse(message)
+                       if field is not None)
+
     for english, text in table(code).items():
-        assert sorted(FIELDS.findall(text)) == sorted(FIELDS.findall(english)), english
+        assert fields(text) == fields(english), english
 
 
 @pytest.mark.parametrize('code', LANGUAGES)
@@ -95,11 +100,103 @@ def test_every_entry_is_still_something_the_program_says(code):
 
 @pytest.mark.parametrize('code', LANGUAGES)
 def test_every_text_the_program_says_has_a_translation(code):
-    """Apart from what is the same in every language, or only names a file type."""
     entries = table(code)
-    missing = [text for text in strings.texts() if text not in entries and text not in ('OK', 'FFmpeg')
-               and ';;' not in text]
-    assert missing == []
+    assert [text for text in strings.texts() if not entries.get(text)] == []
+
+
+def test_window_messages_are_translated_before_values_are_inserted():
+    assert list(strings.untranslated_formats()) == []
+
+
+@pytest.mark.parametrize('code', LANGUAGES)
+def test_qt_file_picker_follows_the_selected_language(qapp, speak, code):
+    from PySide6.QtCore import QLocale
+    from PySide6.QtWidgets import QFileDialog, QLabel, QDialogButtonBox
+
+    speak(code)
+    previous = QLocale()
+    translator = install_qt_language(qapp, code)
+    assert translator is not None
+    try:
+        dialog = QFileDialog()
+        dialog.setAcceptMode(QFileDialog.AcceptMode.AcceptSave)
+        labels = {label.text() for label in dialog.findChildren(QLabel)}
+        assert {i18n.tr('&Look in:'), i18n.tr('Files of &type:')} <= labels
+        assert labels.isdisjoint({'&Look in:', 'Files of &type:', 'File &name:'})
+        box = dialog.findChild(QDialogButtonBox)
+        assert box.button(QDialogButtonBox.StandardButton.Save).text().replace('&', '') != 'Save'
+        assert box.button(QDialogButtonBox.StandardButton.Cancel).text() != 'Cancel'
+    finally:
+        qapp.removeTranslator(translator)
+        QLocale.setDefault(previous)
+
+
+@pytest.mark.parametrize('code', LANGUAGES)
+def test_room_setup_and_export_messages_follow_the_window_language(qapp, session, speak, monkeypatch, tmp_path, code):
+    from PySide6.QtWidgets import QMessageBox
+
+    from recorder import transcript
+    from recorder.session import roomcheck
+
+    speak(code)
+    record(session, 12.0)
+    fill(session)
+    kept = session.keep()
+    bad = kept['sidecar'].with_name('invalid.json')
+    data = json.loads(kept['sidecar'].read_text(encoding='utf-8'))
+    data['export']['file'] = '../outside.wav'
+    bad.write_text(json.dumps(data), encoding='utf-8')
+    output = tmp_path / 'manifest.jsonl'
+
+    opened = []
+    monkeypatch.setattr(QMessageBox, 'exec', lambda box: opened.append((box.windowTitle(), box.text())))
+    window = MainWindow(session=session)
+    window.timer.stop()
+    try:
+        session.capturing.source = 'system'
+        assert not session.room.start()
+        assert window.status_text.full_text == i18n.tr(roomcheck.REFUSALS['source'])
+        assert window.status_text.full_text != roomcheck.REFUSALS['source']
+
+        session.capturing.source, session.capturing.device = 'mic', 1
+
+        def unavailable(*args):
+            raise OSError('TEST-DEVICE')
+
+        monkeypatch.setattr(roomcheck.cap, 'open_capture', unavailable)
+        assert not session.room.start()
+        window.flush()
+        heading, message = opened.pop()
+        assert heading == i18n.tr('Could not open the microphone')
+        assert message == i18n.tr('Check that the microphone is connected, then try again.\n\n{detail}').format(
+            detail='TEST-DEVICE')
+
+        (tmp_path / transcript.SETUP_SCRIPT).touch()
+        monkeypatch.setattr(settings, 'program_dir', lambda: tmp_path)
+        window.suggest_transcript()
+        heading, message = opened.pop()
+        assert heading == i18n.tr('Set up draft transcripts?')
+        assert 'PyPI' in message and 'Open the setup now?' not in message
+        assert transcript.SETUP_SCRIPT in window.status_text.full_text
+        assert not window.status_text.full_text.startswith('Draft transcripts are not set up')
+
+        monkeypatch.setattr(transcript, 'available', lambda *args: True)
+        settings.update({'asr_language': 'e'}, session.settings_file)
+        assert session.drafts.request(session.current, replace=True)
+        session.jobs.drain()
+        assert window.status_text.full_text == i18n.tr('Use a two- or three-letter speech language code, such as en or es. '
+                                                       'Clear the setting to detect the language automatically.')
+
+        monkeypatch.setattr(window.dialogs, 'manifest_options', lambda *args: ('speaker', 'jsonl'))
+        monkeypatch.setattr(window.dialogs, 'choose_save_file', lambda *args: output)
+        window.export_manifest()
+        assert len(output.read_text(encoding='utf-8').splitlines()) == 1
+        heading, message = opened.pop()
+        assert heading == i18n.tr('Some clips were left out')
+        assert 'invalid.json' in message and i18n.tr('it names a file outside its own folder') in message
+        assert window.status_text.full_text.startswith(i18n.tr('Listed {count} clip in {path}').format(count=1, path=output))
+    finally:
+        window.close()
 
 
 @pytest.mark.parametrize('ask', [[], ['--missing', 'de'], ['--stale', 'de']])

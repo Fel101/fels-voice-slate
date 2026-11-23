@@ -18,6 +18,7 @@ pytestmark = pytest.mark.skipif(sys.platform != 'win32', reason='the launcher is
 def isolated_log(tmp_path, monkeypatch):
     """The settings (and so the log) in a temporary folder, and the root logger and process-wide hooks put back after."""
     monkeypatch.setenv(settings.ENV_VAR, str(tmp_path / 'settings.json'))
+    monkeypatch.setattr(entry.i18n, 'windows_language', lambda: 'en')
     root = logging.getLogger()
     handlers, level = list(root.handlers), root.level
     hooks = (sys.excepthook, threading.excepthook)

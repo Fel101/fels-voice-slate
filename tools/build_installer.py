@@ -29,10 +29,11 @@ PROGRAM_FILES = ('LICENSE', 'THIRD_PARTY_NOTICES.md', 'README.md', 'requirements
 # What the window does not use. All of this is Qt's own tooling and modules, and Python's tests and its window toolkit: the
 # smoke test at the end of the build opens the real window, so a mistake here stops the build.
 PRUNE_PYTHON = ('Lib/test', 'Lib/idlelib', 'Lib/tkinter', 'Lib/turtledemo', 'tcl', 'include', 'Scripts', 'Lib/site-packages/pip')
-PRUNE_QT_FOLDERS = ('qml', 'translations', 'typesystems', 'include', 'glue', 'metatypes', 'scripts', 'support', 'doc',
+PRUNE_QT_FOLDERS = ('qml', 'typesystems', 'include', 'glue', 'metatypes', 'scripts', 'support', 'doc',
                     'resources', 'plugins/qmllint', 'plugins/qmltooling', 'plugins/designer', 'plugins/sqldrivers',
                     'plugins/multimedia', 'plugins/networkinformation', 'plugins/tls', 'plugins/generic',
                     'plugins/platforminputcontexts')
+KEEP_QT_TRANSLATIONS = {'qtbase_de.qm', 'qtbase_es.qm', 'qtbase_fr.qm'}
 PRUNE_QT_FILES = ('*.exe', '*.pyi', 'Qt6Quick*', 'Qt6Qml*', 'Qt6Pdf*', 'Qt6Designer*', 'Qt6Help*', 'Qt6Sql*', 'Qt6Test*',
                   'Qt6OpenGL*', 'Qt6Network*', 'Qt6Concurrent*', 'Qt6Xml*', 'Qt6Labs*', 'Qt6ShaderTools*', 'opengl32sw.dll',
                   'QtQuick*', 'QtQml*', 'QtPdf*', 'QtDesigner*', 'QtHelp*', 'QtSql*', 'QtTest*', 'QtOpenGL*', 'QtNetwork*',
@@ -106,6 +107,9 @@ def prune(python):
     qt = site / 'PySide6'
     for name in PRUNE_QT_FOLDERS:
         remove(qt / name)
+    for catalog in (qt / 'translations').glob('*.qm'):
+        if catalog.name not in KEEP_QT_TRANSLATIONS:
+            remove(catalog)
     for pattern in PRUNE_QT_FILES:
         for path in qt.glob(pattern):
             remove(path)

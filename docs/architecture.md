@@ -346,15 +346,11 @@ None of these changes a kept clip, and none goes online.
   window scales as a whole) and the icons, which are SVG geometry drawn in code. No colour is written anywhere else, and
   `tests/test_ui_access.py` measures the contrast of each theme.
 - **`i18n.py`, `ui/translate.py`** translate the window. The English text is the key. The helpers in `ui/widgets.py` translate what
-  they are given, and `translate_tree` goes over a finished window or dialog, so most code simply writes English. A text built from
-  values stays in English until it is written with `{}` fields and `tr(...).format(...)`, where it is worked out: `i18n` needs no
-  toolkit, so the measurements in `core/analysis.py` and `core/autofix.py` and the keep rules are written that way too. What is
-  stored in a file stays in English. `tools/strings.py` lists what a language lacks; it passes over a text with `_` in it, as a
-  name in the code, so a field is `{start}`, never `{best_from}`, and a file name such as `THIRD_PARTY_NOTICES.md` goes in a
-  field. A text the code returns rather than passes to a call it knows is not found either: write `tr(...)` where it is
-  returned. The tests refuse an entry whose fields differ from the English, compare what the Check tab, the Keep card, an
-  edited take, its history and the dialogs say in English and in each language, and measure the take list's choices against
-  their boxes.
+  they are given, and `translate_tree` goes over a finished window or dialog. Translate messages and refusals with `tr()`
+  before inserting values with `.format(...)`. Keep file names, device names and raw diagnostic output in fields. The
+  on-disk formats use stable English identifiers. The window loads Qt's language catalogue for standard controls such as
+  the file picker. `tools/strings.py` lists the keys each language lacks. The tests check the fields and exercise translated
+  messages from room checks, transcript setup, exports and the main window.
 - **`ui/toolbar.py`** collapses labels, then icons, then buttons into a "more" menu as the window narrows, so nothing is
   clipped at the minimum size of 1100 by 600.
 

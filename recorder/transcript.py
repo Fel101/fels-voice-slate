@@ -22,15 +22,20 @@ from pathlib import Path
 import soundfile as sf
 
 from . import audio_core as ac
+from .asr_worker import language_code
 from .core.reading import clean_words
+from .i18n import tr
 
 WORKER = Path(__file__).with_name('asr_worker.py')
 TIMEOUT_SECONDS = 600
 TIMEOUT_PER_SECOND = 3              # and this for each second of the clip: an audition runs for minutes
 SETUP_SCRIPT = 'setup-transcripts.bat'
-NOT_SET_UP = (f'Draft transcripts are not set up: run {SETUP_SCRIPT} in the program folder (it downloads a speech model '
-              'once), or see the README. Type the transcript instead.')
 ELLIPSIS = ('...', '…')
+
+
+def not_set_up():
+    return tr('Draft transcripts are not set up: run {script} in the program folder (it downloads a speech model '
+              'once), or see the README. Type the transcript instead.').format(script=SETUP_SCRIPT)
 
 
 class DraftUnavailable(ValueError):
@@ -107,7 +112,12 @@ def suggest(export_samples, python, model, language=None, rate=ac.EXPORT_RATE, w
     Without one, a recognizer is started for this clip alone.
     """
     if not available(python, model):
-        raise DraftUnavailable(NOT_SET_UP)
+        raise DraftUnavailable(not_set_up())
+    try:
+        language = language_code(language)
+    except ValueError as error:
+        raise DraftUnavailable(tr('Use a two- or three-letter speech language code, such as en or es. Clear the setting '
+                                  'to detect the language automatically.')) from error
     timeout = TIMEOUT_SECONDS + TIMEOUT_PER_SECOND * len(export_samples) / rate
     with tempfile.TemporaryDirectory(prefix='recorder-draft-') as tmp:
         clip = Path(tmp) / 'draft.wav'
@@ -122,7 +132,7 @@ def suggest(export_samples, python, model, language=None, rate=ac.EXPORT_RATE, w
 
 
 def _failed(detail):
-    return 'The transcript draft failed: ' + detail.strip()[-300:]
+    return tr('The transcript draft failed: {detail}').format(detail=detail.strip()[-300:])
 
 
 def _ask_once(python, model, clip, language, timeout):
@@ -135,15 +145,15 @@ def _ask_once(python, model, clip, language, timeout):
         reply = subprocess.run(command, capture_output=True, text=True, encoding='utf-8', errors='replace',
                                timeout=timeout, check=False, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
     except subprocess.TimeoutExpired:
-        raise DraftUnavailable('The transcript draft took too long. Type the transcript instead.') from None
+        raise DraftUnavailable(tr('The transcript draft took too long. Type the transcript instead.')) from None
     except OSError as e:
-        raise DraftUnavailable(f'The speech recognizer could not be started: {e}') from None
+        raise DraftUnavailable(tr('The speech recognizer could not be started: {error}').format(error=e)) from None
     if reply.returncode:
         raise DraftUnavailable(_failed(reply.stderr))
     try:
         return json.loads(reply.stdout.strip().splitlines()[-1])
     except (IndexError, json.JSONDecodeError):
-        raise DraftUnavailable('The transcript draft returned nothing readable.') from None
+        raise DraftUnavailable(tr('The transcript draft returned nothing readable.')) from None
 
 
 def _pump(stream, put, end=None):
@@ -183,7 +193,7 @@ class Worker:
         """The recognizer's answer for one clip, as a dict. Raises DraftUnavailable."""
         with self._lock:
             if self._closed:
-                raise DraftUnavailable('Draft transcripts have stopped: the session is closing.')
+                raise DraftUnavailable(tr('Draft transcripts have stopped: the session is closing.'))
             key = (str(python), str(model))
             if self._process is None or self._key != key or self._process.poll() is not None:
                 self._stop()
@@ -202,7 +212,7 @@ class Worker:
                     line = self._answers.get(timeout=max(0.0, deadline - time.monotonic()))
                 except queue.Empty:
                     self._stop()
-                    raise DraftUnavailable('The transcript draft took too long. Type the transcript instead.') from None
+                    raise DraftUnavailable(tr('The transcript draft took too long. Type the transcript instead.')) from None
                 if line is self._STOPPED:
                     raise DraftUnavailable(self._why_stopped())
                 try:
@@ -233,7 +243,7 @@ class Worker:
                                        encoding='utf-8', errors='replace', bufsize=1,
                                        creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
         except OSError as e:
-            raise DraftUnavailable(f'The speech recognizer could not be started: {e}') from None
+            raise DraftUnavailable(tr('The speech recognizer could not be started: {error}').format(error=e)) from None
         self._key, self._process = key, process
         self._answers, self._errors = queue.Queue(), collections.deque(maxlen=self.ERROR_LINES)
         threading.Thread(target=_pump, args=(process.stdout, self._answers.put, self._STOPPED),
@@ -251,7 +261,7 @@ class Worker:
         self._error_reader.join(timeout=5)
         detail = ''.join(self._errors).strip()
         self._stop()
-        return _failed(detail or f'the speech recognizer stopped (exit code {code}).')
+        return _failed(detail or tr('the speech recognizer stopped (exit code {code}).').format(code=code))
 
     def _stop(self):
         """Let the recognizer go: it is told there is nothing more to do, and ended if it is still busy."""

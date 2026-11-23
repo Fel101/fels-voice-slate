@@ -34,6 +34,7 @@ from . import audio_core as ac
 from . import manifest
 from .core import render
 from .store import Library, _write_audio, file_sha256, permission_line
+from .i18n import tr
 
 LAYOUTS = {'clips': 'Clips with their sidecars', 'ljspeech': 'LJSpeech (wavs and metadata.csv)',
            'audiofolder': 'Hugging Face audio folder (metadata.csv)', 'kaldi': 'Kaldi (wav.scp, text, utt2spk)'}
@@ -60,9 +61,11 @@ def check_folder(folder, library):
     except (ValueError, OSError):
         pass
     else:
-        raise ValueError('Choose a place outside the output folder, so that the dataset is not mistaken for kept clips.')
+        raise ValueError(tr('Choose a place outside the output folder, so that the dataset is not mistaken for kept '
+                            'clips.'))
     if folder.exists() and (not folder.is_dir() or any(folder.iterdir())):
-        raise ValueError('Choose an empty folder: a dataset is one set of files, and nothing in the folder is overwritten.')
+        raise ValueError(tr('Choose an empty folder: a dataset is one set of files, and nothing in the folder is '
+                            'overwritten.'))
 
 
 def _clean_text(text):
@@ -118,11 +121,12 @@ class Export:
 
     def __init__(self, library, folder, layout, rate, from_originals, validation=0):
         if layout not in LAYOUTS:
-            raise ValueError(f'There is no layout called {layout!r}')
+            raise ValueError(tr('There is no layout called {layout!r}').format(layout=layout))
         if rate not in RATES:
-            raise ValueError(f'A dataset at {rate} Hz is not offered')
+            raise ValueError(tr('A dataset at {rate} Hz is not offered').format(rate=rate))
         if validation not in SPLITS:
-            raise ValueError(f'A split with {validation}% for validation is not offered')
+            raise ValueError(tr('A split with {validation}% for validation is not offered').format(
+                validation=validation))
         check_folder(folder, library)
         self.library = library
         self.folder = Path(folder)
@@ -157,7 +161,7 @@ class Export:
         folder = wav.parent
         master = Library.inside(folder, data['master']['file'])
         if not master.is_file():
-            raise DatasetProblem('its original recording is missing')
+            raise DatasetProblem(tr('its original recording is missing'))
         samples, rate = sf.read(str(master), dtype='float32', always_2d=False)
         recipe = Library._recipe_from(data, len(samples), rate, Library._chain_from_sidecar)
         return render.export_samples(samples, rate, recipe, self.library._denoiser(), export_rate=self.rate)

@@ -291,9 +291,11 @@ def main():
 
     from recorder import i18n
     from recorder.ui import theme
+    from recorder.ui.translate import install_qt_language
     i18n.use(args.language)
     theme.prepare_display()
     app = QApplication(sys.argv[:1])
+    install_qt_language(app, args.language)
     theme.install(app, args.theme)
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)

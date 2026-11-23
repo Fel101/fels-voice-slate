@@ -66,7 +66,7 @@ class Drafts:
         python, model = self._recognizer()
         if not transcript.available(python, model):
             if not automatic:
-                self.bus.status(transcript.NOT_SET_UP)
+                self.bus.status(transcript.not_set_up())
             return False
         recipe = frozen(take.history)
         if recipe.chain['denoise']['enabled']:
@@ -143,8 +143,10 @@ class Drafts:
             take.draft_key = request[2] if request is not None else words_key(take.history)
             if take.draft_key == words_key(take.history):
                 take.transcript_checked()                   # made from the clip as it is now: it matches the cuts
-            self.bus.status('Draft transcript filled in. Listen to the clip and correct any wrong words before Keep.'
-                            + (' A repeated ending was removed.' if tidied else ''))
+            message = tr('Draft transcript filled in. Listen to the clip and correct any wrong words before Keep.')
+            if tidied:
+                message += ' ' + tr('A repeated ending was removed.')
+            self.bus.status(message)
         else:
             self.bus.status(self._reading_message(take))
         self.bus.notify('meta', take)           # the take whose text changed, which may not be the one in front

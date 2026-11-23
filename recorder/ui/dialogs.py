@@ -22,12 +22,20 @@ from .palette import PALETTE
 from .translate import translate_tree
 from .widgets import button, clips_text, hbox, label, vbox
 
-AUDIO_FILTER = f'Audio files ({" ".join("*" + suffix for suffix in audio_import.SUFFIXES)});;All files (*)'
 VOICE_LAB_URL = 'https://github.com/Fel101/fels-voice-lab'
 THEME_NAMES = {'dark': 'Dark', 'light': 'Light', 'contrast': 'High contrast', 'system': 'As in Windows'}
 PREFERRED_HEIGHT = 820              # of the Settings dialog, when the screen has the room
 LEVEL_ICONS = {'info': QMessageBox.Icon.Information, 'warning': QMessageBox.Icon.Warning,
                'error': QMessageBox.Icon.Critical}
+
+
+def file_filter(name, patterns, *, all_files=False):
+    description = f'{tr(name)} ({patterns})'
+    return ';;'.join((description, tr('All files (*)'))) if all_files else description
+
+
+def audio_filter():
+    return file_filter('Audio files', ' '.join('*' + suffix for suffix in audio_import.SUFFIXES), all_files=True)
 
 
 class Dialogs:
@@ -62,18 +70,18 @@ class Dialogs:
         folder = QFileDialog.getExistingDirectory(self.parent, tr(title), str(start))
         return folder or None
 
-    def choose_file(self, title, start='', filter=AUDIO_FILTER):
-        path, _ = QFileDialog.getOpenFileName(self.parent, tr(title), str(start), tr(filter))
+    def choose_file(self, title, start='', filter=None):
+        path, _ = QFileDialog.getOpenFileName(self.parent, tr(title), str(start), filter or audio_filter())
         return path or None
 
-    def choose_files(self, title, start='', filter=AUDIO_FILTER):
+    def choose_files(self, title, start='', filter=None):
         """The files chosen, in a dialog that lets several be picked at once: an empty list when it is cancelled."""
-        paths, _ = QFileDialog.getOpenFileNames(self.parent, tr(title), str(start), tr(filter))
+        paths, _ = QFileDialog.getOpenFileNames(self.parent, tr(title), str(start), filter or audio_filter())
         return paths
 
     def choose_save_file(self, title, start='', filter='All files (*)'):
         """A file name to write to. The dialog asks before it replaces a file."""
-        path, _ = QFileDialog.getSaveFileName(self.parent, tr(title), str(start), filter)
+        path, _ = QFileDialog.getSaveFileName(self.parent, tr(title), str(start), tr(filter))
         return path or None
 
     def handoff_draft(self, sending):
@@ -320,13 +328,15 @@ class SettingsDialog(QDialog):
                                     wrap=True))
         form.addRow('Record key', keys)
 
-        self.ffmpeg = PathRow(values.get('ffmpeg'), lambda start: self._file(start, 'ffmpeg.exe (ffmpeg.exe);;All files (*)'),
+        self.ffmpeg = PathRow(values.get('ffmpeg'),
+                              lambda start: self._file(start, file_filter('ffmpeg.exe', 'ffmpeg.exe', all_files=True)),
                               'Leave empty to search PATH and the WinGet folders')
         self.ffmpeg.edit.setPlaceholderText('Search automatically')
         self.ffmpeg.edit.textChanged.connect(self._check_ffmpeg)
         form.addRow('FFmpeg', self.ffmpeg)
 
-        self.python = PathRow(values.get('asr_python'), lambda start: self._file(start, 'python.exe (python.exe);;All files (*)'),
+        self.python = PathRow(values.get('asr_python'),
+                              lambda start: self._file(start, file_filter('python.exe', 'python.exe', all_files=True)),
                               'A Python that has faster-whisper installed')
         self.python.edit.setPlaceholderText('Optional')
         self.python.edit.textChanged.connect(self._check_recognizer)
@@ -746,7 +756,7 @@ class SpeakerDialog(QDialog):
         return edit
 
     def _choose(self, start):
-        return QFileDialog.getOpenFileName(self, tr('Choose the signed release'), start, 'All files (*)')[0]
+        return QFileDialog.getOpenFileName(self, tr('Choose the signed release'), start, tr('All files (*)'))[0]
 
     def values(self):
         def date(known, edit):

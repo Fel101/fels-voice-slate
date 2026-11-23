@@ -187,7 +187,7 @@ class Capturing:
     def _ensure_capture(self):
         if self.capture is None:
             if self.device is None:
-                raise ValueError('Choose a device first.')
+                raise ValueError(tr('Choose a device first.'))
             self.capture = cap.open_capture(self.source, self.device, PRE_ROLL_SECONDS if self.source == 'mic' else 0.0,
                                             self.channel)
         return self.capture

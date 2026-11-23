@@ -14,10 +14,11 @@ import logging
 import sys
 from pathlib import Path
 
-from . import __version__, launch, settings
+from . import __version__, i18n, launch, settings
+from .i18n import tr
 
-NEEDS_PYSIDE = (f'{settings.APP_NAME} needs PySide6 and the other requirements. Install them with:\n'
-                '    python -m pip install -r requirements.txt\n'
+NEEDS_PYSIDE = ('{app} needs PySide6 and the other requirements. Install them with:\n'
+                '    {command}\n'
                 'or run setup.bat in the program folder.')
 
 
@@ -79,19 +80,22 @@ def setup_transcripts(size, language, yes):
 def start():
     """Open the window, with a log file and a plain message if it cannot start (there may be no console to read)."""
     launch.start_logging()
+    i18n.use(settings.language() or i18n.windows_language())
     if importlib.util.find_spec('PySide6') is None:
-        launch.tell(NEEDS_PYSIDE)
+        launch.tell(tr(NEEDS_PYSIDE).format(app=settings.APP_NAME, command='python -m pip install -r requirements.txt'))
         return 1
     if launch.already_running():
         if not launch.bring_forward():
-            launch.tell(f'{settings.APP_NAME} is already running. Look for its window on the taskbar.', error=False)
+            launch.tell(tr('{app} is already running. Look for its window on the taskbar.').format(app=settings.APP_NAME),
+                        error=False)
         return 0
     try:
         from .ui import run
         return run()
     except Exception:
         logging.getLogger('recorder').exception('The window could not start')
-        launch.tell(f'{settings.APP_NAME} could not start. The reason is in the log file:\n{launch.log_path()}')
+        launch.tell(tr('{app} could not start. The reason is in the log file:\n{log}').format(
+            app=settings.APP_NAME, log=launch.log_path()))
         return 1
 
 

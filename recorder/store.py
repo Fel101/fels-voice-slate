@@ -99,7 +99,7 @@ def send_to_trash(paths):
     try:
         from send2trash import send2trash
     except ImportError:
-        raise TrashUnavailable('The send2trash package is not installed.') from None
+        raise TrashUnavailable(tr('The send2trash package is not installed.')) from None
     try:
         send2trash([os.path.abspath(p) for p in paths])
     except OSError as e:
@@ -153,7 +153,7 @@ def _write_audio(path, samples, rate, subtype, comment=None):
         else:
             sf.write(str(path), samples, int(rate), subtype=subtype, format='WAV')
     except RuntimeError as e:
-        raise OSError(f'{path.name} could not be written: {e}') from e
+        raise OSError(tr('{file} could not be written: {error}').format(file=path.name, error=e)) from e
     sync_file(path)
 
 
@@ -396,11 +396,11 @@ class Take:
     def _read_audio(self):
         path = self._audio_file()
         if path is None:
-            raise OSError('The original recording of this take is not on disk.')
+            raise OSError(tr('The original recording of this take is not on disk.'))
         try:
             samples, _ = sf.read(str(path), dtype='float32', always_2d=False)
         except RuntimeError as e:                   # SoundFile's own errors
-            raise OSError(f'{Path(path).name} could not be read: {e}') from e
+            raise OSError(tr('{file} could not be read: {error}').format(file=Path(path).name, error=e)) from e
         return samples
 
     @property
@@ -496,9 +496,9 @@ class Relocation:
         self.source, self.target = Path(source), Path(target)
         source, target = self.source.resolve(), self.target.resolve()
         if target == source or source in target.parents or target in source.parents:
-            raise ValueError('The new folder and the old one must not be inside each other.')
+            raise ValueError(tr('The new folder and the old one must not be inside each other.'))
         if self.target.exists() and any(self.target.iterdir()):
-            raise ValueError('Choose an empty folder: the recordings are not mixed with what is already there.')
+            raise ValueError(tr('Choose an empty folder: the recordings are not mixed with what is already there.'))
         self.files = sorted(path for path in self.source.rglob('*') if path.is_file())
         self.done = []
 
@@ -510,7 +510,7 @@ class Relocation:
             shutil.copyfile(path, tmp)
             sync_file(tmp)
             if file_sha256(tmp) != file_sha256(path):
-                raise OSError(f'{path.name} could not be copied exactly')
+                raise OSError(tr('{file} could not be copied exactly').format(file=path.name))
             os.replace(tmp, destination)
         except BaseException:
             _remove(tmp)
@@ -542,7 +542,7 @@ class Relocation:
 def _not_inside(source, target):
     source, target = Path(source).resolve(), Path(target).resolve()
     if target == source or source in target.parents or target in source.parents:
-        raise ValueError('The two folders must not be inside each other.')
+        raise ValueError(tr('The two folders must not be inside each other.'))
 
 
 def _files_of(folder):
@@ -614,11 +614,12 @@ class FolderCopy:
                     self.part = 0.5 + written.tell() / size / 2
                     yield
             if back.hexdigest() != read.hexdigest():
-                raise OSError(f'{name} could not be copied exactly')
+                raise OSError(tr('{name} could not be copied exactly').format(name=name))
             if name in self.expected and back.hexdigest() != str(self.expected[name]).lower():
-                raise OSError(f'{name} is not the file the backup was made with: it has changed or been damaged since')
+                raise OSError(tr('{name} is not the file the backup was made with: it has changed or been damaged '
+                                 'since').format(name=name))
             if destination.exists():
-                raise OSError(f'{name} is already there, and nothing is overwritten')
+                raise OSError(tr('{name} is already there, and nothing is overwritten').format(name=name))
             os.replace(tmp, destination)
         finally:
             _remove(tmp)
@@ -652,7 +653,7 @@ class Backup(FolderCopy):
         _not_inside(source, target)
         target = Path(target)
         if target.exists() and (not target.is_dir() or any(target.iterdir())):
-            raise ValueError('Choose an empty folder for the backup: nothing in a folder is overwritten.')
+            raise ValueError(tr('Choose an empty folder for the backup: nothing in a folder is overwritten.'))
         super().__init__(source, target, _files_of(source))
 
     def finish(self):
@@ -676,16 +677,17 @@ class BringIn(FolderCopy):
         _not_inside(source, target)
         listed = self._list_of(source)
         if not holds_recordings(source) and not listed:
-            raise ValueError(f'{source} is not a backup of recordings: it has no speakers and no list of a backup in it.')
+            raise ValueError(tr('{source} is not a backup of recordings: it has no speakers and no list of a backup '
+                                'in it.').format(source=source))
         if target.exists() and any(path != target / 'speakers.json' for path in _files_of(target)) \
                 or holds_recordings(target):
-            raise ValueError('Bring a backup into an output folder that has no recordings yet: choose an empty one in '
-                             'Settings > Output folder first.')
+            raise ValueError(tr('Bring a backup into an output folder that has no recordings yet: choose an empty '
+                                'one in Settings > Output folder first.'))
         files = _files_of(source)
         missing = sorted(set(listed) - {path.relative_to(source).as_posix() for path in files})
         if missing:
-            raise ValueError(f'The backup is missing {len(missing)} of the files it was made with, such as {missing[0]}, '
-                             'so it was not brought in.')
+            raise ValueError(tr('The backup is missing {count} of the files it was made with, such as {file}, so it '
+                                'was not brought in.').format(count=len(missing), file=missing[0]))
         super().__init__(source, target, files, listed)
 
     @staticmethod
@@ -697,10 +699,12 @@ class BringIn(FolderCopy):
         except FileNotFoundError:
             return {}
         except (OSError, ValueError):
-            raise ValueError(f'The list of the backup in {folder} cannot be read, so its files cannot be checked.') from None
+            raise ValueError(tr('The list of the backup in {folder} cannot be read, so its files cannot be checked.').format(
+                folder=folder)) from None
         files = data.get('files') if isinstance(data, dict) and data.get('schema') == BACKUP_SCHEMA else None
         if not isinstance(files, dict):
-            raise ValueError(f'The list of the backup in {folder} is not one this version knows.')
+            raise ValueError(tr('The list of the backup in {folder} is not one this version knows.').format(
+                folder=folder))
         return {str(name): str(sha) for name, sha in files.items()}
 
     def _copying(self, path):
@@ -766,7 +770,7 @@ class Importing:
         block = self._source.read(self.BLOCK_FRAMES, dtype='float32', always_2d=True)
         if len(block):
             if not np.isfinite(block).all():
-                raise ValueError('the file is damaged: some of its samples are not numbers')
+                raise ValueError(tr('the file is damaged: some of its samples are not numbers'))
             if self.done + len(block) > len(self._samples):        # the file said it was shorter: an MP3 can
                 self._samples = np.concatenate([self._samples, np.empty_like(block)])
                 if self._mono is not None:
@@ -777,11 +781,11 @@ class Importing:
             try:
                 self._writer.write(block)
             except RuntimeError as e:
-                raise OSError(f'{self._tmp.name} could not be written: {e}') from e
+                raise OSError(tr('{file} could not be written: {error}').format(file=self._tmp.name, error=e)) from e
             self.done += len(block)
         if len(block) < self.BLOCK_FRAMES:
             if self.done == 0:
-                raise ValueError('the file holds no audio')
+                raise ValueError(tr('the file holds no audio'))
             self._close_source()
             self._start_closing()
             return self._closed()
@@ -820,7 +824,7 @@ class Importing:
         self._source = self._opened.file
         self.frames, rate, channels = self._source.frames, self._source.samplerate, self._source.channels
         if self.frames <= 0:
-            raise ValueError('the file holds no audio')
+            raise ValueError(tr('the file holds no audio'))
         fit = audio_import.fit(self.frames, rate, channels, self.memory)
         if fit.verdict == 'refuse':
             raise TooLong(too_long_text(fit))
@@ -837,7 +841,7 @@ class Importing:
         try:
             self._writer = sf.SoundFile(str(self._tmp), 'w', int(rate), channels, MASTER_SUBTYPE, format='WAV')
         except RuntimeError as e:
-            raise OSError(f'{target.name} could not be written: {e}') from e
+            raise OSError(tr('{file} could not be written: {error}').format(file=target.name, error=e)) from e
         return True
 
     def _start_closing(self):
@@ -851,7 +855,7 @@ class Importing:
                 try:
                     writer.close()
                 except RuntimeError as e:       # SoundFile's own errors
-                    raise OSError(f'{target.name} could not be written: {e}') from e
+                    raise OSError(tr('{file} could not be written: {error}').format(file=target.name, error=e)) from e
                 sync_file(tmp)
                 os.replace(tmp, target)
                 outcome['target'] = target
@@ -982,11 +986,11 @@ class Library:
         file may have come from someone else.
         """
         if not isinstance(data, dict):
-            raise ValueError('it is not a list of speakers')
+            raise ValueError(tr('it is not a list of speakers'))
         for slug, speaker in data.items():
             if slug in ('', '.', '..') or slug != Path(slug).name or not isinstance(speaker, dict) \
                     or not isinstance(speaker.get('name'), str):
-                raise ValueError(f'the entry {slug!r} is not a speaker')
+                raise ValueError(tr('the entry {slug!r} is not a speaker').format(slug=slug))
         return data
 
     def _speakers_from_folders(self):
@@ -1005,8 +1009,9 @@ class Library:
         while backup.exists():
             backup, n = path.with_name(f'speakers.json.damaged-{stamp}-{n}'), n + 1
         os.replace(path, backup)
-        self.recovery_note = (f'speakers.json could not be read ({error}). It was moved to {backup.name} and the '
-                              'speakers were rebuilt from their folders. Origin and allowed use need entering again.')
+        self.recovery_note = tr('speakers.json could not be read ({error}). It was moved to {file} and the '
+                                'speakers were rebuilt from their folders. Origin and allowed use need entering again.').format(
+                                    error=error, file=backup.name)
         return self._speakers_from_folders()
 
     # ---- the signed release of a speaker --------------------------------------------------------------------------------
@@ -1039,13 +1044,13 @@ class Library:
         stays in the folder: a release is not something to lose. Raises ValueError, in words the person can read, for a
         date that is not one, and OSError when the file cannot be copied."""
         if slug not in self.speakers():
-            raise ValueError('That speaker is not in this folder')
+            raise ValueError(tr('That speaker is not in this folder'))
         try:
             signed, expires = _iso_date(signed), _iso_date(expires)
         except ValueError:
-            raise ValueError('Write dates as YYYY-MM-DD') from None
+            raise ValueError(tr('Write dates as YYYY-MM-DD')) from None
         if signed and expires and expires < signed:
-            raise ValueError('The release cannot run out before it was signed')
+            raise ValueError(tr('The release cannot run out before it was signed'))
         record = self.release(slug) or {'file': '', 'sha256': ''}
         folder = self.folder(slug) / RELEASE_FOLDER
         if source:
@@ -1087,7 +1092,7 @@ class Library:
         TrashUnavailable, with nothing removed, when the Recycle Bin cannot take it."""
         data = self.speakers()
         if slug not in data:
-            raise ValueError('That speaker is not in this folder')
+            raise ValueError(tr('That speaker is not in this folder'))
         folder = self.folder(slug)
         if folder.exists():
             if permanent:
@@ -1105,7 +1110,7 @@ class Library:
     def add_speaker(self, name):
         name = str(name).strip()
         if not name:
-            raise ValueError('Enter a speaker name')
+            raise ValueError(tr('Enter a speaker name'))
         data = self.speakers()
         for slug, speaker in data.items():          # a speaker renamed since is still found by the name they have now
             if speaker['name'] == name:
@@ -1127,13 +1132,13 @@ class Library:
         """
         name = str(name).strip()
         if not name:
-            raise ValueError('Enter a speaker name')
+            raise ValueError(tr('Enter a speaker name'))
         data = self.speakers()
         if slug not in data:
-            raise ValueError('That speaker is not in this folder')
+            raise ValueError(tr('That speaker is not in this folder'))
         for other, speaker in data.items():
             if other != slug and speaker['name'].casefold() == name.casefold():
-                raise ValueError(f'There is already a speaker called {speaker["name"]}')
+                raise ValueError(tr('There is already a speaker called {name}').format(name=speaker["name"]))
         if data[slug]['name'] != name:
             data[slug]['name'] = name
             self._write_json(self._speakers_file(), data)
@@ -1227,7 +1232,7 @@ class Library:
         match = STEM_PATTERN.match(path.name)
         frames, rate, channels = audio_shape(path)
         if frames == 0:
-            raise ValueError('the original contains no audio')
+            raise ValueError(tr('the original contains no audio'))
         if match:
             created = dt.datetime.strptime(match.group(1) + match.group(2), '%Y%m%d%H%M%S').astimezone().isoformat(timespec='seconds')
         else:
@@ -1257,7 +1262,7 @@ class Library:
             try:
                 takes.append(self.load_unkept(slug, path, defaults))
             except (OSError, RuntimeError, ValueError) as e:
-                self.skipped.append((path.name, f'its original could not be loaded: {e}'))
+                self.skipped.append((path.name, tr('its original could not be loaded: {error}').format(error=e)))
         return takes
 
     # ---- kept clips ---------------------------------------------------------------------------------------------------
@@ -1274,7 +1279,7 @@ class Library:
             try:
                 data = json.loads(sidecar.read_text(encoding='utf-8'))
             except (OSError, ValueError):
-                self.skipped.append((sidecar.name, 'it could not be read'))
+                self.skipped.append((sidecar.name, tr('it could not be read')))
                 continue
             if not isinstance(data, dict) or data.get('schema') not in KNOWN_SCHEMAS:
                 continue
@@ -1283,7 +1288,7 @@ class Library:
             except SidecarProblem as e:
                 self.skipped.append((sidecar.name, str(e)))
             except (OSError, KeyError, TypeError, ValueError):
-                self.skipped.append((sidecar.name, 'it is incomplete or holds a value that cannot be read'))
+                self.skipped.append((sidecar.name, tr('it is incomplete or holds a value that cannot be read')))
             else:
                 self._restore_autosave(take, take.master_path)
                 takes.append(take)
@@ -1297,12 +1302,12 @@ class Library:
         absolute path or one that climbs out with `..` is refused.
         """
         if not isinstance(name, str) or not name:
-            raise SidecarProblem('it is incomplete')
+            raise SidecarProblem(tr('it is incomplete'))
         path = folder / name
         try:
             path.resolve().relative_to(folder.resolve())
         except (ValueError, OSError):
-            raise SidecarProblem('it names a file outside its own folder') from None
+            raise SidecarProblem(tr('it names a file outside its own folder')) from None
         return path
 
     @staticmethod
@@ -1311,34 +1316,34 @@ class Library:
         can be edited or arrive from elsewhere, and one bad value must cost that clip, not the whole list."""
         source, take_id, created = data['source'], data['id'], data['created']
         if not all(isinstance(value, str) and value for value in (source, take_id, created)):
-            raise SidecarProblem('it is incomplete')
+            raise SidecarProblem(tr('it is incomplete'))
         try:
             dt.datetime.fromisoformat(created)
         except ValueError:
-            raise SidecarProblem('its creation time cannot be read') from None
+            raise SidecarProblem(tr('its creation time cannot be read')) from None
         for key in ('transcript', 'origin', 'allowed_use', 'notes', 'source_url'):
             if not isinstance(data.get(key) or '', str):
-                raise SidecarProblem(f'its {key} is not text')
+                raise SidecarProblem(tr('its {key} is not text').format(key=key))
         flags = data.get('flags') or []
         if not isinstance(flags, list) or not all(isinstance(flag, str) for flag in flags):
-            raise SidecarProblem('its flags cannot be read')
+            raise SidecarProblem(tr('its flags cannot be read'))
         if not isinstance(data.get('device') or {}, dict):
-            raise SidecarProblem('its device cannot be read')
+            raise SidecarProblem(tr('its device cannot be read'))
 
     def _take_from_sidecar(self, folder, sidecar, data):
         try:
             master_name, export_name = data['master']['file'], data['export']['file']
             self._check_fields(data)
         except (KeyError, TypeError):
-            raise SidecarProblem('it is incomplete') from None
+            raise SidecarProblem(tr('it is incomplete')) from None
         source, take_id, created = data['source'], data['id'], data['created']
         master_path, export_path = self.inside(folder, master_name), self.inside(folder, export_name)
         if not master_path.exists():
-            raise SidecarProblem('its master file is missing')
+            raise SidecarProblem(tr('its master file is missing'))
         try:
             frames, rate, channels = audio_shape(master_path)
         except (OSError, RuntimeError):
-            raise SidecarProblem('its master file could not be read') from None
+            raise SidecarProblem(tr('its master file could not be read')) from None
         history = self._recipe_from(data, frames, rate, self._chain_from_sidecar)
         label = _label_of(data)
         status = data.get('transcript_status')
@@ -1390,16 +1395,16 @@ class Library:
         try:
             validate_edits(edits, seconds)
             if not ac.kept_segments(ac.cut_ranges(edits, rate, frames), frames):
-                raise ValueError('the cuts remove the whole clip')
+                raise ValueError(tr('the cuts remove the whole clip'))
         except ValueError as e:
-            raise SidecarProblem(f'its edit list is invalid: {e}') from None
+            raise SidecarProblem(tr('its edit list is invalid: {error}').format(error=e)) from None
         fade = float(data.get('join_fade_ms', ac.DEFAULT_FADE_MS))
         if not math.isfinite(fade) or not 0 <= fade <= ac.MAX_FADE_MS:
-            raise SidecarProblem('its join fade is invalid')
+            raise SidecarProblem(tr('its join fade is invalid'))
         try:
             chain = chain_mod.normalize(chain_of(data))
         except ValueError as e:
-            raise SidecarProblem(f'its processing settings are invalid: {e}') from None
+            raise SidecarProblem(tr('its processing settings are invalid: {error}').format(error=e)) from None
         return History(edits, seconds=seconds, chain=chain, fade_ms=fade)
 
     @staticmethod
@@ -1693,17 +1698,17 @@ class Library:
         except SidecarProblem as e:
             take.autosave_problem = f'{path.name}: {e}'
         except (OSError, KeyError, TypeError, ValueError):
-            take.autosave_problem = f'{path.name}: it is damaged'
+            take.autosave_problem = tr('{file}: it is damaged').format(file=path.name)
 
     def _apply_autosave(self, take, master, data):
         if not isinstance(data, dict) or data.get('schema') != AUTOSAVE_SCHEMA:
-            raise SidecarProblem('it is not an autosave file of this program')
+            raise SidecarProblem(tr('it is not an autosave file of this program'))
         if take.kept and data.get('kept_sha256') != take.kept_sha256:
             return                                  # left behind by a Keep that failed to delete it: the sidecar is newer
         about = data.get('master')
         if not isinstance(about, dict) or about.get('file') != master.name or about.get('frames') != take.frames \
                 or about.get('sample_rate') != take.rate:
-            raise SidecarProblem('it was saved for a different recording')
+            raise SidecarProblem(tr('it was saved for a different recording'))
         history = self._recipe_from(data, take.frames, take.rate, lambda d: d.get('chain'))
         # Everything is checked before anything is applied, so a file that fails halfway leaves the take as recorded.
         meta = {key: data[key][:AUTOSAVE_TEXT_MAX] for key in
@@ -1751,7 +1756,7 @@ class Library:
         path = Path(path)
         data = json.loads(path.read_text(encoding='utf-8'))
         if not isinstance(data, dict):
-            raise ValueError('the sidecar is not a clip description')
+            raise ValueError(tr('the sidecar is not a clip description'))
         for key, value in (('label', label), ('markers', _markers_json(markers))):
             if value:
                 data[key] = value
@@ -1799,10 +1804,10 @@ class Library:
             about = json.loads(f.readline())
             raw = f.read()
         if not isinstance(about, dict) or about.get('schema') != SPOOL_SCHEMA:
-            raise ValueError('it is not a recording of this program')
+            raise ValueError(tr('it is not a recording of this program'))
         rate, channels = int(about['rate']), int(about['channels'])
         if rate <= 0 or channels <= 0:
-            raise ValueError('it does not say how it was recorded')
+            raise ValueError(tr('it does not say how it was recorded'))
         dt.datetime.fromisoformat(about['created'])
         purpose = ac.purpose_of(about.get('purpose'))
         samples = np.frombuffer(raw, dtype='<f4', count=len(raw) // (4 * channels) * channels).astype(np.float32)
@@ -1830,7 +1835,7 @@ class Library:
                     recovered += 1
                 path.unlink()
             except (OSError, KeyError, TypeError, ValueError) as e:
-                self.skipped.append((path.name, f'the recording could not be recovered: {e}'))
+                self.skipped.append((path.name, tr('the recording could not be recovered: {error}').format(error=e)))
         return recovered
 
     # ---- moving a take to another speaker -----------------------------------------------------------------------------
@@ -1843,7 +1848,7 @@ class Library:
             shutil.copyfile(source, tmp)
             sync_file(tmp)
             if file_sha256(tmp) != file_sha256(source):
-                raise OSError(f'{source.name} could not be copied exactly')
+                raise OSError(tr('{file} could not be copied exactly').format(file=source.name))
             os.replace(tmp, destination)
         except BaseException:
             _remove(tmp)
@@ -1887,16 +1892,16 @@ class Library:
         be written. In both cases the take is where it was.
         """
         if slug not in self.speakers():
-            raise ValueError('That speaker is not in this folder')
+            raise ValueError(tr('That speaker is not in this folder'))
         old = take.speaker
         if not old:
-            raise ValueError('This take is not filed under a speaker')
+            raise ValueError(tr('This take is not filed under a speaker'))
         if slug == old:
-            raise ValueError('The take is already filed under that speaker')
+            raise ValueError(tr('The take is already filed under that speaker'))
         master = self._master_file(take)
         if take.unsaved or master is None or not master.is_file():
-            raise ValueError('The original recording of this take is not saved on disk yet, so the take cannot be moved. '
-                             'Once the folder is writable, Keep writes it.')
+            raise ValueError(tr('The original recording of this take is not saved on disk yet, so the take cannot be '
+                                'moved. Once the folder is writable, Keep writes it.'))
         target = self.folder(slug)
         if take.kept:
             return self._move_kept(take, old, slug, target, master)
@@ -1926,16 +1931,18 @@ class Library:
     def _move_kept(self, take, old, slug, target, master):
         export, sidecar = Path(take.export_path), Path(take.sidecar_path) if take.sidecar_path else None
         if sidecar is None or not sidecar.is_file():
-            raise ValueError('The saved description of this clip (its sidecar) is missing, so the clip cannot be moved')
+            raise ValueError(tr('The saved description of this clip (its sidecar) is missing, so the clip cannot be '
+                                'moved'))
         if not export.is_file():
-            raise ValueError(f'{export.name} is missing, so the clip cannot be moved')
+            raise ValueError(tr('{file} is missing, so the clip cannot be moved').format(file=export.name))
         try:
             data = json.loads(sidecar.read_text(encoding='utf-8'))
         except ValueError:
             data = None
         if not isinstance(data, dict) or not isinstance(data.get('export'), dict) \
                 or not isinstance(data.get('master'), dict):
-            raise ValueError(f'{sidecar.name} cannot be read as a clip description, so the clip cannot be moved')
+            raise ValueError(tr('{file} cannot be read as a clip description, so the clip cannot be moved').format(
+                file=sidecar.name))
         stem = self._unique_stem(target, export.stem)
         new_master, new_export, new_sidecar = (target / 'masters' / f'{stem}.raw.wav', target / f'{stem}.wav',
                                                target / f'{stem}.json')

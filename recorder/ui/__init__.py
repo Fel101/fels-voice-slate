@@ -19,21 +19,27 @@ def run(argv=None):
     import logging
     import os
 
+    from PySide6.QtCore import Qt
     from PySide6.QtWidgets import QApplication
 
     from .. import __version__, i18n, launch, settings
     from ..hotkey import GlobalKey
     from . import theme
     from .main_window import MainWindow
+    from .translate import install_qt_language
 
     _taskbar_identity()
     theme.prepare_display()
     data = settings.load()
-    i18n.use(settings.language(data) or i18n.windows_language())
+    language = settings.language(data) or i18n.windows_language()
+    i18n.use(language)
+    # Native pickers follow Windows' language. Qt's pickers can follow the language chosen here.
+    QApplication.setAttribute(Qt.ApplicationAttribute.AA_DontUseNativeDialogs)
     scale = settings.text_scale(data) or theme.windows_text_scale()
     if scale != 1.0:
         os.environ.setdefault('QT_SCALE_FACTOR', f'{scale:g}')     # read as the application starts, and it scales everything
     app = QApplication(argv if argv is not None else sys.argv)
+    install_qt_language(app, language)
     app.setApplicationName(settings.APP_NAME)
     app.setApplicationVersion(__version__)
     theme.install(app, settings.theme(data))

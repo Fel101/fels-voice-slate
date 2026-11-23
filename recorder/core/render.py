@@ -12,6 +12,7 @@ import numpy as np
 
 from .. import audio_core as ac
 from . import chain as chain_mod
+from ..i18n import tr
 
 EDGE_RAMP_SECONDS = 0.003        # silence and region gain meet the surrounding audio over this long, outside the region
 
@@ -142,7 +143,7 @@ def before_level(master, rate, recipe, denoise=None, cache=None, ident=None):
     if hit is not None:
         return hit
     if denoise is None:
-        raise ValueError('Noise cleaning is on but no cleaner is available')
+        raise ValueError(tr('Noise cleaning is on but no cleaner is available'))
     cleaned = np.asarray(denoise(filtered, rate, nf), dtype=np.float32)
     if cache is not None and ident is not None:
         cache.put(clean_key, cleaned)

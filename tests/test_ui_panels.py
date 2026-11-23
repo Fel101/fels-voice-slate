@@ -305,7 +305,7 @@ def test_suggest_from_audio_explains_when_the_recognizer_is_not_set_up(window, s
     window.flush()
     dialogs.confirm_answer = False
     window.inspector.clip.suggest.click()
-    assert window.status_text.full_text == transcript.NOT_SET_UP and 'setup-transcripts.bat' in transcript.NOT_SET_UP
+    assert window.status_text.full_text == transcript.not_set_up() and 'setup-transcripts.bat' in transcript.not_set_up()
     assert dialogs.confirmations[-1].title == 'Set up draft transcripts?' and dialogs.opened == []
 
 

@@ -79,11 +79,17 @@ Fel's Voice Slate itself never goes online; only this setup does, now that you r
 recordings is sent. A draft is a guess: you listen and correct it before a clip is kept.
 """
 
-OFFER = (f'Draft transcripts need a speech recognizer, and this computer does not have one yet.\n\n'
-         f'The setup downloads one once, from PyPI and Hugging Face, and keeps it in this program\'s folder: about '
-         f'{RECOGNIZER_MB} MB for the recognizer and {MODEL_RANGE} MB for the speech model '
-         f'you choose. A window asks which model before anything is downloaded. Nothing you record is sent anywhere, '
-         f'and the program itself never goes online.\n\nOpen the setup now?')
+def offer():
+    from .i18n import tr
+
+    sizes = [mb for mb, _ in SIZES.values()]
+    model_range = tr('{low} to {high}').format(low=min(sizes), high=max(sizes))
+    return tr('Draft transcripts need a speech recognizer, and this computer does not have one yet.\n\n'
+              "The setup downloads one once, from PyPI and Hugging Face, and keeps it in this program's folder: about "
+              '{recognizer} MB for the recognizer and {models} MB for the speech model you choose. '
+              'A window asks which model before anything is downloaded. Nothing you record is sent anywhere, '
+              'and the program itself never goes online.\n\nOpen the setup now?').format(
+                  recognizer=RECOGNIZER_MB, models=model_range)
 
 DONE = """
 Done. Draft transcripts are set up with {what}.

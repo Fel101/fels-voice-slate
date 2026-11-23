@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from recorder import launch, settings
+from recorder import i18n, launch, settings
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'tools'))
 import build_installer  # noqa: E402
@@ -61,6 +61,16 @@ def test_nothing_the_window_needs_is_pruned(name):
 def test_what_the_transcript_setup_needs_is_kept():
     """It makes an environment with the private Python, which takes ensurepip and venv."""
     assert not any(part in entry for entry in build_installer.PRUNE_PYTHON for part in ('ensurepip', 'venv'))
+
+
+def test_the_installer_keeps_qt_messages_for_the_window_languages(tmp_path):
+    folder = tmp_path / 'Lib' / 'site-packages' / 'PySide6' / 'translations'
+    folder.mkdir(parents=True)
+    wanted = {f'qtbase_{code}.qm' for code in i18n.LANGUAGES if code != 'en'}
+    for name in wanted | {'qtbase_ja.qm', 'qtquickcontrols2_de.qm'}:
+        (folder / name).touch()
+    build_installer.prune(tmp_path)
+    assert {path.name for path in folder.iterdir()} == wanted
 
 
 def test_the_version_is_read_from_the_program():

@@ -13,6 +13,7 @@ import numpy as np
 
 from . import devices
 from .audio_core import resample
+from .i18n import tr
 
 
 def _default_stream(rate, callback, device=None):
@@ -194,7 +195,7 @@ class Player:
     def swap(self, samples, rate, seconds):
         """Replace the buffer while playing (for A/B) and continue from `seconds` of the new one."""
         if int(rate) != self._source_rate:
-            raise ValueError('Both buffers must have the same sample rate')
+            raise ValueError(tr('Both buffers must have the same sample rate'))
         source = np.ascontiguousarray(np.asarray(samples, dtype=np.float32).reshape(-1))
         playing = source if self._rate == self._source_rate else np.ascontiguousarray(
             resample(source, self._source_rate, self._rate))

@@ -173,7 +173,7 @@ def write(path, rows, kind=None):
     path = Path(path)
     kind = kind or kind_for(path)
     if kind not in FORMATS:
-        raise ValueError('A manifest is a .jsonl or a .csv file')
+        raise ValueError(tr('A manifest is a .jsonl or a .csv file'))
     tmp = path.with_name(path.name + '.tmp')
     try:
         with open(tmp, 'w', encoding='utf-8', newline='') as out:

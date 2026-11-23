@@ -13,6 +13,7 @@ import time
 from .. import audio_core as ac
 from .. import capture as cap
 from ..core import analysis
+from ..i18n import tr
 
 QUIET_SECONDS = 3.0                 # of the room alone
 SPEAK_SECONDS = 15.0                # the longest wait for the sentence, from the end of the quiet
@@ -72,7 +73,8 @@ class RoomCheck:
         except Exception as e:
             self.capture = None
             self._rearm()
-            self.bus.notice('error', 'Could not open the microphone', str(e))
+            text = tr('Check that the microphone is connected, then try again.\n\n{detail}').format(detail=e)
+            self.bus.notice('error', 'Could not open the microphone', text)
             return False
         self.result = None
         self.phase = 'quiet'

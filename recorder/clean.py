@@ -19,6 +19,7 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 from scipy.signal import correlate
+from .i18n import tr
 
 NF_MIN, NF_MAX, DEFAULT_NF = -80.0, -20.0, -45.0
 TIMEOUT_SECONDS = 300
@@ -48,9 +49,9 @@ def validate_nf(nf):
     try:
         value = float(nf)
     except (TypeError, ValueError):
-        raise CleanError('The noise floor must be a number') from None
+        raise CleanError(tr('The noise floor must be a number')) from None
     if isinstance(nf, bool) or not math.isfinite(value) or not NF_MIN <= value <= NF_MAX:
-        raise CleanError(f'The noise floor must be between {NF_MIN:g} and {NF_MAX:g} dB')
+        raise CleanError(tr('The noise floor must be between {low:g} and {high:g} dB').format(low=NF_MIN, high=NF_MAX))
     return value
 
 
@@ -92,14 +93,14 @@ def find_ffmpeg():
     if _configured:
         if Path(_configured).is_file():
             return _configured
-        raise CleanError(f'The ffmpeg path in settings does not exist: {_configured}')
+        raise CleanError(tr('The ffmpeg path in settings does not exist: {path}').format(path=_configured))
     found = _on_path()
     if found:
         return found
     candidates = _winget_candidates()
     if candidates:
         return candidates[0]
-    raise NotFound(NOT_FOUND)
+    raise NotFound(tr(NOT_FOUND))
 
 
 def available():
@@ -153,12 +154,13 @@ def _afftdn(ffmpeg, x, rate, nf):
             reply = subprocess.run(command, capture_output=True, text=True, timeout=TIMEOUT_SECONDS, check=False,
                                    creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
         except subprocess.TimeoutExpired:
-            raise CleanError('FFmpeg took too long to clean the audio.') from None
+            raise CleanError(tr('FFmpeg took too long to clean the audio.')) from None
         except OSError as e:
-            raise CleanError(f'FFmpeg could not be started: {e}') from None
+            raise CleanError(tr('FFmpeg could not be started: {error}').format(error=e)) from None
         if reply.returncode:
-            raise CleanError('FFmpeg could not clean the audio: ' + (reply.stderr.strip() or str(reply.returncode))[-300:])
+            detail = reply.stderr.strip() or str(reply.returncode)
+            raise CleanError(tr('FFmpeg could not clean the audio: {detail}').format(detail=detail[-300:]))
         y, out_rate = sf.read(str(cleaned), dtype='float32', always_2d=False)
     if int(out_rate) != int(rate):
-        raise CleanError('FFmpeg changed the sample rate; the clip was not cleaned.')
+        raise CleanError(tr('FFmpeg changed the sample rate; the clip was not cleaned.'))
     return np.asarray(y, dtype=np.float32).reshape(-1)
