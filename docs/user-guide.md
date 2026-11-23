@@ -730,9 +730,13 @@ Settings are saved in a small `settings.json`. The recorder looks for it in this
 cannot be read is moved aside, never overwritten. The first line of `voice-slate.log` names the file in use, and so does
 the tooltip of *Draft transcripts* at the bottom of the window.
 
-**About** in the gear menu shows the version, the licence, and the libraries the program is built with.
+In the gear menu, **Help → About** shows the version, the licence, and the libraries the program is built with. It also
+links to the Fel's Studio apps in your browser.
 
 ![The About dialog](images/about.png)
+
+**Help → Check for updates** shows the installed version and opens the Voice Slate releases page in your browser.
+Voice Slate itself makes no network connection.
 
 ## Using it without a mouse, and with a screen reader
 

@@ -148,6 +148,9 @@ class StubDialogs:
     def about(self):
         self.shown.append('about')
 
+    def check_for_updates(self):
+        self.shown.append('check_for_updates')
+
     def shortcuts(self):
         self.shown.append('shortcuts')
 

@@ -11,8 +11,8 @@ import PySide6
 from PySide6.QtCore import QDate, QRegularExpression, Qt, QUrl, qVersion
 from PySide6.QtGui import QDesktopServices, QFont, QGuiApplication, QKeySequence, QRegularExpressionValidator
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDateEdit, QDialog, QDoubleSpinBox, QFileDialog, QFormLayout, QFrame,
-                               QInputDialog, QKeySequenceEdit, QLabel, QLineEdit, QMessageBox, QPlainTextEdit, QPushButton,
-                               QScrollArea, QSpinBox, QWidget)
+                               QGridLayout, QInputDialog, QKeySequenceEdit, QLabel, QLineEdit, QMessageBox, QPlainTextEdit,
+                               QPushButton, QScrollArea, QSpinBox, QWidget)
 
 from .. import __version__, audio_import, clean, dataset, devices, manifest, settings, share, transcript
 from .. import audio_core as ac
@@ -22,7 +22,11 @@ from .palette import PALETTE
 from .translate import translate_tree
 from .widgets import button, clips_text, hbox, label, vbox
 
+VOICE_SLATE_URL = 'https://github.com/Fel101/fels-voice-slate'
+RELEASES_URL = f'{VOICE_SLATE_URL}/releases'
 VOICE_LAB_URL = 'https://github.com/Fel101/fels-voice-lab'
+NPC_FORGE_URL = 'https://github.com/Fel101/fels-npc-forge'
+ALTERA_URL = 'https://github.com/Fel101/Altera'
 THEME_NAMES = {'dark': 'Dark', 'light': 'Light', 'contrast': 'High contrast', 'system': 'As in Windows'}
 PREFERRED_HEIGHT = 820              # of the Settings dialog, when the screen has the room
 LEVEL_ICONS = {'info': QMessageBox.Icon.Information, 'warning': QMessageBox.Icon.Warning,
@@ -146,6 +150,15 @@ class Dialogs:
 
     def about(self):
         translate_tree(AboutDialog(self.parent)).exec()
+
+    def check_for_updates(self):
+        version = tr('This is Voice Slate {version}.').format(version=__version__)
+        if QDesktopServices.openUrl(QUrl(RELEASES_URL)):
+            self.notice('info', 'Check for updates', version + ' ' + tr(
+                'Your browser shows the newest version. Voice Slate itself makes no network connection.'))
+        else:
+            self.notice('warning', 'Check for updates', version + ' ' + tr(
+                'The releases page could not open. Copy this address into your browser.\n{url}').format(url=RELEASES_URL))
 
     def shortcuts(self):
         translate_tree(ShortcutsDialog(self.parent)).exec()
@@ -865,6 +878,25 @@ class AboutDialog(QDialog):
         layout.addSpacing(4)
         layout.addWidget(label('Record only voices you own or have permission to use. See the responsible-use notes in '
                                'the documentation.', 'muted', wrap=True))
+        layout.addSpacing(4)
+        layout.addWidget(label("Part of Fel's Studio. Four free apps run on your own PC and work together. Each one also "
+                               'works on its own.', wrap=True))
+        apps = QGridLayout()
+        apps.setHorizontalSpacing(14)
+        apps.setVerticalSpacing(4)
+        apps.setColumnStretch(1, 1)
+        for row, (name, url, description) in enumerate((
+                ('Voice Slate', VOICE_SLATE_URL, tr('Record voices with consent')),
+                ('Voice Lab', VOICE_LAB_URL, tr('Design and clone voices')),
+                ('NPC Forge', NPC_FORGE_URL, tr('Make characters for games')),
+                ('Altera', ALTERA_URL, tr('Talk with your characters')),
+        )):
+            link = button(name, 'link')
+            link.setAccessibleDescription(description)
+            link.clicked.connect(lambda checked=False, address=url: QDesktopServices.openUrl(QUrl(address)))
+            apps.addWidget(link, row, 0, Qt.AlignmentFlag.AlignLeft)
+            apps.addWidget(label(description, 'muted', wrap=True), row, 1)
+        layout.addLayout(apps)
         layout.addSpacing(4)
         layout.addWidget(label(
             tr('Released under the MIT License. Built with Qt {qt} through PySide6 {pyside} (LGPL-3.0), NumPy, SciPy, '

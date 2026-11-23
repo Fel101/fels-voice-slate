@@ -24,7 +24,7 @@ For anything bigger than a small fix, please open an issue first so we can agree
 
 Search the existing issues first, then use the bug-report form. It helps to include:
 
-- the Voice Slate version (the gear menu, then **About**), your Windows version and your Python version;
+- the Voice Slate version (the gear menu, then **Help → About**), your Windows version and your Python version;
 - what you did, what you expected, and what happened, including any message in the status line or an error window;
 - whether it involved a microphone, system audio, or an imported file.
 

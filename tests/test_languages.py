@@ -491,7 +491,9 @@ def test_an_edited_take_and_the_dialogs_say_nothing_in_english(qapp, make_sessio
     theirs = edited_take(qapp, make_session, dialogs, tmp_path / code, code) | opened_dialogs(code)
     assert any(text.startswith('Cut 1.00 to 1.50 s') for text in english)                     # it saw the history
     assert any(text.startswith('Released under') for text in english)                         # and the dialogs
-    left = sorted(text for text in english & theirs if any(word not in SAME for word in WORD.findall(text)))
+    app_names = {'Voice Slate', 'Voice Lab', 'NPC Forge', 'Altera'}
+    assert app_names <= english & theirs
+    left = sorted(text for text in (english & theirs) - app_names if any(word not in SAME for word in WORD.findall(text)))
     assert left == []
 
 

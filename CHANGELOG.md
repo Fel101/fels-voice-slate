@@ -11,6 +11,7 @@ the project uses [Semantic Versioning](https://semver.org/).
 - Send kept clips to Voice Lab's Cast inbox, or save `.voiceslate` files to open in Voice Lab later.
 - Documented the Fel's Studio clip format, with receiver checks and a `.voiceslate` writing example.
 - Window notices, progress, transcript setup and file dialogs follow the selected window language.
+- Fel's Studio links in About and a Check for updates command that opens the releases page in your browser.
 
 ## [0.7.0] - 2026-11-15
 

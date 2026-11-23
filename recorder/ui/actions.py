@@ -111,6 +111,7 @@ SPEC = {
     # the program
     'settings': ('Settings...', 'settings', ['Ctrl+,'], 'Output folder, record key, FFmpeg and draft transcripts', False),
     'shortcuts': ('Keyboard shortcuts', None, ['F1'], 'List every shortcut', False),
+    'check_for_updates': ('Check for updates', None, [], 'Open Voice Slate releases in your browser', False),
     'diagnostics': ('Export diagnostics...', None, [], 'Save a zip to attach to a bug report, with your folders and '
                                                        'speaker names hidden', False),
     'about': ('About...', None, [], 'Version, licence and credits', False),

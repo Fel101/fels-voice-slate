@@ -1,6 +1,7 @@
 """The panels around the editor: the take list, the inspector's three pages and the Keep checklist, the top bar, the
 edit toolbar and the dialogs. The window is driven through the same widgets a person would use."""
 import datetime as dt
+import socket
 
 import numpy as np
 import pytest
@@ -9,13 +10,13 @@ pytest.importorskip('PySide6')
 from PySide6.QtCore import Qt, QTimer  # noqa: E402
 from PySide6.QtGui import QDesktopServices  # noqa: E402
 from PySide6.QtTest import QTest  # noqa: E402
-from PySide6.QtWidgets import QLabel, QPushButton  # noqa: E402
+from PySide6.QtWidgets import QLabel, QMessageBox, QPushButton  # noqa: E402
 
 import ui_helpers  # noqa: E402
 from helpers import fill, record, speech  # noqa: E402
 from ui_helpers import click_row, row_point  # noqa: E402
 from recorder import audio_core as ac  # noqa: E402
-from recorder import clean, transcript  # noqa: E402
+from recorder import __version__, clean, transcript  # noqa: E402
 from recorder.ui import dialogs as dialog_mod  # noqa: E402
 from recorder.ui import library  # noqa: E402
 from recorder.ui.inspector import Inspector  # noqa: E402
@@ -760,6 +761,57 @@ def test_the_settings_dialog_says_whether_each_path_is_any_good(qapp, monkeypatc
 def test_the_about_dialog_names_the_licence_and_the_responsible_use_note(qapp):
     text = label_text(dialog_mod.AboutDialog())
     assert 'MIT' in text and 'LGPL' in text and 'permission' in text and 'nothing leaves this computer' in text
+
+
+def test_about_links_to_the_suite_app_pages(qapp, monkeypatch):
+    opened = []
+    monkeypatch.setattr(QDesktopServices, 'openUrl', lambda url: opened.append(url.toString()) or True)
+    dialog = dialog_mod.AboutDialog()
+    dialog.show()
+    ui_helpers.pump(qapp)
+    links = {b.text(): b for b in dialog.findChildren(QPushButton)}
+    links['Close'].setFocus()
+    for name in ('Voice Slate', 'Voice Lab', 'NPC Forge', 'Altera'):
+        QTest.keyClick(qapp.focusWidget(), Qt.Key.Key_Tab)
+        assert qapp.focusWidget() is links[name]
+        QTest.keyClick(links[name], Qt.Key.Key_Return)
+    assert opened == ['https://github.com/Fel101/fels-voice-slate', 'https://github.com/Fel101/fels-voice-lab',
+                      'https://github.com/Fel101/fels-npc-forge', 'https://github.com/Fel101/Altera']
+    dialog.close()
+
+
+@pytest.mark.parametrize('browser_opened', [True, False])
+def test_check_for_updates_from_help_uses_the_browser_without_sockets(qapp, session, monkeypatch, browser_opened):
+    from recorder.ui.main_window import MainWindow
+
+    opened, notices = [], []
+
+    def open_browser(url):
+        opened.append(url.toString())
+        return browser_opened
+
+    def blocked(*args, **kwargs):
+        pytest.fail('Voice Slate tried to use a network socket')
+
+    monkeypatch.setattr(QDesktopServices, 'openUrl', open_browser)
+    monkeypatch.setattr(QMessageBox, 'exec', lambda box: notices.append((box.windowTitle(), box.text())))
+    window = MainWindow(session=session)
+    window.timer.stop()
+    help_menu = next(action.menu() for action in window.topbar.menu.actions() if action.text() == 'Help')
+    updates = next(action for action in help_menu.actions() if action.text() == 'Check for updates')
+    url = 'https://github.com/Fel101/fels-voice-slate/releases'
+
+    with monkeypatch.context() as offline:
+        for name in ('socket', 'create_connection', 'getaddrinfo'):
+            offline.setattr(socket, name, blocked)
+        assert opened == []
+        updates.trigger()
+
+    assert opened == [url]
+    message = ('Your browser shows the newest version. Voice Slate itself makes no network connection.' if browser_opened else
+               f'The releases page could not open. Copy this address into your browser.\n{url}')
+    assert notices == [('Check for updates', f'This is Voice Slate {__version__}. {message}')]
+    window.close()
 
 
 def test_the_shortcuts_dialog_lists_every_bound_key(qapp):

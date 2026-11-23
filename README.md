@@ -5,12 +5,21 @@ what it may be used for, written next to the audio.
 
 ![Voice Slate: a take with its waveform, spectrogram and the Clip tab](docs/images/edit.png)
 
+> **Part of Fel's Studio.** Four free apps run on your own PC and work together. [Voice Slate][slate] records voices with
+> consent, [Voice Lab][lab] designs and clones voices, [NPC Forge][forge] makes characters for games, and [Altera][altera]
+> lets you talk with them. Each one also works on its own.
+
+[slate]: https://github.com/Fel101/fels-voice-slate
+[lab]: https://github.com/Fel101/fels-voice-lab
+[forge]: https://github.com/Fel101/fels-npc-forge
+[altera]: https://github.com/Fel101/Altera
+
 *The screenshots in this project show generated test audio, not a real person's voice.*
 
-Fel's Voice Slate is for anyone who needs good recordings of one voice: reference clips for text-to-speech tools, a
-sentence at a time for a speech dataset or voice banking, or full audition takes. It records from a microphone, lets you cut
-and clean the take, checks the result against sensible quality rules, and saves a WAV together with a JSON file that says
-what is in it and whether you had the right to record it.
+Fel's Voice Slate is for voice actors and narrators who need to check auditions against ACX's limits, people building
+speech datasets or banking their own voice, and anyone contributing a voice to Voice Lab. In Voice Lab, a clip can become
+a voice you can cast in scenes, games and chats. Slate lets you record, cut and clean a take, then saves a WAV with a JSON
+file that records what is in the clip and how it can be used.
 
 > **Record only voices you own or have permission to use.** The app will not keep a clip until you confirm that, and
 > [Responsible use](docs/responsible-use.md) explains what it means and why it asks.
@@ -126,6 +135,9 @@ Your recordings are safe when you update: they are in your own folder, not in th
 `voice-clips` folder goes on using it until you move it (see [Updating](#updating)).
 
 ## Updating
+
+In the gear menu, choose **Help → Check for updates**. Voice Slate shows the version you're running and opens the releases
+page in your browser, where you can see the newest version. Voice Slate itself makes no network connection.
 
 - **If you used the installer**, run the new one. It asks you to close Voice Slate if it is open, and your recordings, settings
   and speech model stay as they are.
