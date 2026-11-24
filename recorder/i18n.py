@@ -43,9 +43,14 @@ def tr(text):
     return _table.get(text, text)
 
 
+def windows_ui_language():
+    """The language Windows shows itself in, when there is a file for it; None for any other language."""
+    try:
+        return WINDOWS_LANGUAGES.get(ctypes.windll.kernel32.GetUserDefaultUILanguage() & 0x3ff)
+    except (AttributeError, OSError):
+        return None
+
+
 def windows_language():
     """The language Windows shows itself in, if there is a file for it, else English."""
-    try:
-        return WINDOWS_LANGUAGES.get(ctypes.windll.kernel32.GetUserDefaultUILanguage() & 0x3ff, 'en')
-    except (AttributeError, OSError):
-        return 'en'
+    return windows_ui_language() or 'en'

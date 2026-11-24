@@ -166,8 +166,9 @@ class CheckedClip:
     def name(self):
         return self.clip.name
 
-    def write(self, library, destination=None):
-        """Publish one complete archive. A missing destination means the Voice Lab inbox."""
+    def write(self, library, destination=None, *, folder=None):
+        """Publish one complete archive: as `destination`, as a new file named after the clip in `folder`, or, given
+        neither, in the Voice Lab inbox."""
         wav, sidecar = self.clip.read()
         if (_digest(wav), _digest(sidecar)) != (self.wav_digest, self.sidecar_digest):
             raise HandoffError(tr('The kept clip changed during the handoff. Try again to check the latest version.'))
@@ -176,7 +177,7 @@ class CheckedClip:
             bundle.writestr('clip.wav', wav)
             bundle.writestr('clip.json', sidecar)
         data = output.getvalue()
-        if destination is None:
+        if destination is None and folder is None:
             try:
                 _inbox(library)
                 return inbox_write(VOICE_LAB, 'voice-slate', self.name + EXTENSION, data)
@@ -185,12 +186,34 @@ class CheckedClip:
             except OSError as error:
                 raise HandoffError(tr('Could not write to the Voice Lab inbox. Check that it is writable and try again.')) from error
         try:
+            if folder is not None:
+                check_folder(folder, library)
+                return _save_new(Path(folder), self.name, data)
             _outside_library(destination, library)
             return _save(destination, data)
         except FileExistsError as error:
             raise HandoffError(tr('That file already exists. Choose a different name and try again.')) from error
         except OSError as error:
             raise HandoffError(tr('Could not save the Voice Lab file. Choose a writable folder and try again.')) from error
+
+
+def check_folder(folder, library):
+    """Refuse a folder for saved handoff files inside the output folder, before anything is written there."""
+    _outside_library(Path(folder), library)
+
+
+def _save_new(folder, stem, data):
+    """Save as `stem`.voiceslate in `folder`, or with -2, -3 ... added when that name is taken. Nothing is replaced."""
+    for number in range(1, 1000):
+        suffix = '' if number == 1 else f'-{number}'
+        path = folder / f'{stem}{suffix}{EXTENSION}'
+        if path.exists():
+            continue
+        try:
+            return _save(path, data)
+        except FileExistsError:
+            continue                    # taken this instant by another program
+    raise FileExistsError(folder / f'{stem}{EXTENSION}')
 
 
 def _save(destination, data):

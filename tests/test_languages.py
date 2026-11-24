@@ -108,6 +108,20 @@ def test_window_messages_are_translated_before_values_are_inserted():
     assert list(strings.untranslated_formats()) == []
 
 
+@pytest.mark.parametrize('chosen, windows, native', [
+    (None, 'de', True),         # following Windows: Windows' own dialogs, which speak its language
+    (None, None, True),         # a Windows language with no file here still gets Windows' own dialogs
+    ('de', 'de', True),         # the same language chosen as Windows shows
+    ('fr', 'de', False),        # another language chosen: Qt's dialogs, which speak it
+    ('en', None, False),        # English chosen on, say, an Italian Windows
+])
+def test_windows_own_file_pickers_stay_unless_another_language_is_chosen(monkeypatch, chosen, windows, native):
+    from recorder.ui.translate import native_pickers
+
+    monkeypatch.setattr(i18n, 'windows_ui_language', lambda: windows)
+    assert native_pickers(chosen) is native
+
+
 @pytest.mark.parametrize('code', LANGUAGES)
 def test_qt_file_picker_follows_the_selected_language(qapp, speak, code):
     from PySide6.QtCore import QLocale

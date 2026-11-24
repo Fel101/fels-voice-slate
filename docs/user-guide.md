@@ -607,8 +607,9 @@ Shift and use the same command. You can also find it beside **Save a copy...** i
 Open **Cast** in Voice Lab, preview the waiting clips, then choose **Import as candidate** for each one you want to use.
 Voice Lab can be closed while you send. Each handoff carries the kept WAV, transcript, origin and permission details.
 
-If the menu says **Save for Voice Lab...**, choose where to save each `.voiceslate` file. Open the saved files in Voice
-Lab under **Cast → Import from Voice Slate**. You can get the app from the [Voice Lab project](https://github.com/Fel101/fels-voice-lab).
+If the menu says **Save for Voice Lab...**, choose where to save the `.voiceslate` file. For several clips, choose one
+folder: each clip gets a file named after its speaker and label, and a name already there gets `-2`, `-3` and so on, so
+nothing is replaced. Open the saved files in Voice Lab under **Cast → Import from Voice Slate**. You can get the app from the [Voice Lab project](https://github.com/Fel101/fels-voice-lab).
 
 ![The Save for Voice Lab dialog with a link to get Voice Lab](images/handoff.png)
 

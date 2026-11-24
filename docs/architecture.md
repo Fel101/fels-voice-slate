@@ -351,8 +351,9 @@ None of these changes a kept clip, and none goes online.
 - **`i18n.py`, `ui/translate.py`** translate the window. The English text is the key. The helpers in `ui/widgets.py` translate what
   they are given, and `translate_tree` goes over a finished window or dialog. Translate messages and refusals with `tr()`
   before inserting values with `.format(...)`. Keep file names, device names and raw diagnostic output in fields. The
-  on-disk formats use stable English identifiers. The window loads Qt's language catalogue for standard controls such as
-  the file picker. `tools/strings.py` lists the keys each language lacks. The tests check the fields and exercise translated
+  on-disk formats use stable English identifiers. The window loads Qt's language catalogue for standard controls. The Open
+  and Save dialogs stay Windows' own, in Windows' language, unless a different language is chosen in Settings: then they
+  are Qt's, in that language (`translate.native_pickers`). `tools/strings.py` lists the keys each language lacks. The tests check the fields and exercise translated
   messages from room checks, transcript setup, exports and the main window.
 - **`ui/toolbar.py`** collapses labels, then icons, then buttons into a "more" menu as the window narrows, so nothing is
   clipped at the minimum size of 1100 by 600.

@@ -1237,17 +1237,29 @@ class MainWindow(QMainWindow):
             if answer != 'proceed':
                 s.bus.status(tr('Voice Lab handoff stopped.'))
                 return
-        destinations = {}
+        destinations, folder = {}, None
         if not sending:
-            if not self.dialogs.handoff_save():
+            if not self.dialogs.handoff_save(len(clips)):
                 s.bus.status(tr('Voice Lab handoff stopped.'))
                 return
-            for clip in clips:
-                path = self.dialogs.handoff_destination(clip.name + handoff.EXTENSION)
+            if len(clips) == 1:
+                path = self.dialogs.handoff_destination(clips[0].name + handoff.EXTENSION)
                 if not path:
                     s.bus.status(tr('Voice Lab handoff stopped.'))
                     return
-                destinations[clip] = self._with_ending(path, handoff.EXTENSION, {handoff.EXTENSION})
+                destinations[clips[0]] = self._with_ending(path, handoff.EXTENSION, {handoff.EXTENSION})
+            else:
+                # One folder for all of them. A name already there gets -2, -3 ..., so nothing is asked twice.
+                folder = self.dialogs.choose_folder('Choose a folder for the Voice Lab files')
+                if not folder:
+                    s.bus.status(tr('Voice Lab handoff stopped.'))
+                    return
+                try:
+                    handoff.check_folder(folder, s.lib.root)
+                except handoff.HandoffError as error:
+                    s.bus.notice('warning', 'Save for Voice Lab', str(error))
+                    s.bus.status(tr('Voice Lab handoff stopped.'))
+                    return
 
         def finished(paths, stopped, _failed):
             if stopped:
@@ -1258,16 +1270,18 @@ class MainWindow(QMainWindow):
                 text = tr('Sent 1 clip to Voice Lab. Open the Cast page in Voice Lab to add it.' if len(paths) == 1 else
                           'Sent {count} clips to Voice Lab. Open the Cast page in Voice Lab to add them.').format(
                               count=len(paths))
+            elif folder is None:
+                text = tr('Saved 1 file for Voice Lab. In Cast, choose Import from Voice Slate.')
             else:
-                text = tr('Saved 1 file for Voice Lab. In Cast, choose Import from Voice Slate.' if len(paths) == 1 else
-                          'Saved {count} files for Voice Lab. In Cast, choose Import from Voice Slate.').format(count=len(paths))
+                text = tr('Saved {count} files for Voice Lab in {folder}. In Cast, choose Import from Voice Slate for each '
+                          'file.').format(count=len(paths), folder=folder)
             s.bus.status(text)
             if not stopped:
                 s.bus.notice('info', 'Send to Voice Lab' if sending else 'Save for Voice Lab', text)
 
         library = s.lib.root
         s.batch.handoff('Sending clips to Voice Lab' if sending else 'Saving files for Voice Lab', clips, s.jobs,
-                        lambda clip: clip.write(library, None if sending else destinations[clip]), finished)
+                        lambda clip: clip.write(library, destinations.get(clip), folder=folder), finished)
 
     def _export_totals(self, slug):
         """(clips, seconds) a manifest or dataset of this speaker, and of all speakers, would hold, from the sidecars."""

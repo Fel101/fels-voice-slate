@@ -19,6 +19,12 @@ class _DialogTranslator(QTranslator):
         return super().translate(context, source, disambiguation, n) or None
 
 
+def native_pickers(chosen):
+    """Whether to keep Windows' own Open and Save dialogs. They speak Windows' language, and people know them best. Only a
+    window language chosen in Settings that differs from Windows' own swaps them for Qt's dialogs, which speak it."""
+    return chosen is None or chosen == i18n.windows_ui_language()
+
+
 def install_qt_language(app, code):
     """Give Qt's own menus, standard dialogs and date controls the window's language."""
     QLocale.setDefault(QLocale(code))

@@ -100,8 +100,8 @@ class Dialogs:
         box.exec()
         return {review: 'review', proceed: 'proceed'}.get(box.clickedButton())
 
-    def handoff_save(self):
-        return HandoffSaveDialog(self.parent).exec() == QDialog.DialogCode.Accepted
+    def handoff_save(self, count=1):
+        return HandoffSaveDialog(self.parent, count).exec() == QDialog.DialogCode.Accepted
 
     def handoff_destination(self, name):
         chooser = QFileDialog(self.parent, tr('Save for Voice Lab'), '', tr('Voice Slate handoff (*.voiceslate)'))
@@ -172,15 +172,19 @@ class Dialogs:
 
 
 class HandoffSaveDialog(QDialog):
-    """Explain where to open a saved handoff before asking for its file name."""
+    """Explain where to open saved handoffs before asking for a file name, or for one folder when there are several."""
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, count=1):
         super().__init__(parent)
         self.setWindowTitle(tr('Save for Voice Lab'))
         self.setMinimumWidth(430)
         layout = vbox(self, margins=(18, 18, 18, 18), spacing=12)
-        layout.addWidget(label('Save a handoff file to open later in Voice Lab. In Cast, choose Import from Voice Slate.',
-                               wrap=True))
+        if count == 1:
+            text = tr('Save a handoff file to open later in Voice Lab. In Cast, choose Import from Voice Slate.')
+        else:
+            text = tr('Save {count} handoff files in one folder, to open later in Voice Lab. In Cast, choose Import from '
+                      'Voice Slate for each file.').format(count=count)
+        layout.addWidget(label(text, wrap=True))
         link = QLabel(f'<a href="{VOICE_LAB_URL}" style="color: {PALETTE["accent"]}">{html.escape(tr("Get Voice Lab"))}</a>')
         link.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
         link.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
@@ -189,7 +193,7 @@ class HandoffSaveDialog(QDialog):
         layout.addWidget(link)
         row = hbox(spacing=8)
         row.addStretch()
-        cancel, save = button('Cancel', 'ghost'), button('Save...', 'primary')
+        cancel, save = button('Cancel', 'ghost'), button('Save...' if count == 1 else 'Choose folder...', 'primary')
         cancel.clicked.connect(self.reject)
         save.clicked.connect(self.accept)
         save.setDefault(True)

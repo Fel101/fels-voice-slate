@@ -45,10 +45,49 @@ def test_save_action_sits_next_to_copy_when_there_is_no_inbox(window, session, q
     dialogs.save_answer = str(tmp_path / 'saved')
     action(menu, 'Save for Voice Lab...').trigger()
     settle(window, qapp)
-    assert dialogs.asked[-2:] == [('handoff_save', None), ('handoff_destination', 'smoke-speaker-Save this line.voiceslate')]
+    assert dialogs.asked[-2:] == [('handoff_save', 1), ('handoff_destination', 'smoke-speaker-Save this line.voiceslate')]
     with zipfile.ZipFile(tmp_path / 'saved.voiceslate') as bundle:
         assert bundle.read('clip.wav') == take.export_path.read_bytes()
     assert not (tmp_path / 'suite' / 'inbox').exists()
+
+
+def test_several_clips_are_saved_to_one_folder_without_replacing_anything(window, session, qapp, dialogs, tmp_path):
+    takes = [keep(session, f'Line {number}') for number in range(1, 4)]
+    folder = tmp_path / 'for the lab'
+    folder.mkdir()
+    taken = folder / 'smoke-speaker-Line 2.voiceslate'
+    taken.write_bytes(b'already here')
+    dialogs.folder_answer = str(folder)
+    action(window.build_selection_menu(takes), 'Save for Voice Lab...').trigger()
+    settle(window, qapp)
+    assert ('handoff_save', 3) in dialogs.asked
+    assert not [question for question in dialogs.asked if question[0] == 'handoff_destination']
+    assert sorted(path.name for path in folder.iterdir()) == [
+        'smoke-speaker-Line 1.voiceslate', 'smoke-speaker-Line 2-2.voiceslate', 'smoke-speaker-Line 2.voiceslate',
+        'smoke-speaker-Line 3.voiceslate']
+    assert taken.read_bytes() == b'already here'
+    with zipfile.ZipFile(folder / 'smoke-speaker-Line 2-2.voiceslate') as bundle:
+        assert bundle.read('clip.wav') == takes[1].export_path.read_bytes()
+    assert any(f'Saved 3 files for Voice Lab in {folder}.' in notice.text for notice in dialogs.notices)
+
+
+def test_a_folder_inside_the_output_folder_is_refused_before_anything_is_saved(window, session, qapp, dialogs):
+    takes = [keep(session, name) for name in ('One', 'Two')]
+    before = sorted(path for path in session.lib.root.rglob('*'))
+    dialogs.folder_answer = str(session.lib.root)
+    window.lab_handoff(takes)
+    settle(window, qapp)
+    assert sorted(path for path in session.lib.root.rglob('*')) == before
+    assert any('outside the output folder' in notice.text for notice in dialogs.notices)
+
+
+def test_cancelling_the_folder_saves_nothing(window, session, qapp, dialogs, tmp_path):
+    takes = [keep(session, name) for name in ('One', 'Two')]
+    dialogs.folder_answer = None
+    window.lab_handoff(takes)
+    settle(window, qapp)
+    assert list(tmp_path.rglob('*.voiceslate')) == []
+    assert window.status_text.full_text == 'Voice Lab handoff stopped.'
 
 
 def test_save_dialog_offers_a_keyboard_accessible_voice_lab_link(qapp, monkeypatch):
@@ -66,6 +105,11 @@ def test_save_dialog_offers_a_keyboard_accessible_voice_lab_link(qapp, monkeypat
     link.linkActivated.emit(dialogs.VOICE_LAB_URL)
     assert [url.toString() for url in opened] == ['https://github.com/Fel101/fels-voice-lab']
     dialog.close()
+    several = dialogs.HandoffSaveDialog(count=3)
+    texts = {label.text() for label in several.findChildren(QLabel)}
+    assert any(text.startswith('Save 3 handoff files in one folder') for text in texts)
+    assert 'Choose folder...' in {button.text() for button in several.findChildren(dialogs.QPushButton)}
+    several.close()
 
 
 def test_bad_clip_in_selection_prevents_every_write(window, session, qapp, dialogs, tmp_path):

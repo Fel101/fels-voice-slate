@@ -8,9 +8,11 @@ the project uses [Semantic Versioning](https://semver.org/).
 ### Added
 
 - Shared Fel's Studio code and contract tests for file handoffs to Voice Lab.
-- Send kept clips to Voice Lab's Cast inbox, or save `.voiceslate` files to open in Voice Lab later.
+- Send kept clips to Voice Lab's Cast inbox, or save `.voiceslate` files to open in Voice Lab later. Several clips are
+  saved to one folder you choose, and nothing there is replaced.
 - Documented the Fel's Studio clip format, with receiver checks and a `.voiceslate` writing example.
-- Window notices, progress, transcript setup and file dialogs follow the selected window language.
+- Window notices, progress and transcript setup follow the selected window language. Windows' own Open and Save
+  dialogs stay, unless you choose a language other than Windows' own: then Qt's dialogs show it.
 - Fel's Studio links in About and a Check for updates command that opens the releases page in your browser.
 
 ### Changed

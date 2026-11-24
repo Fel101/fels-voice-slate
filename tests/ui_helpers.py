@@ -101,8 +101,8 @@ class StubDialogs:
         self.asked.append(('save', SimpleNamespace(title=title, start=str(start), filter=filter)))
         return self.save_answer
 
-    def handoff_save(self):
-        self.asked.append(('handoff_save', None))
+    def handoff_save(self, count=1):
+        self.asked.append(('handoff_save', count))
         return self.handoff_save_answer
 
     def handoff_draft(self, sending):

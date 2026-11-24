@@ -127,6 +127,17 @@ def test_save_keeps_existing_files_and_never_writes_in_the_library(kept, session
     assert not configured.exists()
 
 
+def test_saving_into_a_folder_picks_a_free_name(kept, session, tmp_path):
+    clip = handoff.Clip.from_take(kept).check()
+    first = clip.write(session.lib.root, folder=tmp_path)
+    second = clip.write(session.lib.root, folder=tmp_path)
+    assert (first.name, second.name) == ('smoke-speaker-First line.voiceslate', 'smoke-speaker-First line-2.voiceslate')
+    assert first.read_bytes() == second.read_bytes()
+    assert list(tmp_path.glob('.voiceslate-*')) == []
+    with pytest.raises(handoff.HandoffError, match='outside the output folder'):
+        clip.write(session.lib.root, folder=session.lib.root / 'smoke-speaker')
+
+
 def test_an_unusable_suite_folder_is_logged_at_startup(kept, session, tmp_path, monkeypatch, caplog):
     configured = tmp_path / 'suite-is-a-file'
     configured.touch()

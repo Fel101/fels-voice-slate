@@ -26,15 +26,16 @@ def run(argv=None):
     from ..hotkey import GlobalKey
     from . import theme
     from .main_window import MainWindow
-    from .translate import install_qt_language
+    from .translate import install_qt_language, native_pickers
 
     _taskbar_identity()
     theme.prepare_display()
     data = settings.load()
-    language = settings.language(data) or i18n.windows_language()
+    chosen = settings.language(data)
+    language = chosen or i18n.windows_language()
     i18n.use(language)
-    # Native pickers follow Windows' language. Qt's pickers can follow the language chosen here.
-    QApplication.setAttribute(Qt.ApplicationAttribute.AA_DontUseNativeDialogs)
+    if not native_pickers(chosen):
+        QApplication.setAttribute(Qt.ApplicationAttribute.AA_DontUseNativeDialogs)
     scale = settings.text_scale(data) or theme.windows_text_scale()
     if scale != 1.0:
         os.environ.setdefault('QT_SCALE_FACTOR', f'{scale:g}')     # read as the application starts, and it scales everything
