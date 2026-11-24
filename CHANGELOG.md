@@ -15,9 +15,13 @@ the project uses [Semantic Versioning](https://semver.org/).
   dialogs stay, unless you choose a language other than Windows' own: then Qt's dialogs show it.
 - Fel's Studio links in About and a Check for updates command that opens the releases page in your browser.
 
+- Each release has a `SHA256SUMS` file and a GitHub attestation for the installer. The README says how to check them.
+
 ### Changed
 
 - Voice Slate uses the Fel's Studio icon family in its window, taskbar, installer and shortcuts.
+- Releases are made by the release workflow alone: it tests the tagged commit, builds and attests the installer, and checks
+  the draft release's files before it publishes them.
 
 ### Fixed
 

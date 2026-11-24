@@ -1,6 +1,6 @@
 """Build the Windows installer: a private Python with the program's packages, the program, and an Inno Setup installer of them.
 
-    python tools/build_installer.py                       everything, into build/
+    python tools/build_installer.py                       everything, into build/: the installer and its SHA256SUMS
     python tools/build_installer.py --iscc PATH           name Inno Setup's compiler, when it is not found by itself
     python tools/build_installer.py --no-installer        stop before the installer: build/app can be started as it is
 
@@ -17,6 +17,8 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+from check_release_files import write_sums
 
 ROOT = Path(__file__).resolve().parent.parent
 PYTHON_VERSION = '3.13'
@@ -171,7 +173,8 @@ def main():
         return 0
     run([compiler(args.iscc), f'/DAppVersion={version()}', f'/DAppFolder={work / "app"}', f'/O{work}', ISS])
     made = work / f'Fels-Voice-Slate-{version()}-Setup.exe'
-    print(f'The installer is {made}, {made.stat().st_size // (1 << 20)} MB.')
+    sums = write_sums(made)                 # a release carries both, and GitHub attests both (.github/workflows/release.yml)
+    print(f'The installer is {made}, {made.stat().st_size // (1 << 20)} MB. Its SHA-256 is in {sums}.')
     return 0
 
 

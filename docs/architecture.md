@@ -42,7 +42,8 @@ recorder/
   resources/     the program's SVG icon, its PNG and ICO renders, and the language files
 installer/       the Inno Setup script of the Windows installer
 tools/           shoot.py draws the screenshots; synthetic.py makes test audio and a fake capture; make_icon.py draws the icon;
-                 build_installer.py builds the installer; strings.py lists the text there is to translate
+                 build_installer.py builds the installer and its SHA256SUMS; strings.py lists the text there is to translate;
+                 release_notes.py and check_release_files.py are steps of the release workflow
 tests/           the test suite
 ```
 
@@ -227,6 +228,11 @@ pinned packages in a folder, removes what the window does not use from Qt and Py
 a test, before Inno Setup packs it (`installer/voice-slate.iss`). A real Python is what lets `setup-transcripts.bat` make its
 environment there too, Qt stays a plain library that can be replaced, and virus scanners flag it less often than a frozen program.
 It installs per user, so the program folder is writable.
+
+A release is made by `.github/workflows/release.yml` from a version tag, after the tests pass on that commit. It builds the
+installer and `SHA256SUMS`, has GitHub attest both (`actions/attest`), puts them on a draft release, and checks the draft's own
+files on another runner (`tools/check_release_files.py`) before it publishes. Voice Lab's release checks its files the same
+way, so the apps of Fel's Studio can be checked alike.
 
 ## Keeping the person's audio safe
 

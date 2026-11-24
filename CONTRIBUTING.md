@@ -85,9 +85,26 @@ are very welcome, above all to the statement of permission, which has to mean ex
 
 **The installer.** `python -m pip install -r requirements-build.txt`, then `python tools/build_installer.py`, with
 [Inno Setup 6](https://jrsoftware.org/isinfo.php) installed. It builds in `build/`, opens the real window from what it built as a
-test, and fails if that does not work. `--no-installer` stops before Inno Setup. A version tag does this on GitHub and attaches the
-installer to the Release (`.github/workflows/release.yml`). If the Release already has an installer, such as one built and tried
-by hand and attached when the Release was written, the workflow leaves it as it is and keeps its own build with the run.
+test, and fails if that does not work. `--no-installer` stops before Inno Setup. Beside the installer it writes `SHA256SUMS`, which holds the installer's
+SHA-256.
+
+**Making a release.** Only the release workflow (`.github/workflows/release.yml`) puts files on a release, because only what it
+built from the tag is attested.
+
+1. Set `__version__` in `recorder/__init__.py`, and move the lines under *Unreleased* in [CHANGELOG.md](CHANGELOG.md) under
+   `## [<version>] - <YYYY-MM-DD>`.
+2. If you want notes written by hand, with pictures or a video, write them on GitHub as a **draft** release for the tag
+   `v<version>`, and leave it unpublished with no files on it. Without a draft, the notes are the changelog's section.
+3. Push the commit, then the tag `v<version>`. The workflow runs the tests on the tagged commit, builds the installer and
+   `SHA256SUMS`, has GitHub attest both, and puts them on the draft. Then, on another runner, it downloads the draft's files and
+   checks their names, the hash and the attestations (`tools/check_release_files.py`). Only then does it publish the draft.
+4. When anything fails, nothing is published. If the failure was not the code's, such as GitHub being down, run the workflow
+   again for the same tag (*Run workflow*, with the tag). Otherwise fix it and release the next patch number. A published
+   release is never changed.
+
+`python tools/release_notes.py --tag v<version>` checks the tag against the version and prints the notes, and
+`python tools/check_release_files.py --dir build --tag v<version> --no-attestation` checks a local build's files, if you want to
+try them before you push.
 
 **New dependencies.** Please ask first. A dependency must have a licence compatible with MIT (permissive, or LGPL used as
 an installed library), must be needed by the program, and must be added to `requirements.txt` and

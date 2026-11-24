@@ -4,6 +4,14 @@ on:
   push:
     branches: [main]
   pull_request:
+  # release.yml runs these on a tag's commit before it builds anything.
+  workflow_call:
+    inputs:
+      ref:
+        description: The commit to test, such as refs/tags/v1.0.0. Empty tests the caller's own commit.
+        type: string
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -17,6 +25,8 @@ jobs:
         python-version: ["3.12", "3.13", "3.14", "3.15"]
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
 
       - uses: actions/setup-python@v7
         with:

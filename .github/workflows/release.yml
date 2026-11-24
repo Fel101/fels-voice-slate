@@ -1,26 +1,59 @@
-name: Release installer
+name: Release
 
-# Builds the Windows installer when a version tag is pushed and attaches it to the GitHub Release of that tag. An
-# installer already on the Release, such as one built and tried by hand, is left as it is, and this build is then
-# only kept with the run. It does nothing else: the Release itself, and its notes, are written by hand first.
+# Pushing a tag v<version> releases that version, once the tests have passed on the tagged commit. Setup.exe is built from the
+# tag, SHA256SUMS holds its SHA-256, and GitHub attests where both came from. They go on a draft release: a draft written by
+# hand beforehand keeps its title and notes, and without one the notes are the version's section of CHANGELOG.md. The draft's
+# files are then downloaded on another runner and checked (tools/check_release_files.py), and only then is the draft
+# published. When anything fails, nothing is published (CONTRIBUTING.md, "Making a release").
 
 on:
   push:
-    tags: ["v*"]
+    tags: ["v*.*.*"]
+  # To release an existing tag again after a failure that was not the code's, such as GitHub being down.
   workflow_dispatch:
+    inputs:
+      tag:
+        description: The tag to release, such as v1.0.0
+        type: string
+        required: true
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
 
 jobs:
-  installer:
+  tests:
+    uses: ./.github/workflows/tests.yml
+    with:
+      ref: refs/tags/${{ inputs.tag || github.ref_name }}
+
+  draft:
+    needs: tests
     runs-on: windows-latest
+    permissions:
+      contents: write
+      # For the attestation of Setup.exe and SHA256SUMS (actions/attest).
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: refs/tags/${{ inputs.tag || github.ref_name }}
 
       - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
+
+      # A tag that is not v and the version in recorder/__init__.py is refused before anything is built.
+      - name: Check the tag and write the notes from the changelog
+        run: python tools/release_notes.py --tag "$env:TAG" --output "$env:RUNNER_TEMP\notes.md"
 
       - name: Install the tools
         run: |
@@ -28,24 +61,82 @@ jobs:
           if ($LASTEXITCODE) { exit $LASTEXITCODE }       # PowerShell carries on after a program fails: stop here
           choco install innosetup --no-progress -y
 
-      - name: Build
+      - name: Build Setup.exe and SHA256SUMS from the tag
         run: python tools/build_installer.py
 
-      - uses: actions/upload-artifact@v7
+      - name: Attest where Setup.exe and SHA256SUMS came from
+        uses: actions/attest@v4
         with:
-          name: installer
-          path: build/Fels-Voice-Slate-*-Setup.exe
+          subject-path: |
+            build/Fels-Voice-Slate-*-Setup.exe
+            build/SHA256SUMS
 
-      - name: Attach it to the Release
-        if: startsWith(github.ref, 'refs/tags/')
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Put them on a draft release
         run: |
-          $attached = @(gh release view "$env:GITHUB_REF_NAME" --json assets --jq '.assets[].name')
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          $installers = $attached -like 'Fels-Voice-Slate-*-Setup.exe'
-          if ($installers) {
-            "::notice::The Release already has $installers, so it is left as it is. This build is kept with the run."
+          $files = (Get-Item build/Fels-Voice-Slate-*-Setup.exe).FullName, (Get-Item build/SHA256SUMS).FullName
+          $state = gh release view "$env:TAG" --repo "$env:GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2>$null
+          if ($state -eq 'false') { throw "$env:TAG is already published, and a published release is never changed. Release the next patch number instead." }
+          if ($state -eq 'true') {
+            # A draft written by hand keeps its title and notes. Any file on it is replaced: only what this run built is attested.
+            $names = @(gh release view "$env:TAG" --repo "$env:GITHUB_REPOSITORY" --json assets --jq '.assets[].name')
+            if ($LASTEXITCODE) { exit $LASTEXITCODE }
+            foreach ($name in $names) {
+              gh release delete-asset "$env:TAG" "$name" --repo "$env:GITHUB_REPOSITORY" --yes
+              if ($LASTEXITCODE) { exit $LASTEXITCODE }
+            }
+            gh release upload "$env:TAG" @files --repo "$env:GITHUB_REPOSITORY"
           } else {
-            gh release upload "$env:GITHUB_REF_NAME" (Get-Item build/Fels-Voice-Slate-*-Setup.exe).FullName
+            $title = "Fel's Voice Slate " + "$env:TAG".Substring(1)
+            gh release create "$env:TAG" @files --repo "$env:GITHUB_REPOSITORY" --draft --verify-tag --title "$title" --notes-file "$env:RUNNER_TEMP\notes.md"
           }
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+
+  check:
+    # What people will download, checked as they will get it: the draft's own files, on a runner that did not build them.
+    needs: draft
+    runs-on: windows-latest
+    permissions:
+      # A draft release can be read only with write access.
+      contents: write
+      attestations: read
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: refs/tags/${{ inputs.tag || github.ref_name }}
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      - name: Download Setup.exe and SHA256SUMS from the draft
+        run: |
+          gh release download "$env:TAG" --repo "$env:GITHUB_REPOSITORY" --dir "$env:RUNNER_TEMP\draft"
+          if ($LASTEXITCODE) { throw "The draft's files could not be downloaded" }
+
+      - name: Check their names, SHA256SUMS and attestations
+        run: python tools/check_release_files.py --dir "$env:RUNNER_TEMP\draft" --tag "$env:TAG" --repo "$env:GITHUB_REPOSITORY"
+
+  publish:
+    needs: check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: refs/tags/${{ inputs.tag || github.ref_name }}
+          fetch-depth: 0
+
+      # The releases page shows the newest version as the latest. A patch to an older version, released after a newer one,
+      # is not marked latest.
+      - name: Publish the checked draft
+        run: |
+          newest=$(git tag --list 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1)
+          if [ "$newest" = "$TAG" ]; then latest=true; else latest=false; fi
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest="$latest"

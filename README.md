@@ -98,10 +98,27 @@ to record; importing audio files works without one.
 
 **The installer needs nothing else.** Download `Fels-Voice-Slate-<version>-Setup.exe` from the
 [latest release](https://github.com/Fel101/fels-voice-slate/releases/latest) and run it. It brings its own private copy of
-Python, installs for you alone, asks for no administrator rights, and puts Voice Slate in the Start menu. The installer has no
-paid signature yet, so Windows SmartScreen may say *Windows protected your PC*: choose **More info**, then **Run anyway**. The
-first start can take up to about 20 seconds while Windows looks over the new files; after that it opens in a few seconds. To
-remove it, use Windows' *Installed apps*. Your recordings and settings stay where they are.
+Python, installs for you alone, asks for no administrator rights, and puts Voice Slate in the Start menu. The installer is
+not signed, so Windows SmartScreen may say *Windows protected your PC*: choose **More info**, then **Run anyway**. You can
+check first that your download is the one built here (below). The first start can take up to about 20 seconds while Windows
+looks over the new files; after that it opens in a few seconds. To remove it, use Windows' *Installed apps*. Your recordings
+and settings stay where they are.
+
+**Checking the download.** Each release, from 1.0.0 on, has a file called `SHA256SUMS` beside the installer. It holds the
+installer's SHA-256 hash, and GitHub records that both files were built from this repository by its release workflow, with an
+attestation. Download `SHA256SUMS` into the same folder as the installer, open PowerShell there, and run this with the
+installer's real name. It prints `True` when the installer is the file that was released:
+
+```powershell
+(Get-FileHash .\Fels-Voice-Slate-1.0.0-Setup.exe).Hash -eq (Get-Content .\SHA256SUMS).Split(' ')[0]
+```
+
+With [GitHub's command line](https://cli.github.com/) (`gh`), you can also check the attestation. It answers
+*Verification succeeded* when the file was built from this repository by its release workflow:
+
+```powershell
+gh attestation verify .\Fels-Voice-Slate-1.0.0-Setup.exe --repo Fel101/fels-voice-slate
+```
 
 **To run it from the source** you need **Python 3.12 or newer** ([python.org](https://www.python.org/downloads/)). Draft
 transcripts need Python 3.12 to 3.14, because their packages are not built for newer versions yet. If you have Python 3.15,
