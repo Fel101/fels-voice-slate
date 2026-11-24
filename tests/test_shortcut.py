@@ -79,7 +79,25 @@ def test_the_icon_file_holds_every_size_as_a_png():
     assert sizes == [16, 24, 32, 48, 64, 128, 256]
 
 
+ICON_STEPS = 8          # how far a pixel of the icon files may be from what the window draws, of 255
+
+
+def largest_difference(first, second):
+    """The largest difference of any channel of any pixel of two pictures of one size, from 0 to 255."""
+    import numpy as np
+    from PySide6.QtGui import QImage
+
+    assert first.size() == second.size()
+    images = [image.convertToFormat(QImage.Format.Format_ARGB32) for image in (first, second)]  # kept alive while read
+    a, b = (np.frombuffer(image.constBits(), np.uint8).astype(np.int16) for image in images)
+    return int(np.abs(a - b).max())
+
+
 def test_the_icon_files_match_what_the_window_draws(qapp):
+    """Qt can draw an antialiased edge slightly differently on another computer: on GitHub's runners the 48-pixel picture
+    came out different under Python 3.12 only, while here every Python draws it as the files hold it. So the files are
+    compared with what the window draws within a few steps. A changed picture, or files not made again after the SVG
+    changed, differ by far more (the next test)."""
     from PySide6.QtGui import QImage
 
     sys.path.insert(0, str(settings.program_dir() / 'tools'))
@@ -94,5 +112,21 @@ def test_the_icon_files_match_what_the_window_draws(qapp):
     for index, size in enumerate(icons.APP_ICON_SIZES):
         length, offset = struct.unpack_from('<II', data, 6 + 16 * index + 8)
         drawn = QImage.fromData(make_icon.png_bytes(icons.app_pixmap(size)), 'PNG')
-        assert QImage.fromData(data[offset:offset + length], 'PNG') == drawn, size
-    assert QImage(str(icon.with_suffix('.png'))) == drawn
+        difference = largest_difference(QImage.fromData(data[offset:offset + length], 'PNG'), drawn)
+        assert difference <= ICON_STEPS, f'the {size}-pixel picture in the .ico differs by up to {difference} of 255'
+    difference = largest_difference(QImage(str(icon.with_suffix('.png'))), drawn)
+    assert difference <= ICON_STEPS, f'the PNG differs by up to {difference} of 255'
+
+
+def test_a_changed_icon_differs_by_more_than_the_steps_allowed(qapp):
+    from PySide6.QtGui import QColor, QPainter
+
+    from recorder.ui import icons
+
+    drawn = icons.app_pixmap(48).toImage()
+    changed = drawn.copy()
+    painter = QPainter(changed)
+    painter.fillRect(changed.rect().adjusted(20, 20, -20, -20), QColor('#ffffff'))
+    painter.end()
+    assert largest_difference(drawn, drawn.copy()) == 0
+    assert largest_difference(drawn, changed) > ICON_STEPS
