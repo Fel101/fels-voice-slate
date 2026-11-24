@@ -125,10 +125,74 @@ def test_the_notes_are_the_versions_section_with_links_at_its_tag(tmp_path):
     assert notes == (
         '### Added\n\n'
         '- **Send to Voice Lab.** See the [clip format](https://github.com/Fel101/fels-voice-slate/blob/v1.2.3/'
-        'docs/clip-format.md#voice-slate-handoff-files), the\n'
-        '  [guide](https://example.com/guide) and ![a picture](https://github.com/Fel101/fels-voice-slate/raw/v1.2.3/'
+        'docs/clip-format.md#voice-slate-handoff-files), the '
+        '[guide](https://example.com/guide) and ![a picture](https://github.com/Fel101/fels-voice-slate/raw/v1.2.3/'
         'docs/images/handoff.png "Save for Voice Lab").\n')
     assert release_notes.notes('1.2.2', changelog=write_changelog(tmp_path)) == '- An older line.\n'
+
+
+def test_wrapped_lines_are_joined_because_github_shows_every_line_break():
+    text = '\n'.join([
+        'A paragraph wrapped',
+        'over two lines.',
+        '',
+        '### A heading',
+        '- An item wrapped',
+        '  over two lines.',
+        '  - A nested item',
+        '    wrapped too.',
+        '1. A numbered item',
+        '> A quote',
+        '> on two lines.',
+        '',
+        '| a | b |',
+        '|---|---|',
+        '| 1 | 2 |',
+        '',
+        '```',
+        'code stays',
+        'as it is',
+        '```',
+        'A hard break  ',
+        'stays.',
+        '',
+        '    indented code',
+        '    stays too',
+    ])
+    assert release_notes.unwrap(text).split('\n') == [
+        'A paragraph wrapped over two lines.',
+        '',
+        '### A heading',
+        '- An item wrapped over two lines.',
+        '  - A nested item wrapped too.',
+        '1. A numbered item',
+        '> A quote',
+        '> on two lines.',
+        '',
+        '| a | b |',
+        '|---|---|',
+        '| 1 | 2 |',
+        '',
+        '```',
+        'code stays',
+        'as it is',
+        '```',
+        'A hard break  ',
+        'stays.',
+        '',
+        '    indented code',
+        '    stays too',
+    ]
+
+
+def test_the_real_changelogs_notes_have_no_wrapped_lines():
+    text = release_notes.CHANGELOG.read_text(encoding='utf-8')
+    versions = [match['version'] for match in map(release_notes.HEADING.fullmatch, text.splitlines())
+                if match and match['version'] != 'Unreleased']
+    assert '1.0.0' in versions
+    for version in versions:
+        for line in release_notes.notes(version).split('\n'):
+            assert not line.startswith('  '), (version, line)
 
 
 @pytest.mark.parametrize('text, problem', [

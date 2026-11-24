@@ -73,6 +73,8 @@ https://github.com/user-attachments/assets/9c4553c8-8d69-43e4-bf3e-e3256375cf52
 - **Share.** Drag a kept clip into Explorer or another program, save a copy as WAV, FLAC, MP3 or Ogg at 16 to 48 kHz, export
   a manifest of the kept clips (JSON Lines or CSV), or a whole dataset in one folder: clips with sidecars, LJSpeech, a Hugging
   Face audio folder or a Kaldi data folder, with a split for validation if you want one. The kept clips are never changed.
+- **Send to Voice Lab.** Send kept clips to [Fel's Voice Lab][lab], which can make a voice from them, with their transcript
+  and the permission to use them. Without Voice Lab on this computer, save them as `.voiceslate` files to open there later.
 - **Back up and move.** Back up the whole output folder in one step, each file checked, and bring the backup in on another
   PC.
 - **Draft transcripts** (optional) from a speech recognizer that runs on your own computer, set up in one step.
@@ -90,6 +92,8 @@ https://github.com/user-attachments/assets/9c4553c8-8d69-43e4-bf3e-e3256375cf52
 | The reading check, and the words of the take to cut by | The Script tab: how far a long script has got |
 | ![The light theme](docs/images/light.png) | ![Keeping several takes with one statement](docs/images/keepmany.png) |
 | The light theme | Keeping several takes takes a statement, every time |
+| ![The Save for Voice Lab dialog with a link to get Voice Lab](docs/images/handoff.png) | ![About, with the other apps of Fel's Studio](docs/images/about.png) |
+| Save for Voice Lab, when Voice Lab is not on this computer | About: the version, and the other apps of Fel's Studio |
 
 ## Install
 

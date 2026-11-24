@@ -6,8 +6,9 @@
 
 The release workflow (.github/workflows/release.yml) runs this first, with --tag, so that a tag that is not "v" and the
 version is refused before anything is built. The notes are used when nobody wrote a draft release for the tag by hand: they
-are the version's section of the changelog, with each link into the repository pointed at the file as it is at the tag,
-because a link such as [Clip format](docs/clip-format.md) leads nowhere on GitHub's release page.
+are the version's section of the changelog, with its wrapped lines joined and each link into the repository pointed at the
+file as it is at the tag, because GitHub's release page shows every line break and a link such as
+[Clip format](docs/clip-format.md) leads nowhere there.
 
 Exit status 1, with the reason, when the version has no section in the changelog, its heading has no date, or its section is
 empty.
@@ -26,6 +27,11 @@ HEADING = re.compile(r'## \[(?P<version>[^\]]+)\](?:\s+-\s+(?P<date>.*?))?\s*')
 # An inline link or image whose target has no spaces, with an optional title. The changelog uses no other kind in a section.
 LINK = re.compile(r'(?P<label>!?\[[^\]]*\])\((?P<target>[^)\s]+)(?P<title>\s+"[^"]*")?\)')
 SCHEME = re.compile(r'[A-Za-z][A-Za-z0-9+.-]*:')
+# For unwrap(): what starts a block of its own, and what never takes the next line
+FENCE = re.compile(r' {0,3}(```|~~~)')
+LIST_ITEM = re.compile(r'\s*([-*+]|\d+[.)])\s')
+BLOCK = re.compile(r'\s*(#|>|\||[-*+]\s|\d+[.)]\s)')
+STANDS_ALONE = re.compile(r'\s*(#|\||```|~~~)')
 
 
 class NotesError(Exception):
@@ -86,8 +92,30 @@ def absolute_links(text, repository, tag):
     return LINK.sub(point, text)
 
 
+def unwrap(text):
+    """The text with each wrapped paragraph and list item on one line. GitHub shows every line break in a release's notes as
+    a break, so the changelog's lines, wrapped at 120 characters to read well in the file, would end raggedly there. A line
+    stays on its own when it or the line before is blank, when it starts a heading, list item, quote, table row or code
+    fence, when the line before is a heading, table row, fence or indented code, or ends in a hard break, and inside a fence."""
+    lines, fenced = [], False
+    for line in text.split('\n'):
+        if FENCE.match(line):
+            fenced = not fenced
+            lines.append(line)
+            continue
+        before = lines[-1] if lines else ''
+        if (fenced or not line.strip() or not before.strip() or BLOCK.match(line) or STANDS_ALONE.match(before)
+                or before.endswith(('  ', '\\'))
+                or (before.startswith('    ') and not LIST_ITEM.match(before))):
+            lines.append(line)
+        else:
+            lines[-1] = f'{before.rstrip()} {line.strip()}'
+    return '\n'.join(lines)
+
+
 def notes(version, tag=None, repository=REPOSITORY, changelog=CHANGELOG):
-    return absolute_links(section(Path(changelog).read_text(encoding='utf-8'), version), repository, tag or f'v{version}')
+    text = unwrap(section(Path(changelog).read_text(encoding='utf-8'), version))
+    return absolute_links(text, repository, tag or f'v{version}')
 
 
 def main(argv=None):

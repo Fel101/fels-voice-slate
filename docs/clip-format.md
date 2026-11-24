@@ -41,7 +41,7 @@ A UTF-8 JSON object. An example, written compactly (the program writes it with o
 ```json
 {
   "schema": "voice-recorder-clip-v2",
-  "software": { "name": "voice-slate", "version": "0.7.0" },
+  "software": { "name": "voice-slate", "version": "1.0.0" },
   "id": "3f9a1c2e",
   "created": "2026-10-20T16:12:04+01:00",
   "speaker": "my-voice",
@@ -368,7 +368,7 @@ clips or more, and never all of them. Each row of `manifest.jsonl` then has `spl
 ```json
 {
   "schema": "voice-slate-backup-v1",
-  "software": { "name": "voice-slate", "version": "0.7.0" },
+  "software": { "name": "voice-slate", "version": "1.0.0" },
   "made": "2026-11-14T19:40:12+00:00",
   "files": {
     "my-voice/20261020-161204_mic_3f9a1c2e.json": "…",

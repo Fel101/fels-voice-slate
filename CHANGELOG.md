@@ -5,27 +5,38 @@ the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-11-24
+
+Voice Slate's first finished version, and the first of the four apps of Fel's Studio to reach 1.0.
+
 ### Added
 
-- Shared Fel's Studio code and contract tests for file handoffs to Voice Lab.
-- Send kept clips to Voice Lab's Cast inbox, or save `.voiceslate` files to open in Voice Lab later. Several clips are
-  saved to one folder you choose, and nothing there is replaced.
-- Documented the Fel's Studio clip format, with receiver checks and a `.voiceslate` writing example.
-- Window notices, progress and transcript setup follow the selected window language. Windows' own Open and Save
-  dialogs stay, unless you choose a language other than Windows' own: then Qt's dialogs show it.
-- Fel's Studio links in About and a Check for updates command that opens the releases page in your browser.
-
-- Each release has a `SHA256SUMS` file and a GitHub attestation for the installer. The README says how to check them.
+- **Send to Voice Lab.** Right-click a kept clip, or several selected with Ctrl or Shift, and choose **Send to Voice
+  Lab...**. Each clip waits on Voice Lab's **Cast** page, with its transcript, where it came from and the permission to use
+  it, until you import it there as a voice. Voice Lab can be closed while you send. Without Voice Lab on this computer,
+  **Save for Voice Lab...** saves `.voiceslate` files to open in Voice Lab later: several clips go into one folder you
+  choose, and nothing there is replaced. The kept clip itself is never changed.
+- **The suite's clip format, written down.** [Clip format](docs/clip-format.md) describes the `.voiceslate` file, the checks
+  a program that receives one makes, and how to write one.
+- **Every message in your language.** Notices, progress, warnings and the transcript setup now follow the window's language
+  (English, German, Spanish or French), as the menus and buttons already did. Windows' own Open and Save dialogs stay,
+  unless you choose a language other than Windows' own: then Voice Slate's dialogs show it.
+- **Part of Fel's Studio.** About lists the other three apps, with links, and **Help → Check for updates** shows the version
+  you have and opens the releases page in your browser. Voice Slate itself still makes no network connection.
+- **Checking the download.** Each release, from this one on, has a `SHA256SUMS` file beside the installer and a GitHub
+  attestation that both were built from this repository by its release workflow. The README says how to check them.
 
 ### Changed
 
 - Voice Slate uses the Fel's Studio icon family in its window, taskbar, installer and shortcuts.
+- Voice Slate and Voice Lab share one file of Fel's Studio code, `fels_suite.py`, with the same tests in both.
 - Releases are made by the release workflow alone: it tests the tagged commit, builds and attests the installer, and checks
   the draft release's files before it publishes them.
 
 ### Fixed
 
-- Log when Voice Slate falls back to the default Fel's Studio folder because `FELS_SUITE_DIR` cannot be used.
+- Voice Slate writes in its log when it uses the default Fel's Studio folder because the one `FELS_SUITE_DIR` names cannot
+  be used.
 
 ## [0.7.0] - 2026-11-15
 
@@ -487,7 +498,8 @@ The first public release.
 - The limiter's ceiling also holds for the saved 24 kHz file: resampling can push a peak over it, so the limiter runs
   once more after resampling.
 
-[Unreleased]: ../../compare/v0.7.0...HEAD
+[Unreleased]: ../../compare/v1.0.0...HEAD
+[1.0.0]: ../../compare/v0.7.0...v1.0.0
 [0.7.0]: ../../compare/v0.6.0...v0.7.0
 [0.6.0]: ../../compare/v0.5.0...v0.6.0
 [0.5.0]: ../../compare/v0.4.0...v0.5.0
