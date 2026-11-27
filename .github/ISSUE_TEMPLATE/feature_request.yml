@@ -8,6 +8,18 @@ body:
         Thank you for the suggestion. Voice Slate is a small, focused program, and the consent step (origin, allowed use
         and permission for every clip) is part of what it is. Requests that would weaken that, add network access or
         tracking, or make it easier to imitate a voice without permission will not be accepted.
+  - type: dropdown
+    id: project
+    attributes:
+      label: What are you making?
+      options:
+        - Voices for Voice Lab
+        - A speech dataset
+        - Game or audio-drama lines
+        - Narration or voice-over
+        - Something else
+    validations:
+      required: true
   - type: textarea
     id: problem
     attributes:

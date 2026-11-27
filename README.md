@@ -12,7 +12,7 @@ what it may be used for, written next to the audio.
 [slate]: https://github.com/Fel101/fels-voice-slate
 [lab]: https://github.com/Fel101/fels-voice-lab
 [forge]: https://github.com/Fel101/fels-npc-forge
-[altera]: https://github.com/Fel101/Altera
+[altera]: https://github.com/Fel101/fels-altera
 
 *The screenshots in this project show generated test audio, not a real person's voice.*
 

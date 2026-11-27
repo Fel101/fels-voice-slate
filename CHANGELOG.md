@@ -5,6 +5,11 @@ the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- The issue forms ask how Voice Slate was installed and offer Sending clips to Voice Lab, and questions go to Discussions.
+- Links to Altera use its new address, github.com/Fel101/fels-altera.
+
 ## [1.0.0] - 2026-11-24
 
 Voice Slate's first finished version, and the first of the four apps of Fel's Studio to reach 1.0.

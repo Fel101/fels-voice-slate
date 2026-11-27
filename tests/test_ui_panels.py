@@ -776,7 +776,7 @@ def test_about_links_to_the_suite_app_pages(qapp, monkeypatch):
         assert qapp.focusWidget() is links[name]
         QTest.keyClick(links[name], Qt.Key.Key_Return)
     assert opened == ['https://github.com/Fel101/fels-voice-slate', 'https://github.com/Fel101/fels-voice-lab',
-                      'https://github.com/Fel101/fels-npc-forge', 'https://github.com/Fel101/Altera']
+                      'https://github.com/Fel101/fels-npc-forge', 'https://github.com/Fel101/fels-altera']
     dialog.close()
 
 

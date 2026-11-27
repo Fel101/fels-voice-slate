@@ -53,11 +53,20 @@ body:
       placeholder: "Windows 11 24H2"
     validations:
       required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: How it was installed
+      options:
+        - Setup.exe
+        - From the source (Download ZIP or git clone, then setup.bat)
+    validations:
+      required: true
   - type: input
     id: python
     attributes:
-      label: Python version
-      description: The output of `python --version` in the folder where you installed it.
+      label: Python version (from the source only)
+      description: The output of `python --version` in the folder where you installed it. Setup.exe brings its own.
       placeholder: "3.12.10"
   - type: dropdown
     id: area
@@ -71,5 +80,6 @@ body:
         - Keeping a clip
         - Noise reduction (FFmpeg)
         - Draft transcripts
+        - Sending clips to Voice Lab
         - Installing or starting the program
         - Something else
