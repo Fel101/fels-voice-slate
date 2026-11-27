@@ -153,6 +153,20 @@ def test_save_keeps_existing_files_and_never_writes_in_the_library(kept, session
     assert not configured.exists()
 
 
+def test_the_same_clip_makes_the_same_file_at_any_time(kept, session, tmp_path, monkeypatch):
+    """ZIP keeps a time for each entry in 2-second steps; two saves either side of one must not differ."""
+    import time
+    clip = handoff.Clip.from_take(kept).check()
+    first = clip.write(session.lib.root, folder=tmp_path)
+    later = time.time() + 3600
+    monkeypatch.setattr(zipfile.time, 'time', lambda: later)
+    monkeypatch.setattr(zipfile.time, 'localtime', lambda seconds=None: time.localtime(later))
+    second = clip.write(session.lib.root, folder=tmp_path)
+    assert first.read_bytes() == second.read_bytes()
+    with zipfile.ZipFile(first) as bundle:
+        assert [item.compress_type for item in bundle.infolist()] == [zipfile.ZIP_STORED] * 2
+
+
 def test_saving_into_a_folder_picks_a_free_name(kept, session, tmp_path):
     clip = handoff.Clip.from_take(kept).check()
     first = clip.write(session.lib.root, folder=tmp_path)

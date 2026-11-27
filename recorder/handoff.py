@@ -184,8 +184,8 @@ class CheckedClip:
                                       'clip details and keep it again.'))
         output = io.BytesIO()
         with zipfile.ZipFile(output, 'w', compression=zipfile.ZIP_STORED) as bundle:
-            bundle.writestr('clip.wav', wav)
-            bundle.writestr('clip.json', sidecar)
+            for name, data in (('clip.wav', wav), ('clip.json', sidecar)):
+                bundle.writestr(_member(name), data)
         data = output.getvalue()
         if destination is None and folder is None:
             try:
@@ -205,6 +205,15 @@ class CheckedClip:
             raise HandoffError(tr('That file already exists. Choose a different name and try again.')) from error
         except OSError as error:
             raise HandoffError(tr('Could not save the Voice Lab file. Choose a writable folder and try again.')) from error
+
+
+def _member(name):
+    """A ZIP entry with a fixed time (ZIP's first day), so the same clip always makes the same file. writestr with a
+    plain name stamps the time it runs, and two saves either side of a 2-second step then differed."""
+    member = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
+    member.compress_type = zipfile.ZIP_STORED
+    member.external_attr = 0o600 << 16      # what writestr gives a plain name
+    return member
 
 
 def check_folder(folder, library):
