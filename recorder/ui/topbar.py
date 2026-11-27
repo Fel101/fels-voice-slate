@@ -31,7 +31,7 @@ class TopBar(QWidget):
         self.record.setAccessibleName('Record')
         self.record.clicked.connect(actions.record.trigger)
         layout.addWidget(self.record)
-        self.play = self._tool(actions.play, 'play', show_text=True)
+        self.play = self._tool(actions.play, 'play')
         self.stop = self._tool(actions.stop, 'stop')
         self.loop = self._tool(actions.loop, 'loop')
         for b in (self.play, self.stop, self.loop):
@@ -89,18 +89,15 @@ class TopBar(QWidget):
         self.gear.setMenu(self.menu)
         layout.addWidget(self.gear)
 
-    def _tool(self, action, icon, *, show_text=False):
+    def _tool(self, action, icon):
+        # Icons only: at the smallest window the bar has no room for their names.
         b = QToolButton()
         b.setDefaultAction(action)
         b.setAccessibleName(action.text())
         b.setIcon(icons.icon(icon))
         b.setIconSize(QSize(18, 18))
-        if show_text:
-            b.setFixedHeight(38)
-            b.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-        else:
-            b.setFixedSize(38, 38)
-            b.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+        b.setFixedSize(38, 38)
+        b.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
         b.setCursor(Qt.CursorShape.PointingHandCursor)
         b.setFocusPolicy(Qt.FocusPolicy.TabFocus)
         return b
