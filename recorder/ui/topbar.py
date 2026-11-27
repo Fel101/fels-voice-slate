@@ -31,7 +31,7 @@ class TopBar(QWidget):
         self.record.setAccessibleName('Record')
         self.record.clicked.connect(actions.record.trigger)
         layout.addWidget(self.record)
-        self.play = self._tool(actions.play, 'play')
+        self.play = self._tool(actions.play, 'play', show_text=True)
         self.stop = self._tool(actions.stop, 'stop')
         self.loop = self._tool(actions.loop, 'loop')
         for b in (self.play, self.stop, self.loop):
@@ -89,14 +89,18 @@ class TopBar(QWidget):
         self.gear.setMenu(self.menu)
         layout.addWidget(self.gear)
 
-    def _tool(self, action, icon):
+    def _tool(self, action, icon, *, show_text=False):
         b = QToolButton()
         b.setDefaultAction(action)
         b.setAccessibleName(action.text())
         b.setIcon(icons.icon(icon))
         b.setIconSize(QSize(18, 18))
-        b.setFixedSize(38, 38)
-        b.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+        if show_text:
+            b.setFixedHeight(38)
+            b.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        else:
+            b.setFixedSize(38, 38)
+            b.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
         b.setCursor(Qt.CursorShape.PointingHandCursor)
         b.setFocusPolicy(Qt.FocusPolicy.TabFocus)
         return b
@@ -160,7 +164,9 @@ class TopBar(QWidget):
     def refresh_transport(self):
         transport = self.session.transport
         self.play.setIcon(icons.icon('pause' if transport.playing else 'play'))
-        self.actions.play.setText(tr('Pause' if transport.playing else 'Play'))
+        play_label = tr('Pause' if transport.playing else 'Play')
+        self.actions.play.setText(play_label)
+        self.play.setAccessibleName(play_label)
         self.loop.setChecked(transport.looping)
         self.stop.setEnabled(transport.active)
 

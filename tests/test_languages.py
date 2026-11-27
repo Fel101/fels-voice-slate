@@ -256,7 +256,7 @@ def german(qapp, session, dialogs, speak):
 
 def test_the_window_comes_up_in_the_language(german):
     words = texts_in(german)
-    assert 'Aufnehmen' in words and 'SPRECHER' in words and 'Noch nichts zu bearbeiten' in words
+    assert 'Aufnehmen' in words and 'SPRECHER' in words and 'Einen Clip aufnehmen und abspielen' in words
 
 
 def test_the_commands_are_in_the_language(german):

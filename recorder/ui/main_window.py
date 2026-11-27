@@ -1213,7 +1213,7 @@ class MainWindow(QMainWindow):
         if not takes or not all(take is not None and take.kept for take in takes):
             return
         sending = handoff.inbox_exists(s.lib.root)
-        clips = [handoff.Clip.from_take(take) for take in takes]
+        clips = [handoff.Clip.from_take(take, speaker_display_name=s.workspace.name_of(take.speaker)) for take in takes]
 
         def checked(results, stopped, failed):
             if not stopped:

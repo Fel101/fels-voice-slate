@@ -149,11 +149,11 @@ class EmptyState(QFrame):
         self.setObjectName('empty')
         layout = vbox(self, (40, 40, 40, 40), 10)
         layout.addStretch(1)
-        title = label('Nothing to edit yet', size=20, weight=QFont.Weight.DemiBold)
+        title = label('Record and play back a clip', size=20, weight=QFont.Weight.DemiBold)
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title)
-        text = label('Record a take with a microphone, record what this computer plays (audio you own or may use), or '
-                     'import a recording. The original is saved the moment you stop, and edits never change it.',
+        text = label('Record about ten seconds, then press Stop and Play to listen. You can also import audio '
+                     'you have permission to use and play it here.',
                      'muted', wrap=True)
         text.setAlignment(Qt.AlignmentFlag.AlignCenter)
         column = hbox()                      # a wrapped label inside a layout row gets its full height; centred by
@@ -166,7 +166,7 @@ class EmptyState(QFrame):
         row.addStretch(1)
         self.record = record = button(f'{tr("Record")}  (F9)', 'primary', 'record')
         record.clicked.connect(self.recordRequested)
-        imported = button('Import a recording...', None, 'import')
+        imported = button('Import audio…', 'primary', 'import')
         imported.clicked.connect(self.importRequested)
         row.addWidget(record)
         row.addWidget(imported)

@@ -5,6 +5,7 @@ import socket
 
 import numpy as np
 import pytest
+import soundfile as sf
 
 pytest.importorskip('PySide6')
 from PySide6.QtCore import Qt, QTimer  # noqa: E402
@@ -121,20 +122,45 @@ def first_run_window(qapp, make_session, dialogs):
     ui_helpers.pump(qapp)
 
 
+def test_first_run_can_import_and_play_audio_without_a_microphone(first_run_window, dialogs, tmp_path, monkeypatch):
+    from recorder import capture
+
+    window = first_run_window
+    monkeypatch.setattr(capture, 'list_microphones', lambda every=False: [])
+    monkeypatch.setattr(capture, 'default_microphone', lambda: None)
+    window.session.capturing.refresh_devices()
+    window.flush()
+    source = tmp_path / 'example.wav'
+    sf.write(source, speech(10.0), 48000)
+    dialogs.files_answer = [source]
+    button = next(item for item in window.editor_panel.empty.findChildren(QPushButton) if item.text() == 'Import audio…')
+    button.click()
+    window.flush()
+    assert window.session.current.source == 'import'
+    window.topbar.play.click()
+    assert window.session.transport.playing
+
+
 def test_the_speaker_picker_and_plus_work_again_after_the_first_recording(first_run_window, open_fake, clock, dialogs):
     """On a first run the first Record makes 'My voice'. Both controls are off for that recording and must come back."""
     w = first_run_window
     session = w.session
     assert w.library.speakers.count() == 0 and w.library.add_speaker.isEnabled()
-    session.capturing.start()
+    w.editor_panel.empty.record.click()
+    open_fake[0]._samples = speech(10.0)
     w.flush()
     assert w.library.speakers.currentText() == 'My voice'
     assert not w.library.speakers.isEnabled() and not w.library.add_speaker.isEnabled()
-    session.capturing.stop()
+    w.topbar.record.click()
     clock.advance(1.0)                                  # the stop tail passes, and the take is saved
     w._tick()
     w.flush()
     assert len(session.workspace.takes) == 1
+    assert session.current.mono.size == 10 * session.current.rate
+    assert w.topbar.play.text() == 'Play'
+    w.topbar.play.click()
+    assert session.transport.playing
+    w.topbar.stop.click()
     assert w.library.speakers.isEnabled() and w.library.add_speaker.isEnabled()
     dialogs.text_answer = 'Sam Rivera'
     QTest.mouseClick(w.library.add_speaker, Qt.MouseButton.LeftButton)
@@ -636,10 +662,10 @@ def test_the_transport_buttons_follow_playback(window, session):
     record(session, 12.0)
     window.flush()
     topbar = window.topbar
-    assert not topbar.stop.isEnabled() and window.actions.play.text() == 'Play'
+    assert not topbar.stop.isEnabled() and topbar.play.text() == 'Play'
     topbar.play.click()
     window.flush()
-    assert topbar.stop.isEnabled() and window.actions.play.text() == 'Pause'
+    assert topbar.stop.isEnabled() and topbar.play.text() == 'Pause'
     topbar.loop.click()
     window.flush()
     assert session.transport.looping and topbar.loop.isChecked()

@@ -102,6 +102,32 @@ def test_legacy_sidecar_remains_unchanged_in_the_bundle(kept, session, tmp_path)
         assert bundle.read('clip.json') == kept.sidecar_path.read_bytes()
 
 
+@pytest.mark.parametrize(('before_keep', 'at_handoff', 'slug'), [
+    ('美咲', '美咲', 'speaker'),
+    ('Élodie', 'Élodie', 'lodie'),
+    ('Original Name', 'Renée 秋山', 'original-name'),
+])
+def test_handoff_adds_the_current_display_name_without_editing_kept_files(
+        session, tmp_path, before_keep, at_handoff, slug):
+    assert session.workspace.add_speaker(before_keep) == slug
+    take = record(session, 12.0)
+    fill(session)
+    session.keep()
+    kept_bytes = take.sidecar_path.read_bytes()
+    wav = take.export_path.read_bytes()
+    session.workspace.rename_speaker(slug, at_handoff)
+    checked = handoff.Clip.from_take(take, speaker_display_name=session.workspace.name_of(slug)).check()
+    path = checked.write(session.lib.root, tmp_path / 'named.voiceslate')
+    with zipfile.ZipFile(path) as bundle:
+        copied = json.loads(bundle.read('clip.json'))
+        assert copied.pop('speaker_display_name') == at_handoff
+        assert copied['speaker'] == slug
+        assert copied == json.loads(kept_bytes)
+        assert bundle.read('clip.wav') == wav
+    assert take.sidecar_path.read_bytes() == kept_bytes
+    assert take.export_path.read_bytes() == wav
+
+
 def test_handoff_refuses_files_that_changed_after_the_check(kept, session, tmp_path):
     clip = handoff.Clip.from_take(kept).check()
     edit_details(kept, transcript_status='asr_draft')

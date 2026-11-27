@@ -224,11 +224,15 @@ the root of a ZIP archive. Use ZIP method 0 (`Stored`) and leave encryption disa
 | ZIP entry | Contents | Maximum size |
 |---|---|---|
 | `clip.wav` | The exact bytes of the kept WAV, including its metadata chunks | 32 MiB (33,554,432 bytes) |
-| `clip.json` | The exact bytes of its sidecar as a UTF-8 JSON object without a byte-order mark | 1 MiB (1,048,576 bytes) |
+| `clip.json` | A UTF-8 JSON object without a byte-order mark, carrying the kept sidecar's fields. A handoff can add `speaker_display_name` with the current Unicode display name. | 1 MiB (1,048,576 bytes) |
 
-Voice Lab caps the whole ZIP at 33 MiB plus 4,096 bytes for ZIP overhead. Preserve both files byte for byte. The fixed ZIP
-entry names leave the original file names in the sidecar intact. The master recording and any release documents stay in the
-speaker's folder.
+The exported display name can reflect a rename made after the clip was kept. `speaker` remains the stable identifier and
+the fallback for bundles without a display name. Slate leaves the original sidecar and the kept WAV in place. The audio
+hash in the copied sidecar still describes `clip.wav`. Review or hash the sidecar inside the bundle when checking a handoff.
+
+Voice Lab caps the whole ZIP at 33 MiB plus 4,096 bytes for ZIP overhead. Copy the WAV byte for byte and preserve the
+sidecar's existing fields. The fixed ZIP entry names leave the original file names in the sidecar intact. The master
+recording and any release documents stay in the speaker's folder.
 
 ### What the receiver checks
 

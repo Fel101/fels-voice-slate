@@ -1,4 +1,4 @@
-"""Package a kept clip for Voice Lab using exactly the bytes checked for the handoff."""
+"""Package a checked kept clip for Voice Lab with the speaker's current display name."""
 import hashlib
 import io
 import json
@@ -101,13 +101,15 @@ class Clip:
     name: str
     wav: Path
     sidecar: Path
+    speaker_display_name: str = ''
 
     @classmethod
-    def from_take(cls, take):
+    def from_take(cls, take, *, speaker_display_name=''):
         wav = Path(take.export_path)
         label = take.meta.get('saved_label') or wav.stem
         name = filename_for(f'{take.speaker[:24]}-{label}')
-        return cls(name, wav, Path(take.sidecar_path) if take.sidecar_path else wav.with_suffix('.json'))
+        return cls(name, wav, Path(take.sidecar_path) if take.sidecar_path else wav.with_suffix('.json'),
+                   speaker_display_name)
 
     def read(self):
         wav = _read(self.wav, MAX_CLIP_BYTES, tr('This audition is too long for Voice Lab. Send a reference or sentence '
@@ -172,6 +174,14 @@ class CheckedClip:
         wav, sidecar = self.clip.read()
         if (_digest(wav), _digest(sidecar)) != (self.wav_digest, self.sidecar_digest):
             raise HandoffError(tr('The kept clip changed during the handoff. Try again to check the latest version.'))
+        if self.clip.speaker_display_name:
+            # Add the display name only to the exported copy. The kept sidecar and its audio hash stay intact.
+            details = json.loads(sidecar.decode('utf-8'))
+            details['speaker_display_name'] = self.clip.speaker_display_name
+            sidecar = json.dumps(details, ensure_ascii=False, separators=(',', ':')).encode('utf-8')
+            if len(sidecar) > MAX_SIDECAR_BYTES:
+                raise HandoffError(tr('The clip details exceed Voice Lab’s 1 MiB limit. Shorten the '
+                                      'clip details and keep it again.'))
         output = io.BytesIO()
         with zipfile.ZipFile(output, 'w', compression=zipfile.ZIP_STORED) as bundle:
             bundle.writestr('clip.wav', wav)
