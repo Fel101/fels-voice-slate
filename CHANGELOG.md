@@ -5,10 +5,27 @@ the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-11-27
+
+### Added
+
+- **Voice Lab gets the speaker's name as you wrote it.** A clip sent or saved for Voice Lab now carries the speaker's
+  current name in any script, such as 美咲 or Renée, also when you renamed the speaker after keeping the clip. Before,
+  Voice Lab showed the name of the speaker's folder, which for a name with no Latin letters was just "speaker". The kept
+  clip and its details on disk are not changed.
+
 ### Changed
 
+- **A release's end date counts in Voice Lab.** From Voice Lab 1.0.1, a voice made from a clip whose release has
+  ended cannot be used for new speech there. To go on, record the renewed release, keep a new clip and send it.
+- **The empty screen says how to start:** record about ten seconds, then press Stop and Play, or import audio you may
+  use. **Import audio...** is next to **Record**. Play's spoken name follows Play and Pause.
 - The issue forms ask how Voice Slate was installed and offer Sending clips to Voice Lab, and questions go to Discussions.
 - Links to Altera use its new address, github.com/Fel101/fels-altera.
+
+### Fixed
+
+- Saving the same clip for Voice Lab twice makes the same file. Each save used to stamp the time inside the file.
 
 ## [1.0.0] - 2026-11-24
 

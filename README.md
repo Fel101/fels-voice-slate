@@ -114,14 +114,14 @@ attestation. Download `SHA256SUMS` into the same folder as the installer, open P
 installer's real name. It prints `True` when the installer is the file that was released:
 
 ```powershell
-(Get-FileHash .\Fels-Voice-Slate-1.0.0-Setup.exe).Hash -eq (Get-Content .\SHA256SUMS).Split(' ')[0]
+(Get-FileHash .\Fels-Voice-Slate-1.0.1-Setup.exe).Hash -eq (Get-Content .\SHA256SUMS).Split(' ')[0]
 ```
 
 With [GitHub's command line](https://cli.github.com/) (`gh`), you can also check the attestation. It answers
 *Verification succeeded* when the file was built from this repository by its release workflow:
 
 ```powershell
-gh attestation verify .\Fels-Voice-Slate-1.0.0-Setup.exe --repo Fel101/fels-voice-slate
+gh attestation verify .\Fels-Voice-Slate-1.0.1-Setup.exe --repo Fel101/fels-voice-slate
 ```
 
 **To run it from the source** you need **Python 3.12 or newer** ([python.org](https://www.python.org/downloads/)). Draft
